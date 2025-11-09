@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logler - Advanced Log Viewer</title>
+
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx-ext-ws@2.0.1/ws.js"></script>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Alpine.js for interactivity -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style>
+        [x-cloak] { display: none !important; }
+
+        .log-trace { color: #9ca3af; }
+        .log-debug { color: #60a5fa; }
+        .log-info { color: #34d399; }
+        .log-warn { color: #fbbf24; }
+        .log-error { color: #f87171; }
+        .log-fatal { color: #dc2626; font-weight: bold; }
+
+        .log-entry {
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 0.875rem;
+            padding: 0.5rem;
+            border-bottom: 1px solid #374151;
+        }
+
+        .log-entry:hover {
+            background-color: #1f2937;
+        }
+
+        body {
+            background-color: #111827;
+            color: #e5e7eb;
+        }
+
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1f2937;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div x-data="logViewer()" x-init="init()" class="flex flex-col h-screen">
+        <!-- Header -->
+        <header class="bg-gray-900 border-b border-gray-700 p-4">
+            <div class="container mx-auto flex items-center justify-between">
+                <h1 class="text-2xl font-bold text-blue-400">🔍 Logler</h1>
+                <div class="flex items-center space-x-4">
+                    <div class="text-sm">
+                        <span class="text-gray-400">Status:</span>
+                        <span x-text="connected ? '🟢 Connected' : '🔴 Disconnected'" :class="connected ? 'text-green-400' : 'text-red-400'"></span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="flex flex-1 overflow-hidden">
+            <!-- Sidebar -->
+            <aside class="w-80 bg-gray-900 border-r border-gray-700 p-4 overflow-y-auto">
+                <div class="space-y-6">
+                    <!-- File Opener -->
+                    <div>
+                        <h2 class="text-lg font-semibold mb-3">Open Log File</h2>
+                        <div class="space-y-2">
+                            <input
+                                type="text"
+                                x-model="filePath"
+                                @keyup.enter="openFile()"
+                                placeholder="/path/to/logfile.log"
+                                class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500"
+                            />
+                            <button
+                                @click="openFile()"
+                                :disabled="!filePath"
+                                class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded text-sm font-medium transition"
+                            >
+                                Open File
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Filters -->
+                    <div x-show="currentFileId">
+                        <h2 class="text-lg font-semibold mb-3">Filters</h2>
+
+                        <!-- Search -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-1">Search</label>
+                            <input
+                                type="text"
+                                x-model="searchQuery"
+                                @keyup.enter="applyFilter()"
+                                placeholder="Search logs..."
+                                class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500"
+                            />
+                        </div>
+
+                        <!-- Log Level -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-2">Log Level</label>
+                            <div class="space-y-1">
+                                <template x-for="level in ['Trace', 'Debug', 'Info', 'Warn', 'Error', 'Fatal']" :key="level">
+                                    <label class="flex items-center space-x-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            :value="level"
+                                            x-model="selectedLevels"
+                                            @change="applyFilter()"
+                                            class="rounded bg-gray-800 border-gray-600"
+                                        />
+                                        <span class="text-sm" :class="'log-' + level.toLowerCase()" x-text="level"></span>
+                                    </label>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Thread ID Filter -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-1">Thread ID</label>
+                            <input
+                                type="text"
+                                x-model="threadIdFilter"
+                                @keyup.enter="applyFilter()"
+                                placeholder="Filter by thread..."
+                                class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500"
+                            />
+                        </div>
+
+                        <!-- Correlation ID Filter -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-1">Correlation ID</label>
+                            <input
+                                type="text"
+                                x-model="correlationIdFilter"
+                                @keyup.enter="applyFilter()"
+                                placeholder="Filter by correlation ID..."
+                                class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500"
+                            />
+                        </div>
+
+                        <!-- Trace ID Filter -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-1">Trace ID</label>
+                            <input
+                                type="text"
+                                x-model="traceIdFilter"
+                                @keyup.enter="applyFilter()"
+                                placeholder="Filter by trace ID..."
+                                class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500"
+                            />
+                        </div>
+
+                        <button
+                            @click="clearFilters()"
+                            class="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-medium transition"
+                        >
+                            Clear Filters
+                        </button>
+                    </div>
+
+                    <!-- Statistics -->
+                    <div x-show="stats && currentFileId">
+                        <h2 class="text-lg font-semibold mb-3">Statistics</h2>
+                        <div class="bg-gray-800 rounded p-3 space-y-2 text-sm">
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Total:</span>
+                                <span x-text="stats.total_count"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Error Rate:</span>
+                                <span x-text="stats.error_rate?.toFixed(2) + '%'"></span>
+                            </div>
+                            <template x-for="(count, level) in stats.level_counts" :key="level">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-400" x-text="level + ':'"></span>
+                                    <span x-text="count"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Threads -->
+                    <div x-show="threads.length > 0">
+                        <h2 class="text-lg font-semibold mb-3">Threads</h2>
+                        <div class="space-y-2">
+                            <template x-for="thread in threads.slice(0, 10)" :key="thread.thread_id">
+                                <div
+                                    @click="filterByThread(thread.thread_id)"
+                                    class="bg-gray-800 rounded p-2 cursor-pointer hover:bg-gray-700 transition"
+                                >
+                                    <div class="flex justify-between text-xs">
+                                        <span class="font-mono" x-text="thread.thread_id"></span>
+                                        <span class="text-gray-400" x-text="thread.log_count"></span>
+                                    </div>
+                                    <div x-show="thread.error_count > 0" class="text-xs text-red-400 mt-1">
+                                        <span x-text="thread.error_count + ' errors'"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Traces -->
+                    <div x-show="traces.length > 0">
+                        <h2 class="text-lg font-semibold mb-3">Traces</h2>
+                        <div class="space-y-2">
+                            <template x-for="trace in traces.slice(0, 10)" :key="trace.trace_id">
+                                <div
+                                    @click="filterByTrace(trace.trace_id)"
+                                    class="bg-gray-800 rounded p-2 cursor-pointer hover:bg-gray-700 transition"
+                                >
+                                    <div class="text-xs font-mono mb-1" x-text="trace.trace_id"></div>
+                                    <div class="flex justify-between text-xs text-gray-400">
+                                        <span x-text="trace.spans?.length + ' spans'"></span>
+                                        <span x-show="trace.duration_ms" x-text="trace.duration_ms?.toFixed(2) + 'ms'"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Log View -->
+            <main class="flex-1 flex flex-col overflow-hidden">
+                <!-- Toolbar -->
+                <div class="bg-gray-900 border-b border-gray-700 p-3 flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm text-gray-400" x-show="currentFileId">
+                            Showing <span x-text="logs.length"></span> entries
+                        </span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button
+                            @click="autoScroll = !autoScroll"
+                            :class="autoScroll ? 'bg-blue-600' : 'bg-gray-700'"
+                            class="px-3 py-1 rounded text-sm hover:opacity-80 transition"
+                        >
+                            <span x-text="autoScroll ? '📌 Auto-scroll ON' : '📌 Auto-scroll OFF'"></span>
+                        </button>
+                        <button
+                            @click="refreshLogs()"
+                            class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm transition"
+                        >
+                            🔄 Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Log Entries -->
+                <div
+                    id="log-container"
+                    class="flex-1 overflow-y-auto overflow-x-auto bg-gray-800"
+                    @scroll="handleScroll()"
+                >
+                    <div x-show="!currentFileId" class="flex items-center justify-center h-full">
+                        <div class="text-center text-gray-500">
+                            <div class="text-6xl mb-4">📁</div>
+                            <div class="text-xl">No file opened</div>
+                            <div class="text-sm mt-2">Open a log file to get started</div>
+                        </div>
+                    </div>
+
+                    <div x-show="currentFileId && logs.length === 0" class="flex items-center justify-center h-full">
+                        <div class="text-center text-gray-500">
+                            <div class="text-4xl mb-4">🔍</div>
+                            <div class="text-lg">No logs match the current filter</div>
+                        </div>
+                    </div>
+
+                    <template x-for="(entry, index) in logs" :key="entry.id">
+                        <div
+                            class="log-entry"
+                            :class="'log-' + entry.level.toLowerCase()"
+                        >
+                            <div class="flex items-start space-x-3">
+                                <span class="text-gray-500 text-xs font-mono flex-shrink-0 w-12 text-right" x-text="entry.line_number"></span>
+                                <span class="text-gray-400 text-xs flex-shrink-0" x-text="formatTimestamp(entry.timestamp)"></span>
+                                <span
+                                    class="text-xs font-bold flex-shrink-0 w-16"
+                                    :class="'log-' + entry.level.toLowerCase()"
+                                    x-text="entry.level"
+                                ></span>
+                                <div class="flex-1 min-w-0">
+                                    <div class="break-words" x-text="entry.message"></div>
+                                    <div x-show="entry.thread_id || entry.correlation_id || entry.trace_id" class="mt-1 text-xs text-gray-500 space-x-3">
+                                        <span x-show="entry.thread_id" x-text="'Thread: ' + entry.thread_id"></span>
+                                        <span x-show="entry.correlation_id" x-text="'Corr: ' + entry.correlation_id"></span>
+                                        <span x-show="entry.trace_id" x-text="'Trace: ' + entry.trace_id"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        function logViewer() {
+            return {
+                connected: false,
+                currentFileId: null,
+                filePath: '',
+                logs: [],
+                stats: null,
+                threads: [],
+                traces: [],
+                searchQuery: '',
+                selectedLevels: [],
+                threadIdFilter: '',
+                correlationIdFilter: '',
+                traceIdFilter: '',
+                autoScroll: false,
+                offset: 0,
+                limit: 1000,
+
+                init() {
+                    this.checkHealth();
+                    setInterval(() => this.checkHealth(), 30000);
+                },
+
+                async checkHealth() {
+                    try {
+                        const response = await fetch('/api/health');
+                        const data = await response.json();
+                        this.connected = data.backend === 'healthy';
+                    } catch (e) {
+                        this.connected = false;
+                    }
+                },
+
+                async openFile() {
+                    if (!this.filePath) return;
+
+                    try {
+                        const response = await fetch('/api/files/open', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ path: this.filePath })
+                        });
+
+                        if (!response.ok) throw new Error('Failed to open file');
+
+                        const data = await response.json();
+                        this.currentFileId = data.file_id;
+                        await this.refreshLogs();
+                        await this.loadStats();
+                        await this.loadThreads();
+                        await this.loadTraces();
+                    } catch (e) {
+                        alert('Error opening file: ' + e.message);
+                    }
+                },
+
+                async refreshLogs() {
+                    if (!this.currentFileId) return;
+
+                    try {
+                        const url = new URL('/api/logs', window.location.origin);
+                        url.searchParams.append('file_id', this.currentFileId);
+                        url.searchParams.append('offset', this.offset);
+                        url.searchParams.append('limit', this.limit);
+
+                        const response = await fetch(url);
+                        if (!response.ok) throw new Error('Failed to fetch logs');
+
+                        this.logs = await response.json();
+
+                        if (this.autoScroll) {
+                            this.$nextTick(() => {
+                                const container = document.getElementById('log-container');
+                                container.scrollTop = container.scrollHeight;
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error fetching logs:', e);
+                    }
+                },
+
+                async applyFilter() {
+                    if (!this.currentFileId) return;
+
+                    try {
+                        const filterData = {
+                            file_id: this.currentFileId,
+                            pattern: this.searchQuery || null,
+                            levels: this.selectedLevels.length > 0 ? this.selectedLevels : null,
+                            thread_id: this.threadIdFilter || null,
+                            correlation_id: this.correlationIdFilter || null,
+                            trace_id: this.traceIdFilter || null,
+                        };
+
+                        const response = await fetch('/api/logs/filter', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(filterData)
+                        });
+
+                        if (!response.ok) throw new Error('Failed to filter logs');
+
+                        this.logs = await response.json();
+                    } catch (e) {
+                        console.error('Error filtering logs:', e);
+                    }
+                },
+
+                clearFilters() {
+                    this.searchQuery = '';
+                    this.selectedLevels = [];
+                    this.threadIdFilter = '';
+                    this.correlationIdFilter = '';
+                    this.traceIdFilter = '';
+                    this.refreshLogs();
+                },
+
+                async loadStats() {
+                    if (!this.currentFileId) return;
+
+                    try {
+                        const url = new URL('/api/stats', window.location.origin);
+                        url.searchParams.append('file_id', this.currentFileId);
+
+                        const response = await fetch(url);
+                        if (!response.ok) throw new Error('Failed to fetch stats');
+
+                        this.stats = await response.json();
+                    } catch (e) {
+                        console.error('Error fetching stats:', e);
+                    }
+                },
+
+                async loadThreads() {
+                    try {
+                        const response = await fetch('/api/threads');
+                        if (!response.ok) throw new Error('Failed to fetch threads');
+
+                        this.threads = await response.json();
+                    } catch (e) {
+                        console.error('Error fetching threads:', e);
+                    }
+                },
+
+                async loadTraces() {
+                    try {
+                        const response = await fetch('/api/traces');
+                        if (!response.ok) throw new Error('Failed to fetch traces');
+
+                        this.traces = await response.json();
+                    } catch (e) {
+                        console.error('Error fetching traces:', e);
+                    }
+                },
+
+                filterByThread(threadId) {
+                    this.threadIdFilter = threadId;
+                    this.applyFilter();
+                },
+
+                filterByTrace(traceId) {
+                    this.traceIdFilter = traceId;
+                    this.applyFilter();
+                },
+
+                formatTimestamp(timestamp) {
+                    if (!timestamp) return 'N/A';
+                    return new Date(timestamp).toLocaleString();
+                },
+
+                handleScroll() {
+                    // Implement infinite scroll or pagination here
+                }
+            };
+        }
+    </script>
+</body>
+</html>
