@@ -1,6 +1,7 @@
 use crate::parser::LogParser;
 use crate::types::LogEntry;
 use anyhow::{Context, Result};
+use futures::pin_mut;
 use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -27,7 +28,8 @@ impl LogReader {
     /// Read all log entries from the file
     pub async fn read_all(&self) -> Result<Vec<LogEntry>> {
         let mut entries = Vec::new();
-        let mut stream = self.stream().await?;
+        let stream = self.stream().await?;
+        pin_mut!(stream);
 
         while let Some(entry) = stream.next().await {
             entries.push(entry?);
@@ -67,7 +69,8 @@ impl LogReader {
     /// Read first N lines
     pub async fn head(&self, n: usize) -> Result<Vec<LogEntry>> {
         let mut entries = Vec::new();
-        let mut stream = self.stream().await?;
+        let stream = self.stream().await?;
+        pin_mut!(stream);
         let mut count = 0;
 
         while let Some(entry) = stream.next().await {
@@ -79,14 +82,5 @@ impl LogReader {
         }
 
         Ok(entries)
-    }
-}
-
-// Enable cloning of parser
-impl Clone for LogParser {
-    fn clone(&self) -> Self {
-        Self {
-            force_format: self.force_format,
-        }
     }
 }

@@ -9,7 +9,9 @@ static PATTERNS: OnceLock<ParserPatterns> = OnceLock::new();
 
 struct ParserPatterns {
     timestamp_iso: Regex,
+    #[allow(dead_code)]
     timestamp_rfc3339: Regex,
+    #[allow(dead_code)]
     timestamp_common: Regex,
     log_level: Regex,
     thread_id: Regex,
@@ -372,5 +374,13 @@ impl LogParser {
 impl Default for LogParser {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Clone for LogParser {
+    fn clone(&self) -> Self {
+        Self {
+            force_format: self.force_format,
+        }
     }
 }
