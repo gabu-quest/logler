@@ -1,33 +1,66 @@
-# Example log files for testing
+# Logler Examples
 
-## JSON logs
-Create a file `sample-json.log`:
-```json
-{"timestamp": "2024-01-15T10:00:00Z", "level": "INFO", "message": "Application started", "thread_id": "main", "service": "api"}
-{"timestamp": "2024-01-15T10:00:01Z", "level": "DEBUG", "message": "Database connection established", "thread_id": "worker-1", "correlation_id": "req-001"}
-{"timestamp": "2024-01-15T10:00:02Z", "level": "INFO", "message": "Handling request", "thread_id": "worker-1", "correlation_id": "req-001", "trace_id": "abc123", "span_id": "span-001"}
-{"timestamp": "2024-01-15T10:00:03Z", "level": "ERROR", "message": "Database query timeout", "thread_id": "worker-1", "correlation_id": "req-001", "trace_id": "abc123", "span_id": "span-002"}
-{"timestamp": "2024-01-15T10:00:04Z", "level": "WARN", "message": "Retrying connection", "thread_id": "worker-2"}
+This directory contains comprehensive examples demonstrating how to use Logler for log investigation, with a focus on LLM agent workflows.
+
+## 📁 Directory Structure
+
+```
+examples/
+├── en/                          # English examples
+│   ├── 01_production_incident_investigation.py
+│   └── 02_advanced_sql_analysis.py
+├── ja/                          # Japanese examples (日本語の例)
+│   └── 01_本番環境インシデント調査.py
+├── logs/                        # Sample log files
+│   └── production_incident.log
+└── README.md                    # This file
 ```
 
-## Plain text logs
-Create a file `sample-plain.log`:
-```
-2024-01-15 10:00:00 INFO [main] Application started
-2024-01-15 10:00:01 DEBUG [worker-1] [req-001] Processing request
-2024-01-15 10:00:02 ERROR [worker-1] [req-001] Connection failed
-2024-01-15 10:00:03 WARN [worker-2] Retry attempt 1/3
-```
+## 🎯 Examples Overview
 
-## Using the samples
+### 01: Production Incident Investigation
+
+**Scenario**: Database connection pool exhaustion causing cascading failures
+
+**Skills demonstrated**:
+- Using `search()` to find error patterns
+- Using `follow_thread()` to reconstruct request timelines
+- Using `find_patterns()` to detect cascading failures
+- Using SQL for time-series analysis
+- Identifying root cause and measuring impact
+
+**Run**:
 ```bash
-# CLI
-logler view examples/sample-json.log
-logler view examples/sample-plain.log --level ERROR
-
-# Web UI
-1. Start logler: ./start.sh
-2. Open http://localhost:8000
-3. Enter path: /path/to/sample-json.log
-4. Click "Open File"
+python examples/en/01_production_incident_investigation.py
 ```
+
+### 02: Advanced SQL Analysis
+
+**Scenario**: Deep-dive analysis using custom SQL queries
+
+**Skills demonstrated**:
+- Statistical anomaly detection with Z-scores
+- Error correlation matrix  
+- Thread hotspot detection
+- Cascading failure pattern recognition
+
+**Run**:
+```bash
+python examples/en/02_advanced_sql_analysis.py
+```
+
+## 🚀 Quick Start
+
+```bash
+# Run English example
+python examples/en/01_production_incident_investigation.py
+
+# Run Japanese example
+python examples/ja/01_本番環境インシデント調査.py
+```
+
+## 💡 For LLM Agents
+
+These examples show how to investigate production incidents efficiently using logler's Rust-powered tools.
+
+See [../docs/LLM_README.md](../docs/LLM_README.md) for complete documentation.

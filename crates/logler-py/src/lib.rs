@@ -98,6 +98,30 @@ impl PyInvestigator {
         serde_json::to_string(&metadata)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
+
+    /// Execute SQL query on loaded logs (requires 'sql' feature)
+    #[cfg(feature = "sql")]
+    fn sql_query(&self, query: String) -> PyResult<String> {
+        self.investigator
+            .sql_query(&query)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Get available SQL tables (requires 'sql' feature)
+    #[cfg(feature = "sql")]
+    fn sql_tables(&self) -> PyResult<Vec<String>> {
+        self.investigator
+            .sql_tables()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Get SQL table schema (requires 'sql' feature)
+    #[cfg(feature = "sql")]
+    fn sql_schema(&self, table: String) -> PyResult<String> {
+        self.investigator
+            .sql_schema(&table)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
 }
 
 /// Standalone search function (convenience)
