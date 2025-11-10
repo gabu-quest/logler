@@ -1,345 +1,292 @@
-# Logler
+# Logler 🔍
 
-🔍 **Advanced Local Log Viewing and Analysis Tool**
+**Beautiful local log viewer with thread tracking and real-time updates**
 
-A high-performance, feature-rich log viewer built with Rust (backend) and FastAPI + HTMX (frontend) for analyzing local log files with advanced features including thread tracking, distributed tracing support, and real-time streaming.
+[![PyPI version](https://badge.fury.io/py/logler.svg)](https://badge.fury.io/py/logler)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
-## Features
+A modern, feature-rich log viewer that makes debugging a pleasure. View logs in your terminal with beautiful colors or start a web interface with WebSocket support for real-time updates.
 
-### Core Capabilities
+## ✨ Features
 
-- **🚀 High Performance**: Rust-powered log parsing and processing
-- **🎯 Smart Format Detection**: Automatically detects and parses multiple log formats:
-  - JSON structured logs
-  - Plain text logs
-  - Syslog format
-  - Apache/Nginx Common Log Format
-  - Logfmt (key=value pairs)
+- 🎨 **Beautiful Terminal Output** - Rich colors and formatting with thread visualization
+- 🌐 **Gorgeous Web UI** - Modern interface with file picker and live updates
+- 🧵 **Thread Tracking** - Follow execution flow across log entries
+- 🔗 **Correlation IDs** - Track requests across microservices
+- 📊 **Distributed Tracing** - OpenTelemetry span/trace support
+- ⚡ **Real-time Streaming** - WebSocket support for live log following
+- 🔍 **Smart Filtering** - By level, thread, pattern, or correlation ID
+- 📝 **Multi-Format Support** - JSON, plain text, syslog, and more
+- 📂 **File Picker** - Browse and select log files from the UI
+- 🎯 **Zero Config** - Works out of the box
 
-### Advanced Features
+## 🚀 Quick Start
 
-- **🧵 Thread Correlation**: Track and correlate logs by thread ID
-- **🔗 Request Tracing**: Follow requests across microservices using correlation IDs
-- **📊 Distributed Tracing**: Full OpenTelemetry trace and span tracking
-- **📈 Real-time Statistics**: Live log statistics and error rate monitoring
-- **🔍 Powerful Filtering**:
-  - Log level filtering
-  - Text/regex search
-  - Thread ID filtering
-  - Correlation ID filtering
-  - Trace ID filtering
-  - Time range filtering
+### Installation
+
+```bash
+# Using pip
+pip install logler
+
+# Using uv (recommended)
+uv pip install logler
+```
+
+### Usage
+
+**Start the web interface:**
+```bash
+logler serve                    # Start with file picker
+logler serve app.log            # Open specific file
+logler serve *.log              # Open multiple files
+logler serve --open             # Auto-open browser
+```
+
+**View logs in terminal:**
+```bash
+logler view app.log                      # View entire file
+logler view app.log -n 100               # Last 100 lines
+logler view app.log -f                   # Follow in real-time
+logler view app.log --level ERROR        # Filter by level
+logler view app.log --grep "timeout"     # Search pattern
+logler view app.log --thread worker-1    # Filter by thread
+```
+
+**Show statistics:**
+```bash
+logler stats app.log             # Show statistics
+logler stats app.log --json      # JSON output
+```
+
+**Watch for new files:**
+```bash
+logler watch "*.log"             # Watch for new log files
+logler watch "app-*.log" -d /var/log    # Specific directory
+```
+
+## 📸 Screenshots
+
+### Web Interface
+Beautiful, modern web UI with file picker and real-time updates:
+- 📁 Browse and select log files
+- 🎨 Syntax-highlighted logs
+- 🧵 Thread visualization
+- 📊 Live statistics
+- 🔄 Real-time following with WebSocket
+
+### Terminal
+Rich, colorful terminal output:
+- 🌈 Color-coded log levels
+- 🧵 Thread badges
+- 🔗 Correlation ID tracking
+- 📈 Thread timelines
+
+## 🎯 Examples
 
 ### Web Interface
 
-- **💻 Modern UI**: Beautiful, responsive web interface built with HTMX and TailwindCSS
-- **⚡ Real-time Updates**: WebSocket support for live log streaming
-- **🎨 Syntax Highlighting**: Color-coded log levels and timestamps
-- **📱 Responsive Design**: Works on desktop, tablet, and mobile
+```bash
+# Start server and auto-open browser
+logler serve --open
 
-## Architecture
+# Start with specific files
+logler serve /var/log/app.log /var/log/error.log
 
-```
-┌─────────────────┐      ┌──────────────────┐      ┌─────────────────┐
-│   HTMX/Alpine   │ ───> │  FastAPI Gateway │ ───> │  Rust Backend   │
-│   (Frontend)    │      │    (Python)      │      │   (Core/API)    │
-└─────────────────┘      └──────────────────┘      └─────────────────┘
-                                                             │
-                                                             ├─ logler-core
-                                                             │  └─ Parser
-                                                             │  └─ Reader
-                                                             │  └─ Thread Tracker
-                                                             │  └─ Stats
-                                                             │
-                                                             ├─ logler-server
-                                                             │  └─ REST API
-                                                             │  └─ WebSocket
-                                                             │  └─ File Watcher
-                                                             │
-                                                             └─ logler-cli
-                                                                └─ CLI Tool
+# Custom host/port
+logler serve --host 0.0.0.0 --port 9000
 ```
 
-## Installation
+Then open your browser to `http://localhost:8000` and:
+1. Click "📁 Open File" to browse log files
+2. Filter by level, search, or thread
+3. Click "🔄 Follow" for real-time streaming
+4. View thread timelines and statistics
 
-### Prerequisites
-
-- **Rust** 1.70+ (for backend)
-- **Python** 3.8+ (for web interface)
-- **Cargo** (comes with Rust)
-
-### Building from Source
+### Terminal Viewing
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/logler.git
-cd logler
+# Basic viewing
+logler view app.log
 
-# Build Rust components
-cargo build --release
+# Follow with filters
+logler view app.log -f --level ERROR --grep "database"
 
-# Install Python dependencies
-cd backend
-pip install -r requirements.txt
+# Multiple files
+logler view app.log error.log -n 50
+
+# Beautiful thread view
+logler view app.log --thread worker-1
 ```
 
-### Quick Start
-
-1. **Start the Rust backend server**:
-```bash
-cargo run --bin logler-server
-# Server starts on http://localhost:3000
-```
-
-2. **Start the FastAPI frontend** (in a new terminal):
-```bash
-cd backend
-python -m uvicorn app.main:app --reload --port 8000
-# Web UI available at http://localhost:8000
-```
-
-3. **Open your browser** to `http://localhost:8000`
-
-## Usage
-
-### Web Interface
-
-1. Enter the path to your log file in the sidebar
-2. Click "Open File" to load the logs
-3. Use the filters to narrow down results:
-   - Select log levels (Trace, Debug, Info, Warn, Error, Fatal)
-   - Search by text or regex
-   - Filter by thread ID, correlation ID, or trace ID
-4. View statistics and thread/trace information in the sidebar
-5. Click on threads or traces to view related logs
-
-### CLI Tool
+### Statistics
 
 ```bash
-# View a log file
-logler view /path/to/app.log
+# Human-readable stats
+logler stats app.log
 
-# Show last 100 lines
-logler view /path/to/app.log -n 100
-
-# Filter by log level
-logler view /path/to/app.log --level ERROR
-
-# Search logs
-logler search /path/to/app.log "exception"
-
-# Show statistics
-logler stats /path/to/app.log
+# JSON for scripting
+logler stats app.log --json | jq '.by_level'
 ```
 
-### REST API
+## 🎨 Log Format Support
 
-The Rust backend provides a comprehensive REST API:
+Logler automatically detects and parses:
 
-#### Files
-- `POST /api/files/open` - Open a log file
-- `GET /api/files` - List log files in a directory
-
-#### Logs
-- `GET /api/logs?file_id={id}&offset={n}&limit={n}` - Get log entries
-- `POST /api/logs/search` - Search logs
-- `POST /api/logs/filter` - Filter logs
-- `GET /api/logs/stats?file_id={id}` - Get statistics
-
-#### Threads
-- `GET /api/threads` - Get all thread contexts
-- `GET /api/threads/{thread_id}` - Get specific thread
-
-#### Traces
-- `GET /api/traces` - Get all traces
-- `GET /api/traces/{trace_id}` - Get specific trace
-
-#### Correlations
-- `GET /api/correlations` - Get all correlation IDs
-- `GET /api/correlations/{correlation_id}` - Get logs by correlation ID
-
-#### WebSocket
-- `WS /ws` - WebSocket for real-time log streaming
-
-### Example API Requests
-
-```bash
-# Open a file
-curl -X POST http://localhost:3000/api/files/open \
-  -H "Content-Type: application/json" \
-  -d '{"path": "/var/log/app.log"}'
-
-# Get logs
-curl "http://localhost:3000/api/logs?file_id={file_id}&limit=100"
-
-# Filter logs
-curl -X POST http://localhost:3000/api/logs/filter \
-  -H "Content-Type: application/json" \
-  -d '{
-    "file_id": "{file_id}",
-    "levels": ["Error", "Fatal"],
-    "pattern": "database"
-  }'
-
-# Get statistics
-curl "http://localhost:3000/api/logs/stats?file_id={file_id}"
-```
-
-## Log Format Examples
-
-### JSON Logs
+**JSON Logs:**
 ```json
 {
-  "timestamp": "2024-01-01T12:00:00Z",
+  "timestamp": "2024-01-15T10:00:00Z",
   "level": "INFO",
   "message": "User logged in",
   "thread_id": "worker-1",
   "correlation_id": "req-123",
-  "trace_id": "abc123def456",
-  "span_id": "span-789",
-  "user_id": 42
+  "trace_id": "abc123",
+  "span_id": "span-001"
 }
 ```
 
-### Plain Text Logs
+**Plain Text:**
 ```
-2024-01-01 12:00:00 INFO [thread-1] [req-123] User logged in
-2024-01-01 12:00:01 ERROR [thread-2] [req-456] Database connection failed
-```
-
-### Syslog Format
-```
-<134>Jan 1 12:00:00 hostname app: User logged in
+2024-01-15 10:00:00 INFO [worker-1] [req-123] User logged in
+2024-01-15 10:00:01 ERROR [worker-2] Database timeout trace_id=abc123
 ```
 
-### Apache Common Log
+**With Thread Tracking:**
 ```
-192.168.1.1 - - [01/Jan/2024:12:00:00 +0000] "GET /api/users HTTP/1.1" 200 1234
+2024-01-15 10:00:00 INFO [worker-1] Request started
+2024-01-15 10:00:01 DEBUG [worker-1] Processing...
+2024-01-15 10:00:02 INFO [worker-1] Request completed
 ```
+Logler groups these together and shows the complete thread timeline!
 
-## Configuration
+## 🧵 Thread Tracking
 
-### Environment Variables
+Logler automatically tracks threads and shows:
+- 📊 Log count per thread
+- ❌ Error count per thread
+- ⏱️ Thread duration
+- 🔗 Associated correlation IDs
+- 📈 Thread timeline
 
-**Rust Backend** (`logler-server`):
-- `RUST_LOG` - Log level (default: `info`)
-- Port: `3000` (hardcoded, can be modified in `main.rs`)
-
-**FastAPI Frontend**:
-- `RUST_BACKEND_URL` - Rust backend URL (default: `http://localhost:3000`)
-
-## Development
-
-### Project Structure
-
+**Example:**
+```bash
+logler view app.log
 ```
-logler/
-├── logler-core/          # Core Rust library
-│   ├── src/
-│   │   ├── lib.rs
-│   │   ├── types.rs      # Data types (LogEntry, LogLevel, etc.)
-│   │   ├── parser.rs     # Log parsing logic
-│   │   ├── reader.rs     # File reading and streaming
-│   │   ├── thread_tracker.rs  # Thread/correlation tracking
-│   │   ├── filter.rs     # Log filtering
-│   │   ├── stats.rs      # Statistics computation
-│   │   └── trace.rs      # Distributed tracing support
-│   └── Cargo.toml
-├── logler-server/        # Rust web server
-│   ├── src/
-│   │   ├── main.rs
-│   │   ├── api.rs        # REST API handlers
-│   │   ├── state.rs      # Application state
-│   │   └── file_watcher.rs  # File watching
-│   └── Cargo.toml
-├── logler-cli/           # CLI tool
-│   ├── src/
-│   │   └── main.rs
-│   └── Cargo.toml
-├── backend/              # FastAPI frontend
-│   ├── app/
-│   │   └── main.py       # FastAPI application
-│   ├── templates/        # HTML templates
-│   │   ├── index.html
-│   │   └── partials/
-│   ├── static/           # Static assets
-│   └── requirements.txt
-├── src/logler/           # Legacy Python implementation
-├── tests/                # Tests
-├── Cargo.toml            # Workspace configuration
-└── README.md
-```
+Shows threads in sidebar with:
+- Thread ID badge
+- Number of logs
+- Error count (if any)
 
-### Running Tests
+Click any thread to filter logs!
+
+## 🔗 Correlation & Tracing
+
+Track requests across services:
 
 ```bash
-# Rust tests
-cargo test
+# Logs with correlation IDs are automatically linked
+logler view app.log
+```
 
-# Python tests (if any)
-cd backend
+In the web UI:
+- See correlation IDs in log entries
+- Filter by correlation ID
+- View complete request flow
+- Track distributed traces
+
+## ⚙️ Configuration
+
+Logler works with zero configuration, but you can customize:
+
+```bash
+# Server options
+logler serve --host 0.0.0.0 --port 8000
+
+# View options
+logler view app.log --no-color    # Disable colors
+logler view app.log -n 1000        # Show more lines
+```
+
+## 🛠️ Development
+
+```bash
+# Clone repository
+git clone https://github.com/yourusername/logler.git
+cd logler
+
+# Install in development mode
+pip install -e ".[dev]"
+
+# Run tests
 pytest
+
+# Format code
+black logler
+ruff check logler
 ```
 
-### Building for Production
+## 📦 What's Included
 
+- **logler** - Main CLI command
+- **Rich Terminal UI** - Beautiful colored output
+- **FastAPI Web Server** - Modern web interface
+- **WebSocket Support** - Real-time log streaming
+- **Thread Tracker** - Correlation and grouping
+- **Smart Parser** - Multi-format support
+- **File Watcher** - Monitor for new files
+
+## 🤝 Contributing
+
+Contributions welcome! Please feel free to submit a Pull Request.
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+Built with:
+- [Rich](https://github.com/Textualize/rich) - Beautiful terminal output
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern web framework
+- [HTMX](https://htmx.org/) - Dynamic web UI
+- [TailwindCSS](https://tailwindcss.com/) - Styling
+- [Alpine.js](https://alpinejs.dev/) - Reactive components
+
+## 💡 Pro Tips
+
+1. **Use `--follow` mode** for real-time debugging
+2. **Filter by thread** to trace execution flow
+3. **Use the web UI** for complex log analysis
+4. **Export stats as JSON** for automation
+5. **Watch directories** for new log files
+
+## 🎓 Examples
+
+### Debug a specific request
 ```bash
-# Build optimized Rust binaries
-cargo build --release
+# Find correlation ID
+logler view app.log --grep "req-12345"
 
-# Binaries will be in target/release/
-# - logler-server
-# - logler (CLI)
-
-# Deploy FastAPI with gunicorn
-cd backend
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker
+# Follow that request across services
+logler view app.log service.log --grep "req-12345"
 ```
 
-## Performance
+### Monitor errors in real-time
+```bash
+logler view app.log -f --level ERROR
+```
 
-- **Parsing Speed**: ~1M lines/second (JSON logs)
-- **Memory Usage**: Minimal - streams files instead of loading entirely
-- **Concurrent Requests**: Handles 1000+ concurrent WebSocket connections
-- **File Size**: Tested with files up to 10GB
+### Analyze thread behavior
+```bash
+logler view app.log --thread worker-1
+```
 
-## Roadmap
-
-- [x] Core log parsing
-- [x] Thread correlation tracking
-- [x] Distributed tracing support
-- [x] REST API
-- [x] WebSocket streaming
-- [x] Web UI with HTMX
-- [ ] Real-time file watching (tail -f mode)
-- [ ] Log aggregation from multiple files
-- [ ] Export to various formats (CSV, JSON, etc.)
-- [ ] Custom log format configuration
-- [ ] Alerting and notifications
-- [ ] Integration with log aggregation platforms (Elasticsearch, Loki, etc.)
-- [ ] Advanced analytics and visualization
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-See LICENSE file for details.
-
-## Acknowledgments
-
-- Built with [Rust](https://www.rust-lang.org/)
-- Web framework: [Axum](https://github.com/tokio-rs/axum)
-- Frontend: [FastAPI](https://fastapi.tiangolo.com/) + [HTMX](https://htmx.org/)
-- UI: [TailwindCSS](https://tailwindcss.com/) + [Alpine.js](https://alpinejs.dev/)
+### Beautiful web dashboard
+```bash
+logler serve app.log --open
+# Then explore threads, traces, and statistics!
+```
 
 ---
 
-**Made with ❤️ for developers who love logs**
+**Made with ❤️ for developers who love beautiful tools**
