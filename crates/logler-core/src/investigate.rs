@@ -432,6 +432,36 @@ impl Investigator {
 
         Ok(metadata)
     }
+
+    /// Execute SQL query on loaded logs (requires 'sql' feature)
+    #[cfg(feature = "sql")]
+    pub fn sql_query(&self, query: &str) -> anyhow::Result<String> {
+        use crate::sql::SqlEngine;
+
+        let mut engine = SqlEngine::new()?;
+        engine.load_files(&self.indices)?;
+        engine.query(query)
+    }
+
+    /// Get available SQL tables (requires 'sql' feature)
+    #[cfg(feature = "sql")]
+    pub fn sql_tables(&self) -> anyhow::Result<Vec<String>> {
+        use crate::sql::SqlEngine;
+
+        let mut engine = SqlEngine::new()?;
+        engine.load_files(&self.indices)?;
+        engine.get_tables()
+    }
+
+    /// Get SQL table schema (requires 'sql' feature)
+    #[cfg(feature = "sql")]
+    pub fn sql_schema(&self, table: &str) -> anyhow::Result<String> {
+        use crate::sql::SqlEngine;
+
+        let mut engine = SqlEngine::new()?;
+        engine.load_files(&self.indices)?;
+        engine.get_schema(table)
+    }
 }
 
 impl Default for Investigator {

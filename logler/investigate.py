@@ -307,3 +307,39 @@ class Investigator:
         """Get context around a line."""
         result_json = self._investigator.get_context(file, line_number, lines_before, lines_after, False)
         return json.loads(result_json)
+
+    def sql_query(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Execute SQL query on loaded logs (requires 'sql' feature).
+
+        Args:
+            query: SQL query string
+
+        Returns:
+            List of result rows as dictionaries
+
+        Example:
+            results = investigator.sql_query(\"\"\"
+                SELECT level, COUNT(*) as count
+                FROM logs
+                GROUP BY level
+                ORDER BY count DESC
+            \"\"\")
+        """
+        if not hasattr(self._investigator, 'sql_query'):
+            raise RuntimeError("SQL feature not available. Build with --features sql")
+        result_json = self._investigator.sql_query(query)
+        return json.loads(result_json)
+
+    def sql_tables(self) -> List[str]:
+        """Get list of available SQL tables (requires 'sql' feature)."""
+        if not hasattr(self._investigator, 'sql_tables'):
+            raise RuntimeError("SQL feature not available. Build with --features sql")
+        return self._investigator.sql_tables()
+
+    def sql_schema(self, table: str) -> List[Dict[str, Any]]:
+        """Get schema for a SQL table (requires 'sql' feature)."""
+        if not hasattr(self._investigator, 'sql_schema'):
+            raise RuntimeError("SQL feature not available. Build with --features sql")
+        result_json = self._investigator.sql_schema(table)
+        return json.loads(result_json)

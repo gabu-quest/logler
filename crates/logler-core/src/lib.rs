@@ -35,10 +35,16 @@ pub mod investigate;
 pub mod parser;
 pub mod types;
 
+#[cfg(feature = "sql")]
+pub mod sql;
+
 pub use index::{LogIndex, IndexStats};
 pub use investigate::Investigator;
 pub use parser::LogParser;
 pub use types::*;
+
+#[cfg(feature = "sql")]
+pub use sql::SqlEngine;
 
 #[cfg(test)]
 mod tests {
