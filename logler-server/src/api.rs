@@ -298,7 +298,7 @@ pub async fn websocket_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState) {
+async fn handle_socket(socket: WebSocket, _state: AppState) {
     let (mut sender, mut receiver) = socket.split();
 
     // Handle incoming messages

@@ -1,5 +1,5 @@
 use crate::types::{LogEntry, ThreadContext, TraceContext, SpanInfo};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use dashmap::DashMap;
 use std::sync::Arc;
 use uuid::Uuid;
