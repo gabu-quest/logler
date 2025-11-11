@@ -20,6 +20,45 @@ A modern, feature-rich log viewer that makes debugging a pleasure. View logs in 
 - 📂 **File Picker** - Browse and select log files from the UI
 - 🎯 **Zero Config** - Works out of the box
 
+## 🤖 NEW: LLM Investigation Engine
+
+**Rust-powered log investigation designed for AI agents!**
+
+- ⚡ **Blazing Fast** - Search 1GB files in <50ms with parallel processing
+- 🔍 **Semantic Search** - Find errors by description, not just exact matches
+- 🧵 **Thread Following** - Reconstruct request flows across distributed systems
+- 📊 **Pattern Detection** - Automatically find repeated errors and cascading failures
+- 💾 **SQL Queries** - DuckDB-powered custom analysis for deep investigation
+- 📈 **Statistical Analysis** - Z-scores, percentiles, correlations, anomaly detection
+- 🌍 **Bilingual Docs** - Complete documentation in English and Japanese (日本語)
+
+```python
+# For LLM agents like Claude
+import logler.investigate as investigate
+
+# Quick triage
+results = investigate.search(files=["app.log"], query="error", level="ERROR")
+patterns = investigate.find_patterns(files=["app.log"])
+timeline = investigate.follow_thread(files=["app.log"], correlation_id="req-001")
+
+# Deep analysis with SQL
+from logler.investigate import Investigator
+investigator = Investigator()
+investigator.load_files(["app.log"])
+anomalies = investigator.sql_query("""
+    SELECT timestamp, COUNT(*) as errors
+    FROM logs WHERE level = 'ERROR'
+    GROUP BY strftime('%M', timestamp)
+    HAVING errors > (SELECT AVG(errors) FROM ...)
+""")
+```
+
+**📚 Complete LLM documentation:**
+- [English Guide](docs/LLM_README.md) - Complete API and examples
+- [日本語ガイド](README.ja.md) - 完全なドキュメント
+- [API Reference](docs/LLM_INVESTIGATION_API.md) - All investigation tools
+- [Examples](examples/) - Production incident investigations
+
 ## 🚀 Quick Start
 
 ### Installation
