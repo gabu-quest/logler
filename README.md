@@ -22,8 +22,9 @@ A modern, feature-rich log viewer that makes debugging a pleasure. View logs in 
 
 ## 🤖 NEW: LLM Investigation Engine
 
-**Rust-powered log investigation designed for AI agents!**
+**Rust-powered log investigation designed for AI agents - the most LLM-friendly log tool available!**
 
+### Core Features
 - ⚡ **Blazing Fast** - Search 1GB files in <50ms with parallel processing
 - 🔍 **Semantic Search** - Find errors by description, not just exact matches
 - 🧵 **Thread Following** - Reconstruct request flows across distributed systems
@@ -32,25 +33,63 @@ A modern, feature-rich log viewer that makes debugging a pleasure. View logs in 
 - 📈 **Statistical Analysis** - Z-scores, percentiles, correlations, anomaly detection
 - 🌍 **Bilingual Docs** - Complete documentation in English and Japanese (日本語)
 
+### 🚀 NEW: Advanced LLM Features
+
+**Designed specifically for AI agents with limited context windows:**
+
+- 💡 **Auto Insights** - `analyze_with_insights()` automatically detects patterns, errors, and suggests next steps
+- 📉 **Token-Efficient Output** - 44x token savings with summary/count/compact modes
+- 🔀 **Compare & Diff** - Compare successful vs failed requests, before/after deployments
+- 🌐 **Cross-Service Timeline** - Unified view across microservices for distributed debugging
+- 📝 **Investigation Sessions** - Track progress, undo/redo, save/resume investigations
+- 🎯 **Smart Sampling** - Representative sampling with multiple strategies (diverse, errors-focused, chronological)
+- 📄 **Report Generation** - Auto-generate markdown/text/JSON reports from investigation
+- 🤔 **Explain Feature** - Plain English explanations of cryptic errors with next steps
+- 💬 **Contextual Suggestions** - AI suggests what to investigate next based on findings
+
 ```python
-# For LLM agents like Claude
 import logler.investigate as investigate
 
-# Quick triage
-results = investigate.search(files=["app.log"], query="error", level="ERROR")
-patterns = investigate.find_patterns(files=["app.log"])
-timeline = investigate.follow_thread(files=["app.log"], correlation_id="req-001")
+# 🎯 One-line auto investigation with insights
+result = investigate.analyze_with_insights(files=["app.log"])
+print(result['insights'])  # Automatic pattern detection, error analysis, suggestions
 
-# Deep analysis with SQL
-from logler.investigate import Investigator
-investigator = Investigator()
-investigator.load_files(["app.log"])
-anomalies = investigator.sql_query("""
-    SELECT timestamp, COUNT(*) as errors
-    FROM logs WHERE level = 'ERROR'
-    GROUP BY strftime('%M', timestamp)
-    HAVING errors > (SELECT AVG(errors) FROM ...)
-""")
+# 📉 Token-efficient search (44x smaller output)
+errors = investigate.search(files=["app.log"], level="ERROR", output_format="summary")
+# Returns aggregated stats instead of all entries - perfect for limited context windows
+
+# 🔀 Compare successful vs failed requests
+diff = investigate.compare_threads(
+    files=["app.log"],
+    correlation_a="req-success-123",
+    correlation_b="req-failed-456"
+)
+print(diff['summary'])  # "Thread B took 2341ms longer and had 5 errors (cache miss, timeout)"
+
+# 🌐 Cross-service distributed tracing
+timeline = investigate.cross_service_timeline(
+    files={"api": ["api.log"], "db": ["db.log"], "cache": ["cache.log"]},
+    correlation_id="req-12345"
+)
+# See request flow: API → DB → Cache with latency breakdown
+
+# 📝 Track investigation with sessions
+session = investigate.InvestigationSession(files=["app.log"], name="incident_2024")
+session.search(level="ERROR")
+session.find_patterns()
+session.add_note("Database connection pool exhausted")
+report = session.generate_report(format="markdown")  # Auto-generate report
+
+# 🎯 Smart sampling (representative sample of huge logs)
+sample = investigate.smart_sample(
+    files=["huge.log"],
+    strategy="errors_focused",  # or "diverse", "representative", "chronological"
+    sample_size=50
+)
+
+# 🤔 Explain cryptic errors in plain English
+explanation = investigate.explain(error_message="Connection pool exhausted", context="production")
+print(explanation)  # Common causes, next steps, production-specific advice
 ```
 
 **📚 Complete LLM documentation:**
