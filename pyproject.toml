@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logler"
+version = "1.0.0"
+description = "Beautiful local log viewer with thread tracking and real-time updates"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Logler Contributors"},
+]
+keywords = ["logs", "logging", "viewer", "monitoring", "debugging"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: System :: Logging",
+]
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "rich>=13.0.0",
+    "watchdog>=4.0.0",
+    "python-multipart>=0.0.9",
+    "jinja2>=3.1.0",
+    "websockets>=12.0",
+    "aiofiles>=23.0.0",
+    "click>=8.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.0.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+logler = "logler.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/logler"
+Documentation = "https://github.com/yourusername/logler#readme"
+Repository = "https://github.com/yourusername/logler"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["logler*"]
+
+[tool.setuptools.package-data]
+logler = ["web/templates/**/*", "web/static/**/*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -1,0 +1,34 @@
+<div class="bg-gray-800 p-4 rounded">
+    <h3 class="text-lg font-semibold mb-3">Trace: {{ trace.trace_id }}</h3>
+    <div class="space-y-2 text-sm">
+        <div class="flex justify-between">
+            <span class="text-gray-400">Spans:</span>
+            <span>{{ trace.spans|length }}</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-400">Duration:</span>
+            <span>{{ trace.duration_ms }}ms</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-400">Services:</span>
+            <span>{{ trace.services|join(', ') }}</span>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <h4 class="font-semibold mb-2">Spans:</h4>
+        <div class="space-y-2">
+            {% for span in trace.spans %}
+            <div class="bg-gray-700 p-2 rounded">
+                <div class="font-mono text-xs">{{ span.span_id }}</div>
+                {% if span.operation_name %}
+                <div class="text-sm">{{ span.operation_name }}</div>
+                {% endif %}
+                {% if span.duration_ms %}
+                <div class="text-xs text-gray-400">{{ span.duration_ms }}ms</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>

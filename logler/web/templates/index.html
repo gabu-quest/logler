@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logler - Beautiful Log Viewer</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx-ext-ws@2.0.1/ws.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+
+        [x-cloak] { display: none !important; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .log-viewer {
+            font-family: 'JetBrains Mono', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+
+        .log-line {
+            padding: 0.5rem;
+            border-bottom: 1px solid #2d2d2d;
+            transition: background 0.2s;
+        }
+
+        .log-line:hover {
+            background: #2d2d2d;
+        }
+
+        .level-TRACE { color: #808080; }
+        .level-DEBUG { color: #4FC3F7; }
+        .level-INFO { color: #66BB6A; }
+        .level-WARN, .level-WARNING { color: #FFA726; }
+        .level-ERROR { color: #EF5350; }
+        .level-CRITICAL, .level-FATAL { color: #F44336; font-weight: bold; }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+
+        .file-item {
+            transition: all 0.2s;
+        }
+
+        .file-item:hover {
+            transform: translateX(4px);
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .thread-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: rgba(103, 126, 234, 0.2);
+            color: #667eea;
+            border: 1px solid rgba(103, 126, 234, 0.3);
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: transform 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #764ba2;
+        }
+    </style>
+</head>
+<body x-data="logViewer()" x-init="init()" class="overflow-hidden">
+    <!-- Header -->
+    <header class="glass-card text-white p-4">
+        <div class="container mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <span class="text-3xl">🔍</span>
+                <h1 class="text-2xl font-bold">Logler</h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span x-show="websocketConnected" class="flex items-center space-x-2">
+                    <span class="w-3 h-3 bg-green-400 rounded-full animate-pulse"></span>
+                    <span class="text-sm">Live</span>
+                </span>
+                <button @click="showFilePicker = true" class="px-4 py-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg transition">
+                    📁 Open File
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex h-[calc(100vh-73px)]">
+        <!-- Sidebar -->
+        <aside class="w-80 glass-card text-white p-4 overflow-y-auto">
+            <div class="space-y-6">
+                <!-- Active Files -->
+                <div>
+                    <h2 class="text-lg font-semibold mb-3 flex items-center">
+                        <span class="mr-2">📄</span> Active Files
+                    </h2>
+                    <div x-show="activeFiles.length === 0" class="text-sm text-gray-300">
+                        No files open yet
+                    </div>
+                    <div class="space-y-2">
+                        <template x-for="file in activeFiles" :key="file">
+                            <div class="p-2 bg-white bg-opacity-10 rounded cursor-pointer hover:bg-opacity-20 transition" @click="selectFile(file)">
+                                <div class="text-sm font-mono truncate" x-text="file.split('/').pop()"></div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Statistics -->
+                <div x-show="stats.total > 0">
+                    <h2 class="text-lg font-semibold mb-3 flex items-center">
+                        <span class="mr-2">📊</span> Statistics
+                    </h2>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="stat-card p-3 rounded-lg">
+                            <div class="text-xs text-gray-300">Total</div>
+                            <div class="text-2xl font-bold" x-text="stats.total"></div>
+                        </div>
+                        <div class="stat-card p-3 rounded-lg">
+                            <div class="text-xs text-gray-300">Errors</div>
+                            <div class="text-2xl font-bold text-red-400" x-text="stats.errors"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Threads -->
+                <div x-show="threads.length > 0">
+                    <h2 class="text-lg font-semibold mb-3 flex items-center">
+                        <span class="mr-2">🧵</span> Threads
+                    </h2>
+                    <div class="space-y-2">
+                        <template x-for="thread in threads.slice(0, 10)" :key="thread.thread_id">
+                            <div class="p-2 bg-white bg-opacity-10 rounded cursor-pointer hover:bg-opacity-20 transition"
+                                 @click="filterByThread(thread.thread_id)">
+                                <div class="flex justify-between items-center">
+                                    <span class="thread-badge" x-text="thread.thread_id"></span>
+                                    <span class="text-xs text-gray-300" x-text="thread.log_count + ' logs'"></span>
+                                </div>
+                                <div x-show="thread.error_count > 0" class="text-xs text-red-400 mt-1">
+                                    <span x-text="thread.error_count + ' errors'"></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div>
+                    <h2 class="text-lg font-semibold mb-3 flex items-center">
+                        <span class="mr-2">🔍</span> Filters
+                    </h2>
+                    <div class="space-y-3">
+                        <div>
+                            <input type="text" x-model="searchQuery" @keyup.enter="applyFilters()"
+                                   placeholder="Search logs..."
+                                   class="w-full px-3 py-2 bg-white bg-opacity-10 border border-white border-opacity-20 rounded focus:outline-none focus:ring-2 focus:ring-purple-400">
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <template x-for="level in ['DEBUG', 'INFO', 'WARN', 'ERROR']">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="checkbox" :value="level" x-model="selectedLevels" @change="applyFilters()"
+                                           class="rounded bg-white bg-opacity-10">
+                                    <span class="text-sm" x-text="level" :class="'level-' + level"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col overflow-hidden">
+            <!-- Toolbar -->
+            <div class="glass-card text-white p-3 flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm">
+                        Showing <span x-text="filteredEntries.length"></span> entries
+                    </span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button @click="autoScroll = !autoScroll"
+                            :class="autoScroll ? 'bg-green-500' : 'bg-white bg-opacity-20'"
+                            class="px-3 py-1 rounded text-sm hover:opacity-80 transition">
+                        <span x-text="autoScroll ? '📌 Auto-scroll ON' : '📌 Auto-scroll OFF'"></span>
+                    </button>
+                    <button @click="followFile()" x-show="currentFile"
+                            class="px-3 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-sm transition">
+                        🔄 Follow
+                    </button>
+                </div>
+            </div>
+
+            <!-- Log Viewer -->
+            <div class="flex-1 log-viewer overflow-auto" id="log-container" @scroll="handleScroll()">
+                <div x-show="!currentFile" class="flex items-center justify-center h-full">
+                    <div class="text-center text-gray-500">
+                        <div class="text-6xl mb-4">📁</div>
+                        <div class="text-xl mb-2">No file opened</div>
+                        <div class="text-sm">Click "Open File" to get started</div>
+                    </div>
+                </div>
+
+                <div x-show="currentFile && filteredEntries.length === 0" class="flex items-center justify-center h-full">
+                    <div class="text-center text-gray-500">
+                        <div class="text-4xl mb-4">🔍</div>
+                        <div class="text-lg">No logs match the current filter</div>
+                    </div>
+                </div>
+
+                <template x-for="entry in filteredEntries" :key="entry.line_number">
+                    <div class="log-line" :class="'level-' + entry.level">
+                        <div class="flex items-start space-x-3">
+                            <span class="text-gray-600 text-xs font-mono w-12 text-right flex-shrink-0" x-text="entry.line_number"></span>
+                            <span class="text-gray-500 text-xs flex-shrink-0 w-32" x-text="formatTimestamp(entry.timestamp)"></span>
+                            <span class="text-xs font-bold flex-shrink-0 w-16" :class="'level-' + entry.level" x-text="entry.level"></span>
+                            <div class="flex-1 min-w-0">
+                                <div class="break-words" x-text="entry.message"></div>
+                                <div x-show="entry.thread_id || entry.correlation_id" class="mt-1 flex items-center space-x-2 text-xs text-gray-500">
+                                    <span x-show="entry.thread_id" class="thread-badge" x-text="'🧵 ' + entry.thread_id"></span>
+                                    <span x-show="entry.correlation_id" class="text-blue-400" x-text="'🔗 ' + entry.correlation_id"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </main>
+    </div>
+
+    <!-- File Picker Modal -->
+    <div x-show="showFilePicker" x-cloak
+         class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
+         @click.self="showFilePicker = false">
+        <div class="glass-card text-white p-6 rounded-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+            <h2 class="text-2xl font-bold mb-4">📁 Open Log File</h2>
+
+            <div class="mb-4">
+                <input type="text" x-model="currentDir" @keyup.enter="browseDirectory(currentDir)"
+                       placeholder="Enter directory path..."
+                       class="w-full px-4 py-2 bg-white bg-opacity-10 border border-white border-opacity-20 rounded focus:outline-none focus:ring-2 focus:ring-purple-400">
+            </div>
+
+            <div class="flex-1 overflow-y-auto space-y-2 mb-4">
+                <div x-show="parentDir" @click="browseDirectory(parentDir)"
+                     class="file-item p-3 rounded cursor-pointer bg-white bg-opacity-5">
+                    <span class="text-yellow-400">📁 ..</span>
+                </div>
+
+                <template x-for="file in files" :key="file.path">
+                    <div @click="openFile(file.path); showFilePicker = false"
+                         class="file-item p-3 rounded cursor-pointer bg-white bg-opacity-5">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <span>📄</span>
+                                <span class="font-mono text-sm" x-text="file.name"></span>
+                            </div>
+                            <span class="text-xs text-gray-400" x-text="formatSize(file.size)"></span>
+                        </div>
+                    </div>
+                </template>
+
+                <div x-show="files.length === 0" class="text-center text-gray-400 py-8">
+                    No log files found in this directory
+                </div>
+            </div>
+
+            <button @click="showFilePicker = false"
+                    class="w-full py-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded transition">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <script>
+        function logViewer() {
+            return {
+                showFilePicker: false,
+                currentDir: '.',
+                parentDir: null,
+                files: [],
+                activeFiles: [],
+                currentFile: null,
+                entries: [],
+                filteredEntries: [],
+                threads: [],
+                searchQuery: '',
+                selectedLevels: [],
+                autoScroll: false,
+                websocketConnected: false,
+                stats: {
+                    total: 0,
+                    errors: 0,
+                },
+
+                init() {
+                    this.browseDirectory('.');
+                    {% if active_files %}
+                    this.activeFiles = {{ active_files | tojson }};
+                    if (this.activeFiles.length > 0) {
+                        this.openFile(this.activeFiles[0]);
+                    }
+                    {% endif %}
+                },
+
+                async browseDirectory(dir) {
+                    const response = await fetch(`/api/files/browse?directory=${encodeURIComponent(dir)}`);
+                    const data = await response.json();
+                    this.currentDir = data.current_dir || dir;
+                    this.parentDir = data.parent_dir;
+                    this.files = data.files || [];
+                },
+
+                async openFile(path) {
+                    const response = await fetch('/api/files/open', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({path})
+                    });
+                    const data = await response.json();
+
+                    if (data.error) {
+                        alert(data.error);
+                        return;
+                    }
+
+                    this.currentFile = data.file_path;
+                    if (!this.activeFiles.includes(this.currentFile)) {
+                        this.activeFiles.push(this.currentFile);
+                    }
+                    this.entries = data.entries;
+                    this.applyFilters();
+                    await this.loadThreads();
+                    this.updateStats();
+
+                    if (this.autoScroll) {
+                        this.$nextTick(() => this.scrollToBottom());
+                    }
+                },
+
+                async loadThreads() {
+                    const response = await fetch('/api/threads');
+                    this.threads = await response.json();
+                },
+
+                applyFilters() {
+                    let filtered = this.entries;
+
+                    if (this.searchQuery) {
+                        const query = this.searchQuery.toLowerCase();
+                        filtered = filtered.filter(e => e.message.toLowerCase().includes(query));
+                    }
+
+                    if (this.selectedLevels.length > 0) {
+                        filtered = filtered.filter(e => this.selectedLevels.includes(e.level));
+                    }
+
+                    this.filteredEntries = filtered;
+                    this.updateStats();
+                },
+
+                updateStats() {
+                    this.stats.total = this.filteredEntries.length;
+                    this.stats.errors = this.filteredEntries.filter(e =>
+                        ['ERROR', 'CRITICAL', 'FATAL'].includes(e.level)
+                    ).length;
+                },
+
+                filterByThread(threadId) {
+                    this.filteredEntries = this.entries.filter(e => e.thread_id === threadId);
+                    this.updateStats();
+                },
+
+                selectFile(file) {
+                    this.openFile(file);
+                },
+
+                followFile() {
+                    if (!this.currentFile) return;
+
+                    const ws = new WebSocket(`ws://${location.host}/ws`);
+                    ws.onopen = () => {
+                        this.websocketConnected = true;
+                        ws.send(JSON.stringify({
+                            action: 'follow',
+                            file_path: this.currentFile
+                        }));
+                    };
+
+                    ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'log_entry') {
+                            this.entries.push(data.entry);
+                            this.applyFilters();
+                            if (this.autoScroll) {
+                                this.$nextTick(() => this.scrollToBottom());
+                            }
+                        }
+                    };
+
+                    ws.onclose = () => {
+                        this.websocketConnected = false;
+                    };
+                },
+
+                formatTimestamp(ts) {
+                    if (!ts) return 'N/A';
+                    return new Date(ts).toLocaleString();
+                },
+
+                formatSize(bytes) {
+                    if (bytes < 1024) return bytes + ' B';
+                    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+                },
+
+                scrollToBottom() {
+                    const container = document.getElementById('log-container');
+                    container.scrollTop = container.scrollHeight;
+                },
+
+                handleScroll() {
+                    const container = document.getElementById('log-container');
+                    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
+                    this.autoScroll = isAtBottom;
+                }
+            };
+        }
+    </script>
+</body>
+</html>
