@@ -1,0 +1,2231 @@
+"""
+LLM Investigation Module - High-performance log investigation powered by Rust
+
+This module provides fast log parsing, searching, and investigation capabilities
+specifically designed for LLM agents like Claude.
+
+Example Usage:
+    import logler.investigate as investigate
+
+    # Search for errors
+    results = investigate.search(
+        files=["app.log"],
+        query="database timeout",
+        level="ERROR",
+        limit=10
+    )
+
+    # Follow a thread
+    timeline = investigate.follow_thread(
+        files=["app.log"],
+        thread_id="worker-1"
+    )
+
+    # Find patterns
+    patterns = investigate.find_patterns(
+        files=["app.log"],
+        min_occurrences=3
+    )
+"""
+
+import json
+from typing import List, Optional, Dict, Any, Tuple
+from datetime import datetime
+from collections import defaultdict
+
+try:
+    import logler_rs
+    RUST_AVAILABLE = True
+except ImportError:
+    RUST_AVAILABLE = False
+    print("Warning: Rust backend not available. Using Python fallback.")
+
+
+def search(
+    files: List[str],
+    query: Optional[str] = None,
+    level: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    limit: Optional[int] = None,
+    context_lines: int = 3,
+    output_format: str = "full",
+) -> Dict[str, Any]:
+    """
+    Search logs with filters.
+
+    Args:
+        files: List of log file paths
+        query: Search query string
+        level: Filter by log level (ERROR, WARN, INFO, etc.)
+        thread_id: Filter by thread ID
+        correlation_id: Filter by correlation ID
+        limit: Maximum number of results
+        context_lines: Number of context lines before/after each result
+        output_format: Output format - "full", "summary", "count", or "compact"
+                      - "full": Complete log entries (default)
+                      - "summary": Aggregated summary with examples
+                      - "count": Just counts, no log content
+                      - "compact": Essential fields only (no raw logs)
+
+    Returns:
+        Dictionary with search results (format depends on output_format):
+
+        For "full":
+        {
+            "results": [...],  # Full entries
+            "total_matches": 123,
+            "search_time_ms": 45
+        }
+
+        For "summary":
+        {
+            "total_matches": 123,
+            "unique_messages": 15,
+            "log_levels": {"ERROR": 100, "WARN": 23},
+            "top_messages": [
+                {"message": "...", "count": 50, "first_seen": "...", "last_seen": "..."},
+                ...
+            ],
+            "sample_entries": [...]  # 3-5 examples
+        }
+
+        For "count":
+        {
+            "total_matches": 123,
+            "by_level": {"ERROR": 100, "WARN": 23},
+            "by_file": {"app.log": 80, "api.log": 43},
+            "time_range": {"start": "...", "end": "..."}
+        }
+
+        For "compact":
+        {
+            "matches": [
+                {"time": "...", "level": "ERROR", "msg": "...", "thread": "..."},
+                ...
+            ],
+            "total": 123
+        }
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    # Build query
+    filters = {}
+    if level:
+        filters["levels"] = [level.upper()]
+    if thread_id:
+        filters["thread_id"] = thread_id
+    if correlation_id:
+        filters["correlation_id"] = correlation_id
+
+    query_dict = {
+        "files": files,
+        "query": query,
+        "filters": filters,
+        "limit": limit,
+        "context_lines": context_lines,
+    }
+
+    # Call Rust function
+    result_json = logler_rs.search(files, query or "", limit)
+    result = json.loads(result_json)
+
+    # Transform based on output_format
+    if output_format == "full":
+        return result
+    elif output_format == "summary":
+        return _format_as_summary(result)
+    elif output_format == "count":
+        return _format_as_count(result)
+    elif output_format == "compact":
+        return _format_as_compact(result)
+    else:
+        return result
+
+
+def follow_thread(
+    files: List[str],
+    thread_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Follow a thread/correlation/trace through log files.
+
+    Args:
+        files: List of log file paths
+        thread_id: Thread ID to follow
+        correlation_id: Correlation ID to follow
+        trace_id: Trace ID to follow
+
+    Returns:
+        Dictionary with timeline:
+        {
+            "entries": [...],
+            "total_entries": 42,
+            "duration_ms": 1523,
+            "unique_spans": [...]
+        }
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    result_json = logler_rs.follow_thread(files, thread_id, correlation_id, trace_id)
+    return json.loads(result_json)
+
+
+def get_context(
+    file: str,
+    line_number: int,
+    lines_before: int = 10,
+    lines_after: int = 10,
+) -> Dict[str, Any]:
+    """
+    Get context around a specific log line.
+
+    Args:
+        file: Log file path
+        line_number: Line number to get context for
+        lines_before: Number of lines before
+        lines_after: Number of lines after
+
+    Returns:
+        Dictionary with context:
+        {
+            "target": {...},
+            "context_before": [...],
+            "context_after": [...],
+        }
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    # Use Investigator class for more complex operations
+    investigator = logler_rs.PyInvestigator()
+    investigator.load_files([file])
+    result_json = investigator.get_context(file, line_number, lines_before, lines_after, False)
+    return json.loads(result_json)
+
+
+def find_patterns(
+    files: List[str],
+    min_occurrences: int = 3,
+) -> Dict[str, Any]:
+    """
+    Find repeated patterns and anomalies in logs.
+
+    Args:
+        files: List of log file paths
+        min_occurrences: Minimum number of occurrences to consider a pattern
+
+    Returns:
+        Dictionary with patterns:
+        {
+            "patterns": [
+                {
+                    "pattern": "...",
+                    "occurrences": 15,
+                    "first_seen": "...",
+                    "last_seen": "...",
+                    "affected_threads": [...],
+                    "examples": [...]
+                }
+            ]
+        }
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    result_json = logler_rs.find_patterns(files, min_occurrences)
+    return json.loads(result_json)
+
+
+def get_metadata(files: List[str]) -> Dict[str, Any]:
+    """
+    Get metadata about log files.
+
+    Args:
+        files: List of log file paths
+
+    Returns:
+        List of file metadata:
+        [
+            {
+                "path": "...",
+                "size_bytes": 12345,
+                "lines": 5000,
+                "format": "json",
+                "time_range": {...},
+                "available_fields": [...],
+                "unique_threads": 8,
+                "unique_correlation_ids": 123,
+                "log_levels": {...}
+            }
+        ]
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    result_json = logler_rs.get_metadata(files)
+    return json.loads(result_json)
+
+
+# Advanced API using Investigator class
+class Investigator:
+    """
+    Advanced investigation API with persistent index.
+
+    Use this when you need to perform multiple operations on the same files
+    for better performance.
+
+    Example:
+        investigator = Investigator()
+        investigator.load_files(["app.log", "api.log"])
+
+        results = investigator.search(query="error", limit=10)
+        patterns = investigator.find_patterns(min_occurrences=5)
+        metadata = investigator.get_metadata()
+    """
+
+    def __init__(self):
+        if not RUST_AVAILABLE:
+            raise RuntimeError("Rust backend not available")
+        self._investigator = logler_rs.PyInvestigator()
+        self._files = []
+
+    def load_files(self, files: List[str]):
+        """Load log files and build index."""
+        self._investigator.load_files(files)
+        self._files = files
+
+    def search(
+        self,
+        query: Optional[str] = None,
+        level: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        context_lines: int = 3,
+    ) -> Dict[str, Any]:
+        """Search loaded files."""
+        filters = {}
+        if level:
+            filters["levels"] = [level.upper()]
+        if thread_id:
+            filters["thread_id"] = thread_id
+        if correlation_id:
+            filters["correlation_id"] = correlation_id
+
+        query_dict = {
+            "files": self._files,
+            "query": query,
+            "filters": filters,
+            "limit": limit,
+            "context_lines": context_lines,
+        }
+
+        result_json = self._investigator.search(json.dumps(query_dict))
+        return json.loads(result_json)
+
+    def follow_thread(
+        self,
+        thread_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Follow thread in loaded files."""
+        result_json = self._investigator.follow_thread(self._files, thread_id, correlation_id, trace_id)
+        return json.loads(result_json)
+
+    def find_patterns(self, min_occurrences: int = 3) -> Dict[str, Any]:
+        """Find patterns in loaded files."""
+        result_json = self._investigator.find_patterns(self._files, min_occurrences)
+        return json.loads(result_json)
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """Get metadata for loaded files."""
+        result_json = self._investigator.get_metadata(self._files)
+        return json.loads(result_json)
+
+    def get_context(
+        self,
+        file: str,
+        line_number: int,
+        lines_before: int = 10,
+        lines_after: int = 10,
+    ) -> Dict[str, Any]:
+        """Get context around a line."""
+        result_json = self._investigator.get_context(file, line_number, lines_before, lines_after, False)
+        return json.loads(result_json)
+
+    def sql_query(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Execute SQL query on loaded logs (requires 'sql' feature).
+
+        Args:
+            query: SQL query string
+
+        Returns:
+            List of result rows as dictionaries
+
+        Example:
+            results = investigator.sql_query(\"\"\"
+                SELECT level, COUNT(*) as count
+                FROM logs
+                GROUP BY level
+                ORDER BY count DESC
+            \"\"\")
+        """
+        if not hasattr(self._investigator, 'sql_query'):
+            raise RuntimeError("SQL feature not available. Build with --features sql")
+        result_json = self._investigator.sql_query(query)
+        return json.loads(result_json)
+
+    def sql_tables(self) -> List[str]:
+        """Get list of available SQL tables (requires 'sql' feature)."""
+        if not hasattr(self._investigator, 'sql_tables'):
+            raise RuntimeError("SQL feature not available. Build with --features sql")
+        return self._investigator.sql_tables()
+
+    def sql_schema(self, table: str) -> List[Dict[str, Any]]:
+        """Get schema for a SQL table (requires 'sql' feature)."""
+        if not hasattr(self._investigator, 'sql_schema'):
+            raise RuntimeError("SQL feature not available. Build with --features sql")
+        result_json = self._investigator.sql_schema(table)
+        return json.loads(result_json)
+
+
+# Advanced LLM-optimized features
+
+def cross_service_timeline(
+    files: Dict[str, List[str]],
+    time_window: Optional[Tuple[str, str]] = None,
+    correlation_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    limit: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Create a unified timeline across multiple services/log files.
+
+    This is perfect for investigating distributed systems where a single
+    request flows through multiple services (API Gateway → Auth → Database → Cache).
+
+    Args:
+        files: Dictionary mapping service names to log file lists
+               e.g., {"api": ["api.log"], "database": ["db.log"], "cache": ["cache.log"]}
+        time_window: Optional tuple of (start_time, end_time) in ISO format
+        correlation_id: Filter to specific correlation ID
+        trace_id: Filter to specific trace ID
+        limit: Maximum number of entries to return
+
+    Returns:
+        Dictionary with unified timeline:
+        {
+            "timeline": [
+                {
+                    "service": "api",
+                    "timestamp": "2024-01-01T10:30:15.123Z",
+                    "entry": {...},
+                    "relative_time_ms": 0
+                },
+                {
+                    "service": "database",
+                    "timestamp": "2024-01-01T10:30:15.456Z",
+                    "entry": {...},
+                    "relative_time_ms": 333
+                },
+                ...
+            ],
+            "services": ["api", "database", "cache"],
+            "total_entries": 42,
+            "duration_ms": 1523,
+            "service_breakdown": {
+                "api": 15,
+                "database": 20,
+                "cache": 7
+            }
+        }
+
+    Example:
+        # Investigate a failed request across services
+        timeline = cross_service_timeline(
+            files={
+                "api": ["logs/api.log"],
+                "auth": ["logs/auth.log"],
+                "db": ["logs/db.log"]
+            },
+            correlation_id="req-12345"
+        )
+
+        # See the flow
+        for entry in timeline['timeline']:
+            print(f"[{entry['service']:10s}] +{entry['relative_time_ms']:4d}ms: {entry['entry']['message']}")
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    # Collect entries from all services
+    all_entries = []
+    service_counts = defaultdict(int)
+
+    for service_name, service_files in files.items():
+        # Search with filters
+        filters = {}
+        if correlation_id:
+            result = follow_thread(service_files, correlation_id=correlation_id, trace_id=trace_id)
+            entries = result.get('entries', [])
+        elif trace_id:
+            result = follow_thread(service_files, trace_id=trace_id)
+            entries = result.get('entries', [])
+        else:
+            # Get all entries
+            result = search(service_files, limit=None)
+            entries = [r['entry'] for r in result.get('results', [])]
+
+        # Add service label to each entry
+        for entry in entries:
+            # Parse timestamp if present
+            timestamp_str = entry.get('timestamp')
+            if timestamp_str:
+                try:
+                    timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                except:
+                    timestamp = None
+            else:
+                timestamp = None
+
+            all_entries.append({
+                'service': service_name,
+                'timestamp': timestamp,
+                'timestamp_str': timestamp_str,
+                'entry': entry
+            })
+            service_counts[service_name] += 1
+
+    # Filter by time window if specified
+    if time_window:
+        start_time, end_time = time_window
+        try:
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            all_entries = [
+                e for e in all_entries
+                if e['timestamp'] and start_dt <= e['timestamp'] <= end_dt
+            ]
+        except Exception as e:
+            print(f"Warning: Could not parse time window: {e}")
+
+    # Sort by timestamp
+    all_entries.sort(key=lambda e: e['timestamp'] if e['timestamp'] else datetime.min)
+
+    # Calculate relative times
+    if all_entries and all_entries[0]['timestamp']:
+        start_time = all_entries[0]['timestamp']
+        for entry in all_entries:
+            if entry['timestamp']:
+                delta = entry['timestamp'] - start_time
+                entry['relative_time_ms'] = int(delta.total_seconds() * 1000)
+            else:
+                entry['relative_time_ms'] = None
+    else:
+        for entry in all_entries:
+            entry['relative_time_ms'] = None
+
+    # Apply limit if specified
+    if limit:
+        all_entries = all_entries[:limit]
+
+    # Calculate duration
+    duration_ms = None
+    if len(all_entries) >= 2 and all_entries[0]['timestamp'] and all_entries[-1]['timestamp']:
+        duration = all_entries[-1]['timestamp'] - all_entries[0]['timestamp']
+        duration_ms = int(duration.total_seconds() * 1000)
+
+    # Clean up entries for output (remove internal timestamp objects)
+    timeline = []
+    for e in all_entries:
+        timeline.append({
+            'service': e['service'],
+            'timestamp': e['timestamp_str'],
+            'entry': e['entry'],
+            'relative_time_ms': e['relative_time_ms']
+        })
+
+    return {
+        'timeline': timeline,
+        'services': list(files.keys()),
+        'total_entries': len(timeline),
+        'duration_ms': duration_ms,
+        'service_breakdown': dict(service_counts)
+    }
+
+
+def compare_threads(
+    files: List[str],
+    thread_a: Optional[str] = None,
+    thread_b: Optional[str] = None,
+    correlation_a: Optional[str] = None,
+    correlation_b: Optional[str] = None,
+    trace_a: Optional[str] = None,
+    trace_b: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Compare two threads/requests to find differences.
+
+    Perfect for root cause analysis: "What's different between the successful
+    request and the failed one?"
+
+    Args:
+        files: List of log file paths
+        thread_a: First thread ID to compare
+        thread_b: Second thread ID to compare
+        correlation_a: First correlation ID to compare
+        correlation_b: Second correlation ID to compare
+        trace_a: First trace ID to compare
+        trace_b: Second trace ID to compare
+
+    Returns:
+        Dictionary with comparison:
+        {
+            "thread_a": {
+                "id": "...",
+                "entries": [...],
+                "duration_ms": 1523,
+                "error_count": 0,
+                "log_levels": {"INFO": 15, "ERROR": 0},
+                "unique_messages": 15,
+                "services": [...]
+            },
+            "thread_b": {...},
+            "differences": {
+                "duration_diff_ms": 2341,  # B took 2341ms longer
+                "error_diff": 5,  # B had 5 more errors
+                "only_in_a": ["cache hit", ...],  # Messages only in A
+                "only_in_b": ["cache miss", "timeout", ...],  # Messages only in B
+                "level_changes": {"ERROR": +5, "WARN": +2}
+            },
+            "summary": "Thread B took 2.3s longer and had 5 errors (cache miss, timeout)"
+        }
+
+    Example:
+        # Compare successful vs failed request
+        diff = compare_threads(
+            files=["app.log"],
+            correlation_a="req-success-123",
+            correlation_b="req-failed-456"
+        )
+        print(diff['summary'])
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    # Get both threads
+    timeline_a = follow_thread(files, thread_id=thread_a, correlation_id=correlation_a, trace_id=trace_a)
+    timeline_b = follow_thread(files, thread_id=thread_b, correlation_id=correlation_b, trace_id=trace_b)
+
+    # Analyze thread A
+    entries_a = timeline_a.get('entries', [])
+    analysis_a = _analyze_thread(entries_a, thread_a or correlation_a or trace_a or "Thread A")
+
+    # Analyze thread B
+    entries_b = timeline_b.get('entries', [])
+    analysis_b = _analyze_thread(entries_b, thread_b or correlation_b or trace_b or "Thread B")
+
+    # Compare
+    differences = _compute_differences(analysis_a, analysis_b)
+
+    # Generate summary
+    summary = _generate_comparison_summary(analysis_a, analysis_b, differences)
+
+    return {
+        'thread_a': analysis_a,
+        'thread_b': analysis_b,
+        'differences': differences,
+        'summary': summary
+    }
+
+
+def compare_time_periods(
+    files: List[str],
+    period_a_start: str,
+    period_a_end: str,
+    period_b_start: str,
+    period_b_end: str,
+) -> Dict[str, Any]:
+    """
+    Compare two time periods to find what changed.
+
+    Perfect for questions like: "What changed after the deployment?"
+    or "Why did error rates spike at 3pm?"
+
+    Args:
+        files: List of log file paths
+        period_a_start: Start time for period A (ISO format)
+        period_a_end: End time for period A (ISO format)
+        period_b_start: Start time for period B (ISO format)
+        period_b_end: End time for period B (ISO format)
+
+    Returns:
+        Dictionary with comparison:
+        {
+            "period_a": {
+                "start": "...",
+                "end": "...",
+                "total_logs": 1523,
+                "error_rate": 0.02,
+                "log_levels": {...},
+                "top_errors": [...],
+                "unique_threads": 45
+            },
+            "period_b": {...},
+            "changes": {
+                "log_volume_change_pct": 150,  # 150% increase
+                "error_rate_change": 10.5,  # 10.5x more errors
+                "new_errors": ["OutOfMemoryError", ...],
+                "resolved_errors": [],
+                "new_threads": 23
+            },
+            "summary": "Period B had 150% more logs and 10.5x error rate. New errors: OutOfMemoryError"
+        }
+
+    Example:
+        # Compare before/after deployment
+        diff = compare_time_periods(
+            files=["app.log"],
+            period_a_start="2024-01-01T14:00:00Z",
+            period_a_end="2024-01-01T15:00:00Z",
+            period_b_start="2024-01-01T15:00:00Z",
+            period_b_end="2024-01-01T16:00:00Z"
+        )
+        print(diff['summary'])
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    # Search each period
+    # Period A
+    inv = Investigator()
+    inv.load_files(files)
+
+    results_a = search(files, limit=None)
+    results_b = search(files, limit=None)
+
+    # Filter by time
+    entries_a = [r['entry'] for r in results_a.get('results', [])
+                 if _in_time_range(r['entry'], period_a_start, period_a_end)]
+    entries_b = [r['entry'] for r in results_b.get('results', [])
+                 if _in_time_range(r['entry'], period_b_start, period_b_end)]
+
+    # Analyze periods
+    analysis_a = _analyze_period(entries_a, period_a_start, period_a_end)
+    analysis_b = _analyze_period(entries_b, period_b_start, period_b_end)
+
+    # Compute changes
+    changes = _compute_period_changes(analysis_a, analysis_b)
+
+    # Generate summary
+    summary = _generate_period_summary(analysis_a, analysis_b, changes)
+
+    return {
+        'period_a': analysis_a,
+        'period_b': analysis_b,
+        'changes': changes,
+        'summary': summary
+    }
+
+
+# Helper functions for comparison
+
+def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
+    """Analyze a single thread's entries"""
+    if not entries:
+        return {
+            'id': thread_id,
+            'entries': [],
+            'duration_ms': 0,
+            'error_count': 0,
+            'log_levels': {},
+            'unique_messages': 0,
+            'messages': [],
+            'services': []
+        }
+
+    # Count log levels
+    level_counts = defaultdict(int)
+    error_count = 0
+    messages = []
+    services = set()
+
+    for entry in entries:
+        level = entry.get('level', 'INFO')
+        level_counts[level] += 1
+        if level in ['ERROR', 'FATAL']:
+            error_count += 1
+
+        message = entry.get('message', '')
+        messages.append(message)
+
+        service = entry.get('service')
+        if service:
+            services.add(service)
+
+    # Calculate duration
+    duration_ms = 0
+    if len(entries) >= 2:
+        try:
+            start = datetime.fromisoformat(entries[0].get('timestamp', '').replace('Z', '+00:00'))
+            end = datetime.fromisoformat(entries[-1].get('timestamp', '').replace('Z', '+00:00'))
+            duration_ms = int((end - start).total_seconds() * 1000)
+        except:
+            pass
+
+    return {
+        'id': thread_id,
+        'entries': entries,
+        'entry_count': len(entries),
+        'duration_ms': duration_ms,
+        'error_count': error_count,
+        'log_levels': dict(level_counts),
+        'unique_messages': len(set(messages)),
+        'messages': messages,
+        'services': list(services)
+    }
+
+
+def _compute_differences(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
+    """Compute differences between two thread analyses"""
+    # Duration difference
+    duration_diff_ms = analysis_b['duration_ms'] - analysis_a['duration_ms']
+
+    # Error difference
+    error_diff = analysis_b['error_count'] - analysis_a['error_count']
+
+    # Message differences
+    messages_a = set(analysis_a['messages'])
+    messages_b = set(analysis_b['messages'])
+    only_in_a = list(messages_a - messages_b)
+    only_in_b = list(messages_b - messages_a)
+
+    # Log level changes
+    level_changes = {}
+    all_levels = set(list(analysis_a['log_levels'].keys()) + list(analysis_b['log_levels'].keys()))
+    for level in all_levels:
+        count_a = analysis_a['log_levels'].get(level, 0)
+        count_b = analysis_b['log_levels'].get(level, 0)
+        if count_a != count_b:
+            level_changes[level] = count_b - count_a
+
+    return {
+        'duration_diff_ms': duration_diff_ms,
+        'error_diff': error_diff,
+        'only_in_a': only_in_a[:10],  # Limit to 10
+        'only_in_b': only_in_b[:10],
+        'level_changes': level_changes,
+        'entry_count_diff': analysis_b['entry_count'] - analysis_a['entry_count']
+    }
+
+
+def _generate_comparison_summary(analysis_a: Dict, analysis_b: Dict, differences: Dict) -> str:
+    """Generate human-readable summary of comparison"""
+    parts = []
+
+    # Duration
+    duration_diff = differences['duration_diff_ms']
+    if abs(duration_diff) > 100:
+        if duration_diff > 0:
+            parts.append(f"Thread B took {duration_diff}ms longer")
+        else:
+            parts.append(f"Thread B was {-duration_diff}ms faster")
+
+    # Errors
+    error_diff = differences['error_diff']
+    if error_diff > 0:
+        parts.append(f"Thread B had {error_diff} more error(s)")
+        if differences['only_in_b']:
+            examples = differences['only_in_b'][:3]
+            parts.append(f"including: {', '.join(examples)}")
+    elif error_diff < 0:
+        parts.append(f"Thread B had {-error_diff} fewer error(s)")
+
+    # New messages in B
+    if differences['only_in_b'] and error_diff == 0:
+        parts.append(f"Thread B had unique messages: {', '.join(differences['only_in_b'][:3])}")
+
+    if not parts:
+        parts.append("Threads are similar")
+
+    return ". ".join(parts)
+
+
+def _analyze_period(entries: List[Dict], start: str, end: str) -> Dict[str, Any]:
+    """Analyze a time period's entries"""
+    level_counts = defaultdict(int)
+    error_messages = []
+    threads = set()
+
+    for entry in entries:
+        level = entry.get('level', 'INFO')
+        level_counts[level] += 1
+
+        if level in ['ERROR', 'FATAL']:
+            error_messages.append(entry.get('message', ''))
+
+        thread = entry.get('thread_id') or entry.get('correlation_id')
+        if thread:
+            threads.add(thread)
+
+    total = len(entries)
+    error_count = level_counts.get('ERROR', 0) + level_counts.get('FATAL', 0)
+    error_rate = error_count / total if total > 0 else 0
+
+    return {
+        'start': start,
+        'end': end,
+        'total_logs': total,
+        'error_count': error_count,
+        'error_rate': error_rate,
+        'log_levels': dict(level_counts),
+        'top_errors': list(set(error_messages))[:10],
+        'unique_threads': len(threads)
+    }
+
+
+def _compute_period_changes(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
+    """Compute changes between two time periods"""
+    # Volume change
+    if analysis_a['total_logs'] > 0:
+        volume_change_pct = ((analysis_b['total_logs'] - analysis_a['total_logs']) / analysis_a['total_logs']) * 100
+    else:
+        volume_change_pct = 100 if analysis_b['total_logs'] > 0 else 0
+
+    # Error rate change
+    if analysis_a['error_rate'] > 0:
+        error_rate_multiplier = analysis_b['error_rate'] / analysis_a['error_rate']
+    else:
+        error_rate_multiplier = float('inf') if analysis_b['error_rate'] > 0 else 1.0
+
+    # New vs resolved errors
+    errors_a = set(analysis_a['top_errors'])
+    errors_b = set(analysis_b['top_errors'])
+    new_errors = list(errors_b - errors_a)
+    resolved_errors = list(errors_a - errors_b)
+
+    return {
+        'log_volume_change_pct': volume_change_pct,
+        'error_rate_multiplier': error_rate_multiplier,
+        'error_count_change': analysis_b['error_count'] - analysis_a['error_count'],
+        'new_errors': new_errors[:10],
+        'resolved_errors': resolved_errors[:10],
+        'thread_count_change': analysis_b['unique_threads'] - analysis_a['unique_threads']
+    }
+
+
+def _generate_period_summary(analysis_a: Dict, analysis_b: Dict, changes: Dict) -> str:
+    """Generate human-readable summary of period comparison"""
+    parts = []
+
+    # Volume
+    vol_change = changes['log_volume_change_pct']
+    if abs(vol_change) > 20:
+        parts.append(f"Log volume {'increased' if vol_change > 0 else 'decreased'} by {abs(vol_change):.1f}%")
+
+    # Error rate
+    err_mult = changes['error_rate_multiplier']
+    if err_mult > 1.5:
+        parts.append(f"Error rate increased {err_mult:.1f}x")
+    elif err_mult < 0.7 and err_mult > 0:
+        parts.append(f"Error rate decreased to {err_mult:.1f}x")
+
+    # New errors
+    if changes['new_errors']:
+        parts.append(f"New errors: {', '.join(changes['new_errors'][:3])}")
+
+    if not parts:
+        parts.append("Periods are similar")
+
+    return ". ".join(parts)
+
+
+def _in_time_range(entry: Dict, start: str, end: str) -> bool:
+    """Check if entry timestamp is within range"""
+    timestamp_str = entry.get('timestamp')
+    if not timestamp_str:
+        return False
+
+    try:
+        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+        end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+        return start_dt <= timestamp <= end_dt
+    except:
+        return False
+
+
+# Token-efficient output formatters
+
+def _format_as_summary(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert full search results to token-efficient summary format.
+
+    Instead of returning all log entries, groups them by message and
+    provides aggregated statistics with a few examples.
+    """
+    results = result.get('results', [])
+    if not results:
+        return {
+            'total_matches': 0,
+            'unique_messages': 0,
+            'log_levels': {},
+            'top_messages': [],
+            'sample_entries': []
+        }
+
+    # Group by message
+    message_groups = defaultdict(lambda: {
+        'count': 0,
+        'first_seen': None,
+        'last_seen': None,
+        'levels': defaultdict(int),
+        'examples': []
+    })
+
+    level_counts = defaultdict(int)
+    file_counts = defaultdict(int)
+
+    for item in results:
+        entry = item.get('entry', {})
+        message = entry.get('message', '').strip()
+        level = entry.get('level', 'INFO')
+        timestamp = entry.get('timestamp')
+        file_path = entry.get('file', '')
+
+        # Update level counts
+        level_counts[level] += 1
+        file_counts[file_path] += 1
+
+        # Update message group
+        group = message_groups[message]
+        group['count'] += 1
+        group['levels'][level] += 1
+
+        if group['first_seen'] is None or (timestamp and timestamp < group['first_seen']):
+            group['first_seen'] = timestamp
+
+        if group['last_seen'] is None or (timestamp and timestamp > group['last_seen']):
+            group['last_seen'] = timestamp
+
+        # Keep up to 2 examples per message
+        if len(group['examples']) < 2:
+            group['examples'].append({
+                'file': file_path,
+                'line': entry.get('line_number'),
+                'timestamp': timestamp,
+                'level': level
+            })
+
+    # Convert to sorted list (most frequent first)
+    top_messages = []
+    for message, data in sorted(message_groups.items(), key=lambda x: x[1]['count'], reverse=True)[:20]:
+        top_messages.append({
+            'message': message[:200],  # Truncate long messages
+            'count': data['count'],
+            'first_seen': data['first_seen'],
+            'last_seen': data['last_seen'],
+            'levels': dict(data['levels']),
+            'examples': data['examples']
+        })
+
+    # Sample entries (diverse selection)
+    sample_entries = _select_diverse_samples(results, max_samples=5)
+
+    return {
+        'total_matches': len(results),
+        'unique_messages': len(message_groups),
+        'log_levels': dict(level_counts),
+        'by_file': dict(file_counts),
+        'top_messages': top_messages,
+        'sample_entries': sample_entries,
+        'full_results_available': True
+    }
+
+
+def _format_as_count(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert full search results to count-only format (minimal tokens).
+
+    Returns only statistics, no actual log content.
+    """
+    results = result.get('results', [])
+    if not results:
+        return {
+            'total_matches': 0,
+            'by_level': {},
+            'by_file': {},
+            'time_range': None
+        }
+
+    level_counts = defaultdict(int)
+    file_counts = defaultdict(int)
+    timestamps = []
+
+    for item in results:
+        entry = item.get('entry', {})
+        level = entry.get('level', 'INFO')
+        file_path = entry.get('file', '')
+        timestamp = entry.get('timestamp')
+
+        level_counts[level] += 1
+        file_counts[file_path] += 1
+
+        if timestamp:
+            timestamps.append(timestamp)
+
+    # Time range
+    time_range = None
+    if timestamps:
+        timestamps.sort()
+        time_range = {
+            'start': timestamps[0],
+            'end': timestamps[-1]
+        }
+
+    return {
+        'total_matches': len(results),
+        'by_level': dict(level_counts),
+        'by_file': dict(file_counts),
+        'time_range': time_range
+    }
+
+
+def _format_as_compact(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert full search results to compact format.
+
+    Returns only essential fields, removing raw logs and extra context.
+    """
+    results = result.get('results', [])
+    if not results:
+        return {
+            'matches': [],
+            'total': 0
+        }
+
+    compact_matches = []
+    for item in results:
+        entry = item.get('entry', {})
+        compact_matches.append({
+            'time': entry.get('timestamp'),
+            'level': entry.get('level'),
+            'msg': entry.get('message', '')[:150],  # Truncate messages
+            'thread': entry.get('thread_id') or entry.get('correlation_id'),
+            'file': entry.get('file', '').split('/')[-1],  # Just filename
+            'line': entry.get('line_number')
+        })
+
+    return {
+        'matches': compact_matches,
+        'total': len(results)
+    }
+
+
+def _select_diverse_samples(results: List[Dict], max_samples: int = 5) -> List[Dict]:
+    """
+    Select a diverse set of sample entries.
+
+    Tries to include:
+    - First and last entry
+    - Different log levels
+    - Different files
+    - Errors if present
+    """
+    if not results:
+        return []
+
+    if len(results) <= max_samples:
+        return [r.get('entry', {}) for r in results]
+
+    samples = []
+    indices_used = set()
+
+    # Always include first and last
+    samples.append(results[0].get('entry', {}))
+    indices_used.add(0)
+
+    if len(results) > 1:
+        samples.append(results[-1].get('entry', {}))
+        indices_used.add(len(results) - 1)
+
+    # Find first error
+    for i, item in enumerate(results):
+        if i in indices_used:
+            continue
+        entry = item.get('entry', {})
+        if entry.get('level') in ['ERROR', 'FATAL']:
+            samples.append(entry)
+            indices_used.add(i)
+            break
+
+    # Fill remaining slots with evenly spaced entries
+    remaining = max_samples - len(samples)
+    if remaining > 0 and len(results) > len(indices_used):
+        step = len(results) // (remaining + 1)
+        for i in range(1, remaining + 1):
+            idx = min(i * step, len(results) - 1)
+            if idx not in indices_used:
+                samples.append(results[idx].get('entry', {}))
+                indices_used.add(idx)
+
+    return samples[:max_samples]
+
+
+# Investigation Session Management
+
+class InvestigationSession:
+    """
+    Track investigation state and history for multi-step analysis.
+
+    This allows LLMs to:
+    - Track what they've already investigated
+    - Undo/redo operations
+    - Save and resume investigations
+    - Generate reports of their investigation process
+
+    Example:
+        session = InvestigationSession(files=["app.log"])
+
+        # Perform investigation
+        session.search(level="ERROR")
+        session.follow_thread(correlation_id="req-123")
+        session.find_patterns()
+
+        # Review history
+        history = session.get_history()
+
+        # Undo last operation
+        session.undo()
+
+        # Save for later
+        session.save("incident_2024_01_15.json")
+
+        # Resume later
+        session2 = InvestigationSession.load("incident_2024_01_15.json")
+    """
+
+    def __init__(self, files: Optional[List[str]] = None, name: Optional[str] = None):
+        self.files = files or []
+        self.name = name or f"investigation_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.history = []
+        self.current_index = -1
+        self.metadata = {}
+
+        if files:
+            self._add_to_history("init", "Initialize investigation", {"files": files}, None)
+
+    def search(self, query: Optional[str] = None, level: Optional[str] = None,
+               output_format: str = "summary", **kwargs) -> Dict[str, Any]:
+        """Perform search and track in history"""
+        params = {"query": query, "level": level, "output_format": output_format, **kwargs}
+        result = search(self.files, query=query, level=level, output_format=output_format, **kwargs)
+
+        self._add_to_history(
+            "search",
+            f"Search for {level or 'all'} logs" + (f" matching '{query}'" if query else ""),
+            params,
+            result
+        )
+
+        return result
+
+    def follow_thread(self, thread_id: Optional[str] = None,
+                     correlation_id: Optional[str] = None,
+                     trace_id: Optional[str] = None) -> Dict[str, Any]:
+        """Follow thread and track in history"""
+        params = {"thread_id": thread_id, "correlation_id": correlation_id, "trace_id": trace_id}
+        result = follow_thread(self.files, thread_id=thread_id,
+                              correlation_id=correlation_id, trace_id=trace_id)
+
+        thread_desc = thread_id or correlation_id or trace_id
+        self._add_to_history(
+            "follow_thread",
+            f"Follow thread: {thread_desc}",
+            params,
+            result
+        )
+
+        return result
+
+    def find_patterns(self, min_occurrences: int = 3) -> Dict[str, Any]:
+        """Find patterns and track in history"""
+        params = {"min_occurrences": min_occurrences}
+        result = find_patterns(self.files, min_occurrences=min_occurrences)
+
+        self._add_to_history(
+            "find_patterns",
+            f"Find patterns (min {min_occurrences} occurrences)",
+            params,
+            result
+        )
+
+        return result
+
+    def compare_threads(self, **kwargs) -> Dict[str, Any]:
+        """Compare threads and track in history"""
+        result = compare_threads(self.files, **kwargs)
+
+        desc = f"Compare {kwargs.get('correlation_a', 'A')} vs {kwargs.get('correlation_b', 'B')}"
+        self._add_to_history("compare_threads", desc, kwargs, result)
+
+        return result
+
+    def cross_service_timeline(self, service_files: Dict[str, List[str]], **kwargs) -> Dict[str, Any]:
+        """Create cross-service timeline and track in history"""
+        result = cross_service_timeline(service_files, **kwargs)
+
+        desc = f"Cross-service timeline for {list(service_files.keys())}"
+        self._add_to_history("cross_service_timeline", desc, {"service_files": service_files, **kwargs}, result)
+
+        return result
+
+    def add_note(self, note: str):
+        """Add a text note to the investigation"""
+        self._add_to_history("note", f"Note: {note[:50]}...", {"note": note}, None)
+
+    def _add_to_history(self, operation_type: str, description: str,
+                       params: Dict[str, Any], result: Optional[Dict[str, Any]]):
+        """Add operation to history"""
+        # Remove any operations after current index (for undo/redo)
+        self.history = self.history[:self.current_index + 1]
+
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "operation": operation_type,
+            "description": description,
+            "params": params,
+            "result_summary": self._summarize_result(result) if result else None
+        }
+
+        self.history.append(entry)
+        self.current_index = len(self.history) - 1
+
+    def _summarize_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a compact summary of operation result"""
+        if not result:
+            return {}
+
+        summary = {}
+
+        # Common fields
+        if 'total_matches' in result:
+            summary['total_matches'] = result['total_matches']
+        if 'total_entries' in result:
+            summary['total_entries'] = result['total_entries']
+        if 'duration_ms' in result:
+            summary['duration_ms'] = result['duration_ms']
+        if 'summary' in result:
+            summary['summary'] = result['summary']
+
+        # Pattern results
+        if 'patterns' in result:
+            summary['pattern_count'] = len(result['patterns'])
+
+        # Timeline results
+        if 'timeline' in result:
+            summary['timeline_length'] = len(result['timeline'])
+
+        return summary
+
+    def get_history(self, include_results: bool = False) -> List[Dict[str, Any]]:
+        """Get investigation history"""
+        if include_results:
+            return self.history
+        else:
+            # Return without full results (more token-efficient)
+            return [{
+                "timestamp": h["timestamp"],
+                "operation": h["operation"],
+                "description": h["description"],
+                "result_summary": h.get("result_summary")
+            } for h in self.history]
+
+    def undo(self) -> bool:
+        """Undo last operation"""
+        if self.current_index > 0:
+            self.current_index -= 1
+            return True
+        return False
+
+    def redo(self) -> bool:
+        """Redo previously undone operation"""
+        if self.current_index < len(self.history) - 1:
+            self.current_index += 1
+            return True
+        return False
+
+    def get_current_focus(self) -> Optional[Dict[str, Any]]:
+        """Get the current operation being focused on"""
+        if 0 <= self.current_index < len(self.history):
+            return self.history[self.current_index]
+        return None
+
+    def save(self, filepath: str):
+        """Save session to file"""
+        import json
+
+        data = {
+            "name": self.name,
+            "files": self.files,
+            "history": self.history,
+            "current_index": self.current_index,
+            "metadata": self.metadata,
+            "saved_at": datetime.now().isoformat()
+        }
+
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=2)
+
+    @classmethod
+    def load(cls, filepath: str) -> 'InvestigationSession':
+        """Load session from file"""
+        import json
+
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+
+        session = cls(files=data['files'], name=data['name'])
+        session.history = data['history']
+        session.current_index = data['current_index']
+        session.metadata = data.get('metadata', {})
+
+        return session
+
+    def get_summary(self) -> str:
+        """Get a human-readable summary of the investigation"""
+        if not self.history:
+            return "No investigation steps yet"
+
+        lines = [
+            f"Investigation: {self.name}",
+            f"Steps completed: {len(self.history)}",
+            f"",
+            "Timeline:"
+        ]
+
+        for i, entry in enumerate(self.history):
+            marker = "→" if i == self.current_index else " "
+            lines.append(f"  {marker} {i+1}. {entry['description']}")
+            if entry.get('result_summary'):
+                for key, value in entry['result_summary'].items():
+                    lines.append(f"      {key}: {value}")
+
+        return "\n".join(lines)
+
+    def generate_report(self, format: str = "markdown", include_evidence: bool = True) -> str:
+        """
+        Generate a comprehensive investigation report.
+
+        Args:
+            format: Output format - "markdown", "text", or "json"
+            include_evidence: Include example log entries as evidence
+
+        Returns:
+            Formatted investigation report string
+        """
+        if format == "markdown":
+            return self._generate_markdown_report(include_evidence)
+        elif format == "text":
+            return self._generate_text_report(include_evidence)
+        elif format == "json":
+            import json
+            return json.dumps(self._generate_json_report(include_evidence), indent=2)
+        else:
+            return self._generate_markdown_report(include_evidence)
+
+    def _generate_markdown_report(self, include_evidence: bool) -> str:
+        """Generate Markdown format report"""
+        lines = [
+            f"# Investigation Report: {self.name}",
+            f"",
+            f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"**Files Analyzed:** {', '.join(self.files)}",
+            f"**Steps Completed:** {len(self.history)}",
+            f"",
+            f"---",
+            f"",
+            f"## Executive Summary",
+            f"",
+        ]
+
+        # Try to extract key findings
+        error_counts = []
+        patterns_found = []
+        key_insights = []
+
+        for entry in self.history:
+            summary = entry.get('result_summary', {})
+            if 'total_matches' in summary and entry['operation'] == 'search':
+                error_counts.append(f"- Found {summary['total_matches']} matches in {entry['description']}")
+            if 'pattern_count' in summary:
+                patterns_found.append(f"- Identified {summary['pattern_count']} repeated patterns")
+            if 'summary' in summary:
+                key_insights.append(f"- {summary['summary']}")
+
+        if error_counts:
+            lines.extend(error_counts)
+        if patterns_found:
+            lines.extend(patterns_found)
+        if key_insights:
+            lines.append("")
+            lines.append("### Key Findings")
+            lines.extend(key_insights)
+
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## Investigation Timeline",
+            ""
+        ])
+
+        # Add detailed timeline
+        for i, entry in enumerate(self.history):
+            timestamp = entry.get('timestamp', 'Unknown time')
+            desc = entry['description']
+            operation = entry['operation']
+
+            lines.append(f"### Step {i+1}: {desc}")
+            lines.append(f"")
+            lines.append(f"- **Time:** {timestamp}")
+            lines.append(f"- **Operation:** `{operation}`")
+
+            # Add results
+            if entry.get('result_summary'):
+                lines.append(f"- **Results:**")
+                for key, value in entry['result_summary'].items():
+                    lines.append(f"  - {key}: {value}")
+
+            lines.append("")
+
+        lines.extend([
+            "---",
+            "",
+            "## Conclusions",
+            "",
+            "Based on the investigation steps above, review the key findings and error patterns.",
+            "",
+            "## Next Steps",
+            "",
+            "- [ ] Review identified error patterns",
+            "- [ ] Investigate root causes",
+            "- [ ] Implement fixes",
+            "- [ ] Monitor for recurrence",
+            ""
+        ])
+
+        return "\n".join(lines)
+
+    def _generate_text_report(self, include_evidence: bool) -> str:
+        """Generate plain text format report"""
+        lines = [
+            "=" * 70,
+            f"INVESTIGATION REPORT: {self.name}",
+            "=" * 70,
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Files: {', '.join(self.files)}",
+            f"Steps: {len(self.history)}",
+            "=" * 70,
+            "",
+            "TIMELINE:",
+            ""
+        ]
+
+        for i, entry in enumerate(self.history):
+            timestamp = entry.get('timestamp', 'Unknown')
+            lines.append(f"{i+1}. [{timestamp}] {entry['description']}")
+
+            if entry.get('result_summary'):
+                for key, value in entry['result_summary'].items():
+                    lines.append(f"   - {key}: {value}")
+            lines.append("")
+
+        lines.extend([
+            "=" * 70,
+            "END OF REPORT",
+            "=" * 70
+        ])
+
+        return "\n".join(lines)
+
+    def _generate_json_report(self, include_evidence: bool) -> Dict[str, Any]:
+        """Generate JSON format report"""
+        return {
+            "name": self.name,
+            "generated_at": datetime.now().isoformat(),
+            "files": self.files,
+            "steps_completed": len(self.history),
+            "timeline": self.history if include_evidence else self.get_history(include_results=False),
+            "metadata": self.metadata
+        }
+
+
+# Smart Sampling
+
+def smart_sample(
+    files: List[str],
+    level: Optional[str] = None,
+    strategy: str = "representative",
+    sample_size: int = 50
+) -> Dict[str, Any]:
+    """
+    Get a smart sample of log entries that represents the full dataset.
+
+    Instead of random sampling, this uses intelligent strategies to ensure
+    the sample is informative and diverse.
+
+    Args:
+        files: List of log file paths
+        level: Optional log level filter
+        strategy: Sampling strategy:
+            - "representative": Balanced mix of levels, times, and patterns
+            - "diverse": Maximum diversity (different messages, threads, etc.)
+            - "chronological": Evenly spaced across time
+            - "errors_focused": Prioritize errors with context
+        sample_size: Target number of entries (default 50)
+
+    Returns:
+        Dictionary with sampled entries:
+        {
+            "samples": [...],  # Selected log entries
+            "total_population": 15230,
+            "sample_size": 50,
+            "strategy": "representative",
+            "coverage": {
+                "time_coverage": 0.95,  # % of time range covered
+                "level_coverage": {"ERROR": 10, "INFO": 35, "WARN": 5},
+                "thread_coverage": 23  # Number of unique threads
+            }
+        }
+
+    Example:
+        # Get representative sample of 100 entries
+        sample = smart_sample(
+            files=["app.log"],
+            strategy="representative",
+            sample_size=100
+        )
+
+        # Analyze the sample (much faster than full dataset)
+        for entry in sample['samples']:
+            print(entry['message'])
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    # Get all entries
+    results = search(files, level=level, limit=None)
+    all_entries = [r['entry'] for r in results.get('results', [])]
+
+    if not all_entries:
+        return {
+            "samples": [],
+            "total_population": 0,
+            "sample_size": 0,
+            "strategy": strategy,
+            "coverage": {}
+        }
+
+    # Apply sampling strategy
+    if strategy == "representative":
+        samples = _sample_representative(all_entries, sample_size)
+    elif strategy == "diverse":
+        samples = _sample_diverse(all_entries, sample_size)
+    elif strategy == "chronological":
+        samples = _sample_chronological(all_entries, sample_size)
+    elif strategy == "errors_focused":
+        samples = _sample_errors_focused(all_entries, sample_size)
+    else:
+        # Default to representative
+        samples = _sample_representative(all_entries, sample_size)
+
+    # Calculate coverage
+    coverage = _calculate_coverage(all_entries, samples)
+
+    return {
+        "samples": samples,
+        "total_population": len(all_entries),
+        "sample_size": len(samples),
+        "strategy": strategy,
+        "coverage": coverage
+    }
+
+
+def _sample_representative(entries: List[Dict], size: int) -> List[Dict]:
+    """Sample to represent overall distribution"""
+    if len(entries) <= size:
+        return entries
+
+    samples = []
+
+    # Group by level
+    by_level = defaultdict(list)
+    for entry in entries:
+        level = entry.get('level', 'INFO')
+        by_level[level].append(entry)
+
+    # Calculate proportional samples per level
+    for level, level_entries in by_level.items():
+        proportion = len(level_entries) / len(entries)
+        level_sample_size = max(1, int(size * proportion))
+
+        # Sample evenly across time
+        if level_sample_size >= len(level_entries):
+            samples.extend(level_entries)
+        else:
+            step = len(level_entries) / level_sample_size
+            indices = [int(i * step) for i in range(level_sample_size)]
+            samples.extend([level_entries[i] for i in indices])
+
+    # If we have too many, trim to size
+    if len(samples) > size:
+        step = len(samples) / size
+        indices = [int(i * step) for i in range(size)]
+        samples = [samples[i] for i in indices]
+
+    return samples[:size]
+
+
+def _sample_diverse(entries: List[Dict], size: int) -> List[Dict]:
+    """Sample for maximum diversity"""
+    if len(entries) <= size:
+        return entries
+
+    samples = []
+    used_messages = set()
+    used_threads = set()
+
+    # First pass: unique messages
+    for entry in entries:
+        if len(samples) >= size:
+            break
+
+        message = entry.get('message', '')
+        if message and message not in used_messages:
+            samples.append(entry)
+            used_messages.add(message)
+            thread = entry.get('thread_id') or entry.get('correlation_id')
+            if thread:
+                used_threads.add(thread)
+
+    # Second pass: unique threads
+    if len(samples) < size:
+        for entry in entries:
+            if len(samples) >= size:
+                break
+
+            thread = entry.get('thread_id') or entry.get('correlation_id')
+            if thread and thread not in used_threads:
+                samples.append(entry)
+                used_threads.add(thread)
+
+    # Third pass: fill remaining with evenly spaced entries
+    if len(samples) < size:
+        remaining = size - len(samples)
+        step = len(entries) / remaining
+        for i in range(remaining):
+            idx = int(i * step)
+            if idx < len(entries):
+                samples.append(entries[idx])
+
+    return samples[:size]
+
+
+def _sample_chronological(entries: List[Dict], size: int) -> List[Dict]:
+    """Sample evenly across time"""
+    if len(entries) <= size:
+        return entries
+
+    # Sort by timestamp
+    sorted_entries = sorted(
+        entries,
+        key=lambda e: e.get('timestamp', '')
+    )
+
+    # Sample evenly
+    step = len(sorted_entries) / size
+    indices = [int(i * step) for i in range(size)]
+    return [sorted_entries[i] for i in indices]
+
+
+def _sample_errors_focused(entries: List[Dict], size: int) -> List[Dict]:
+    """Sample focusing on errors with context"""
+    if len(entries) <= size:
+        return entries
+
+    samples = []
+    error_indices = []
+    non_error_indices = []
+
+    # Separate errors from non-errors
+    for i, entry in enumerate(entries):
+        level = entry.get('level', 'INFO')
+        if level in ['ERROR', 'FATAL']:
+            error_indices.append(i)
+        else:
+            non_error_indices.append(i)
+
+    # Allocate 70% to errors, 30% to context
+    error_budget = int(size * 0.7)
+    context_budget = size - error_budget
+
+    # Sample errors
+    if error_indices:
+        if len(error_indices) <= error_budget:
+            # All errors + some context
+            for idx in error_indices:
+                samples.append(entries[idx])
+                # Add 1-2 entries before error for context
+                if idx > 0:
+                    samples.append(entries[idx - 1])
+        else:
+            # Sample errors evenly
+            step = len(error_indices) / error_budget
+            for i in range(error_budget):
+                idx = error_indices[int(i * step)]
+                samples.append(entries[idx])
+
+    # Sample non-errors for context
+    if non_error_indices and len(samples) < size:
+        remaining = size - len(samples)
+        step = len(non_error_indices) / remaining
+        for i in range(remaining):
+            idx = non_error_indices[min(int(i * step), len(non_error_indices) - 1)]
+            samples.append(entries[idx])
+
+    # Sort by original order
+    entry_to_index = {id(e): i for i, e in enumerate(entries)}
+    samples.sort(key=lambda e: entry_to_index.get(id(e), 0))
+
+    return samples[:size]
+
+
+def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str, Any]:
+    """Calculate how well the sample covers the population"""
+    # Time coverage
+    pop_times = [e.get('timestamp') for e in population if e.get('timestamp')]
+    sample_times = [e.get('timestamp') for e in sample if e.get('timestamp')]
+
+    time_coverage = 0.0
+    if pop_times and sample_times:
+        pop_times.sort()
+        sample_times.sort()
+        pop_range = pop_times[-1], pop_times[0]
+        sample_range = sample_times[-1], sample_times[0]
+        # Simple coverage: sample span / population span
+        try:
+            pop_start = datetime.fromisoformat(pop_times[0].replace('Z', '+00:00'))
+            pop_end = datetime.fromisoformat(pop_times[-1].replace('Z', '+00:00'))
+            sample_start = datetime.fromisoformat(sample_times[0].replace('Z', '+00:00'))
+            sample_end = datetime.fromisoformat(sample_times[-1].replace('Z', '+00:00'))
+
+            pop_duration = (pop_end - pop_start).total_seconds()
+            sample_duration = (sample_end - sample_start).total_seconds()
+
+            if pop_duration > 0:
+                time_coverage = min(1.0, sample_duration / pop_duration)
+        except:
+            pass
+
+    # Level coverage
+    level_coverage = defaultdict(int)
+    for entry in sample:
+        level = entry.get('level', 'INFO')
+        level_coverage[level] += 1
+
+    # Thread coverage
+    pop_threads = set()
+    sample_threads = set()
+    for entry in population:
+        thread = entry.get('thread_id') or entry.get('correlation_id')
+        if thread:
+            pop_threads.add(thread)
+    for entry in sample:
+        thread = entry.get('thread_id') or entry.get('correlation_id')
+        if thread:
+            sample_threads.add(thread)
+
+    thread_coverage_pct = len(sample_threads) / len(pop_threads) if pop_threads else 0
+
+    return {
+        "time_coverage": time_coverage,
+        "level_distribution": dict(level_coverage),
+        "unique_threads_in_sample": len(sample_threads),
+        "unique_threads_in_population": len(pop_threads),
+        "thread_coverage_pct": thread_coverage_pct
+    }
+
+
+# Automatic Insights and Suggestions
+
+def analyze_with_insights(
+    files: List[str],
+    level: Optional[str] = None,
+    auto_investigate: bool = True
+) -> Dict[str, Any]:
+    """
+    Analyze logs and automatically generate insights and suggestions.
+
+    This is the "smart mode" that does the thinking for you - perfect for
+    LLMs that want quick actionable information.
+
+    Args:
+        files: List of log file paths
+        level: Optional log level filter (default: analyzes all levels)
+        auto_investigate: Automatically perform follow-up investigations
+
+    Returns:
+        Dictionary with insights:
+        {
+            "overview": {...},  # Quick stats
+            "insights": [
+                {
+                    "type": "error_spike",
+                    "severity": "high",
+                    "description": "Error rate 10x higher than normal",
+                    "evidence": [...],
+                    "suggestion": "Check database connections"
+                },
+                ...
+            ],
+            "suggestions": [
+                "Follow thread req-12345 - appears to be failing consistently",
+                "Check database connection pool size",
+                ...
+            ],
+            "next_steps": [...]  # Recommended next investigation steps
+        }
+
+    Example:
+        # One-shot analysis with insights
+        result = analyze_with_insights(files=["app.log"])
+
+        for insight in result['insights']:
+            print(f"[{insight['severity']}] {insight['description']}")
+            print(f"  → {insight['suggestion']}")
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    insights = []
+    suggestions = []
+    next_steps = []
+
+    # Get overview
+    metadata = get_metadata(files)
+    search_results = search(files, level=level, output_format="summary")
+
+    # Insight 1: Error rate analysis
+    total = search_results.get('total_matches', 0)
+    levels = search_results.get('log_levels', {})
+    error_count = levels.get('ERROR', 0) + levels.get('FATAL', 0)
+
+    if total > 0:
+        error_rate = error_count / total
+        if error_rate > 0.1:  # More than 10% errors
+            insights.append({
+                "type": "high_error_rate",
+                "severity": "high",
+                "description": f"High error rate: {error_rate:.1%} ({error_count}/{total})",
+                "evidence": {"error_count": error_count, "total": total, "rate": error_rate},
+                "suggestion": "Investigate most common errors first"
+            })
+            next_steps.append("Run: find_patterns(files, min_occurrences=3)")
+
+    # Insight 2: Pattern detection
+    if auto_investigate and error_count > 0:
+        patterns = find_patterns(files, min_occurrences=2)
+        if patterns.get('patterns'):
+            pattern_count = len(patterns['patterns'])
+            insights.append({
+                "type": "repeated_patterns",
+                "severity": "medium",
+                "description": f"Found {pattern_count} repeated error patterns",
+                "evidence": patterns['patterns'][:3],  # Top 3
+                "suggestion": "These errors are systematic, not random"
+            })
+
+            # Suggest investigating the most frequent pattern
+            if patterns['patterns']:
+                top_pattern = patterns['patterns'][0]
+                suggestions.append(f"Investigate pattern: '{top_pattern.get('pattern', '')[:50]}...'")
+
+    # Insight 3: Check for cascading failures
+    if error_count > 5:
+        # Look for timing patterns
+        top_messages = search_results.get('top_messages', [])
+        if top_messages:
+            # Check if errors happened in quick succession
+            time_clustered = any(
+                msg.get('count', 0) > 3 for msg in top_messages
+            )
+            if time_clustered:
+                insights.append({
+                    "type": "possible_cascade",
+                    "severity": "high",
+                    "description": "Errors may be cascading (multiple errors in short time)",
+                    "evidence": top_messages[:2],
+                    "suggestion": "Look for root cause - later errors may be symptoms"
+                })
+                suggestions.append("Check timestamps - investigate earliest error first")
+
+    # Insight 4: Thread analysis
+    for meta in metadata:
+        unique_threads = meta.get('unique_threads', 0)
+        unique_correlations = meta.get('unique_correlation_ids', 0)
+
+        if error_count > 0 and unique_correlations > 0:
+            # Some threads are failing
+            insights.append({
+                "type": "thread_failures",
+                "severity": "medium",
+                "description": f"Errors across {unique_correlations} different requests",
+                "evidence": {"unique_correlations": unique_correlations},
+                "suggestion": "Compare successful vs failed requests"
+            })
+            next_steps.append("Use: compare_threads() to find differences")
+
+    # Generate suggestions based on insights
+    if not suggestions:
+        if error_count > 0:
+            suggestions.append("Start by examining the first error - it may be the root cause")
+            suggestions.append("Use follow_thread() to see full request flow")
+        else:
+            suggestions.append("No errors found - logs look healthy")
+
+    # Overview
+    overview = {
+        "total_logs": total,
+        "error_count": error_count,
+        "error_rate": error_count / total if total > 0 else 0,
+        "files_analyzed": len(files),
+        "log_levels": levels
+    }
+
+    return {
+        "overview": overview,
+        "insights": insights,
+        "suggestions": suggestions,
+        "next_steps": next_steps,
+        "investigated_automatically": auto_investigate
+    }
+
+
+def explain(
+    entry: Optional[Dict[str, Any]] = None,
+    error_message: Optional[str] = None,
+    context: str = "general"
+) -> str:
+    """
+    Explain a log entry or error message in simple terms.
+
+    Perfect for when you encounter cryptic errors or need to understand
+    what's happening. Provides human-friendly explanations and next steps.
+
+    Args:
+        entry: Log entry dictionary to explain
+        error_message: Or just provide an error message string
+        context: Context for explanation ("production", "development", "general")
+
+    Returns:
+        Human-friendly explanation string
+
+    Example:
+        # Explain a log entry
+        explanation = explain(
+            entry=error_entry,
+            context="production"
+        )
+        print(explanation)
+
+        # Explain just a message
+        explanation = explain(
+            error_message="Connection pool exhausted",
+            context="production"
+        )
+    """
+    if entry:
+        message = entry.get('message', '')
+        level = entry.get('level', 'INFO')
+        error_field = entry.get('error', '')
+    elif error_message:
+        message = error_message
+        level = "ERROR"
+        error_field = ""
+    else:
+        return "No entry or message provided to explain"
+
+    # Build explanation
+    lines = []
+
+    # What happened
+    lines.append("## What This Means\n")
+
+    # Pattern matching for common errors
+    message_lower = message.lower()
+
+    if "timeout" in message_lower or "timed out" in message_lower:
+        lines.append("A timeout means an operation took too long and was cancelled.")
+        lines.append("\n**Common causes:**")
+        lines.append("- Database query is too slow")
+        lines.append("- Network latency issues")
+        lines.append("- Service is overloaded")
+        lines.append("- Deadlock or infinite loop")
+        lines.append("\n**Next steps:**")
+        lines.append("1. Check what operation was timing out")
+        lines.append("2. Look at the service being called - is it slow or down?")
+        lines.append("3. Review timeout configuration - is it too short?")
+
+    elif "connection" in message_lower and ("refused" in message_lower or "failed" in message_lower):
+        lines.append("A connection failure means the application couldn't reach another service.")
+        lines.append("\n**Common causes:**")
+        lines.append("- Service is down or not responding")
+        lines.append("- Network connectivity issues")
+        lines.append("- Firewall blocking the connection")
+        lines.append("- Wrong hostname/port configuration")
+        lines.append("\n**Next steps:**")
+        lines.append("1. Check if the target service is running")
+        lines.append("2. Verify network connectivity")
+        lines.append("3. Check configuration (hostname, port, etc.)")
+
+    elif "pool exhausted" in message_lower or "too many connections" in message_lower:
+        lines.append("The connection pool is exhausted - all available connections are in use.")
+        lines.append("\n**Common causes:**")
+        lines.append("- Traffic spike overwhelming the system")
+        lines.append("- Connection leaks (not closing connections)")
+        lines.append("- Pool size too small for the load")
+        lines.append("- Slow queries holding connections too long")
+        lines.append("\n**Next steps:**")
+        lines.append("1. Check connection pool size configuration")
+        lines.append("2. Look for connection leaks in code")
+        lines.append("3. Identify slow operations holding connections")
+        lines.append("4. Consider increasing pool size if load is legitimate")
+
+    elif "out of memory" in message_lower or "outofmemoryerror" in message_lower:
+        lines.append("The application ran out of available memory.")
+        lines.append("\n**Common causes:**")
+        lines.append("- Memory leak (memory not being freed)")
+        lines.append("- Processing too much data at once")
+        lines.append("- Insufficient memory allocated")
+        lines.append("- Caching too aggressively")
+        lines.append("\n**Next steps:**")
+        lines.append("1. Check memory allocation settings")
+        lines.append("2. Look for memory leaks")
+        lines.append("3. Review data processing - can it be batched/streamed?")
+        lines.append("4. Check garbage collection logs")
+
+    elif "null" in message_lower and ("pointer" in message_lower or "reference" in message_lower):
+        lines.append("Tried to use something that doesn't exist (null/None).")
+        lines.append("\n**Common causes:**")
+        lines.append("- Missing input validation")
+        lines.append("- Unexpected missing data")
+        lines.append("- Race condition")
+        lines.append("- API returned unexpected null")
+        lines.append("\n**Next steps:**")
+        lines.append("1. Check the stack trace to find where it happened")
+        lines.append("2. Add null checks and validation")
+        lines.append("3. Review why the value was null")
+
+    elif "permission" in message_lower or "access denied" in message_lower or "forbidden" in message_lower:
+        lines.append("The application doesn't have permission to perform this action.")
+        lines.append("\n**Common causes:**")
+        lines.append("- Incorrect file/resource permissions")
+        lines.append("- Wrong user/service account")
+        lines.append("- Missing IAM roles or policies")
+        lines.append("- Authentication token expired")
+        lines.append("\n**Next steps:**")
+        lines.append("1. Check file/resource permissions")
+        lines.append("2. Verify the application is running as the correct user")
+        lines.append("3. Review access control policies")
+
+    else:
+        # Generic explanation
+        if level == "ERROR" or level == "FATAL":
+            lines.append(f"This is an error that prevented normal operation.")
+            lines.append(f"\nError message: `{message}`")
+            lines.append("\n**Next steps:**")
+            lines.append("1. Look at the full stack trace if available")
+            lines.append("2. Check what operation was being performed")
+            lines.append("3. Look for similar errors - is this a pattern?")
+            lines.append("4. Check if there were recent changes (deployment, config)")
+        elif level == "WARN":
+            lines.append("This is a warning - not critical but worth investigating.")
+            lines.append(f"\nMessage: `{message}`")
+            lines.append("\n**Next steps:**")
+            lines.append("1. Determine if this warning is expected")
+            lines.append("2. Check if it's happening frequently")
+            lines.append("3. Consider if it could become a problem")
+        else:
+            lines.append(f"This is an informational message.")
+            lines.append(f"\nMessage: `{message}`")
+
+    # Context-specific advice
+    if context == "production":
+        lines.append("\n**Production Context:**")
+        lines.append("- Check monitoring dashboards for patterns")
+        lines.append("- Review recent deployments")
+        lines.append("- Consider impact on users")
+        lines.append("- Prepare rollback plan if needed")
+
+    return "\n".join(lines)
+
+
+def suggest_next_action(current_results: Dict[str, Any], investigation_context: Optional[Dict] = None) -> List[str]:
+    """
+    Suggest what to investigate next based on current results.
+
+    Args:
+        current_results: Results from previous operation (search, pattern finding, etc.)
+        investigation_context: Optional context about what's been investigated so far
+
+    Returns:
+        List of suggested next actions with example code
+    """
+    suggestions = []
+
+    # Based on search results
+    if 'total_matches' in current_results:
+        total = current_results['total_matches']
+        if total == 0:
+            suggestions.append("No matches found. Try:")
+            suggestions.append("  - Broaden search (remove filters)")
+            suggestions.append("  - Check different log files")
+            suggestions.append("  - Verify time range")
+        elif total > 1000:
+            suggestions.append(f"Large result set ({total} matches). Consider:")
+            suggestions.append("  - Use output_format='summary' for token efficiency")
+            suggestions.append("  - Add more filters (level, time range, thread_id)")
+            suggestions.append("  - Use smart_sample() to get representative sample")
+        elif total > 0:
+            # Good result size, suggest next steps
+            if 'top_messages' in current_results:
+                top_msg = current_results['top_messages'][0] if current_results['top_messages'] else None
+                if top_msg and top_msg.get('count', 0) > 3:
+                    suggestions.append("Repeated errors detected. Next:")
+                    suggestions.append(f"  - find_patterns(files, min_occurrences=3)")
+                    suggestions.append("  - Follow one of these threads to see full context")
+
+    # Based on patterns
+    if 'patterns' in current_results:
+        pattern_count = len(current_results.get('patterns', []))
+        if pattern_count > 0:
+            suggestions.append(f"Found {pattern_count} patterns. Next:")
+            suggestions.append("  - Compare successful vs failed requests")
+            suggestions.append("  - Check timestamps - are they clustered?")
+
+    # Default suggestions
+    if not suggestions:
+        suggestions.append("Continue investigation:")
+        suggestions.append("  - analyze_with_insights(files) - Get automatic insights")
+        suggestions.append("  - find_patterns(files) - Find repeated issues")
+        suggestions.append("  - compare_time_periods() - Before/after analysis")
+
+    return suggestions

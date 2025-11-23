@@ -1,0 +1,47 @@
+[package]
+name = "logler-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "logler-server"
+path = "src/main.rs"
+
+[dependencies]
+logler-core = { path = "../logler-core" }
+
+# Async
+tokio.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+
+# Web framework
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Tracing
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-opentelemetry.workspace = true
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp.workspace = true
+
+# File watching
+notify.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Utilities
+uuid.workspace = true
+dashmap.workspace = true
+chrono.workspace = true
