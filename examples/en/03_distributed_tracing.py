@@ -19,9 +19,6 @@ Learning Objectives:
 - Detect degraded mode operations
 """
 
-import sys
-sys.path.insert(0, '/home/user/logler')
-
 import logler.investigate as investigate
 from logler.investigate import Investigator
 

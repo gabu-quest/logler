@@ -21,9 +21,6 @@
 - 根本原因と解決タイムラインを特定
 """
 
-import sys
-sys.path.insert(0, '/home/user/logler')
-
 import logler.investigate as investigate
 from logler.investigate import Investigator
 import json

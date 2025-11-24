@@ -18,9 +18,6 @@ Learning Objectives:
 - Predict time to OOM (Out of Memory)
 """
 
-import sys
-sys.path.insert(0, '/home/user/logler')
-
 import logler.investigate as investigate
 from logler.investigate import Investigator
 from datetime import datetime
