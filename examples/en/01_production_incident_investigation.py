@@ -21,9 +21,6 @@ Learning Objectives:
 - Identify root cause and resolution timeline
 """
 
-import sys
-sys.path.insert(0, '/home/user/logler')
-
 import logler.investigate as investigate
 from logler.investigate import Investigator
 import json

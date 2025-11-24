@@ -55,7 +55,7 @@ Documentation = "https://github.com/yourusername/logler#readme"
 Repository = "https://github.com/yourusername/logler"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["logler*"]
 
 [tool.setuptools.package-data]
@@ -70,5 +70,4 @@ line-length = 100
 target-version = "py39"
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
