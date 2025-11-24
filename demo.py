@@ -5,9 +5,6 @@ Quick 30-Second Demo of Logler's LLM Investigation Features
 This demonstrates what an LLM agent can do with logler in under a minute.
 """
 
-import sys
-sys.path.insert(0, '/home/user/logler')
-
 import logler.investigate as investigate
 
 LOG_FILE = "examples/logs/production_incident.log"

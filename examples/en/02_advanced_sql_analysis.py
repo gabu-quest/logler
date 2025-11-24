@@ -15,9 +15,6 @@ These are the kinds of queries an LLM would write after initial investigation
 to dig deeper into specific issues.
 """
 
-import sys
-sys.path.insert(0, '/home/user/logler')
-
 from logler.investigate import Investigator
 import json
 
