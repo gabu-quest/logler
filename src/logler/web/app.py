@@ -4,9 +4,10 @@ FastAPI web application for Logler.
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import List, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -22,7 +23,21 @@ TEMPLATES_DIR = PACKAGE_DIR / "templates"
 STATIC_DIR = PACKAGE_DIR / "static"
 
 # Create FastAPI app
-app = FastAPI(title="Logler", description="Beautiful log viewer")
+LOG_ROOT = Path(os.environ.get("LOGLER_ROOT", ".")).expanduser().resolve()
+
+
+def _ensure_within_root(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if resolved == LOG_ROOT or LOG_ROOT in resolved.parents:
+        return resolved
+    raise HTTPException(status_code=403, detail="Requested path is outside the configured log root")
+
+
+app = FastAPI(
+    title="Logler",
+    description="Beautiful log viewer",
+    summary="Legacy web UI (Python FastAPI) with log root restrictions",
+)
 
 # Mount static files if directory exists
 if STATIC_DIR.exists():
@@ -57,7 +72,7 @@ async def index(request: Request):
 @app.get("/api/files/browse")
 async def browse_files(directory: str = "."):
     """Browse files in a directory."""
-    dir_path = Path(directory).expanduser().resolve()
+    dir_path = _ensure_within_root(Path(directory))
 
     if not dir_path.exists() or not dir_path.is_dir():
         return {"error": "Invalid directory", "files": []}
@@ -74,9 +89,13 @@ async def browse_files(directory: str = "."):
     except PermissionError:
         return {"error": "Permission denied", "files": []}
 
+    parent_dir = dir_path.parent if dir_path.parent != dir_path else None
+    if parent_dir and not (parent_dir == LOG_ROOT or LOG_ROOT in parent_dir.parents):
+        parent_dir = None
+
     return {
         "current_dir": str(dir_path),
-        "parent_dir": str(dir_path.parent) if dir_path.parent != dir_path else None,
+        "parent_dir": str(parent_dir) if parent_dir else None,
         "files": files,
     }
 
@@ -84,7 +103,7 @@ async def browse_files(directory: str = "."):
 @app.post("/api/files/open")
 async def open_file(request: FileRequest):
     """Open a log file."""
-    file_path = Path(request.path)
+    file_path = _ensure_within_root(Path(request.path))
 
     if not file_path.exists():
         return {"error": "File not found"}
@@ -168,7 +187,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def follow_file(websocket: WebSocket, file_path: str):
     """Follow a log file and send updates via WebSocket."""
-    path = Path(file_path)
+    try:
+        path = _ensure_within_root(Path(file_path))
+    except HTTPException as exc:
+        await websocket.send_json({"error": exc.detail})
+        return
 
     if not path.exists():
         await websocket.send_json({"error": "File not found"})

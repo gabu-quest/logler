@@ -1,8 +1,12 @@
-"""logler - Cool local log viewing tool."""
+"""
+Logler - Beautiful local log viewer with thread tracking and real-time updates.
+"""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
+__author__ = "Logler Contributors"
 
+from .parser import LogParser, LogEntry
+from .tracker import ThreadTracker
 from .log_reader import LogReader
-from .log_parser import LogParser
 
-__all__ = ["LogReader", "LogParser"]
+__all__ = ["LogParser", "LogEntry", "ThreadTracker", "LogReader"]

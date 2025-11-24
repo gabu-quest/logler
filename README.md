@@ -120,6 +120,13 @@ logler serve *.log              # Open multiple files
 logler serve --open             # Auto-open browser
 ```
 
+### Security and path restrictions
+
+- The legacy Python web UI now enforces a **log root** to avoid accidental exposure of arbitrary files. Set `LOGLER_ROOT` to
+  the directory you want to browse (defaults to the current working directory). Requests outside that root are rejected.
+- For production or remote access, place the service behind authentication/reverse proxies; the built-in UI is intended for
+  local or trusted environments only.
+
 **View logs in terminal:**
 ```bash
 logler view app.log                      # View entire file
