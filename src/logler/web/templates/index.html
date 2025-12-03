@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Logler - Beautiful Log Viewer</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%23111a2c'/><text x='50%' y='50%' dy='.35em' text-anchor='middle' font-family='monospace' font-size='28' fill='%23b3c7ff'>L</text></svg>">
+    <link rel="stylesheet" href="/static/css/tailwind.css">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://unpkg.com/htmx-ext-ws@2.0.1/ws.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     <style>
@@ -16,8 +17,11 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: radial-gradient(circle at 20% 20%, rgba(102,126,234,0.08), transparent 25%),
+                        radial-gradient(circle at 80% 0%, rgba(118,75,162,0.08), transparent 20%),
+                        linear-gradient(135deg, #0f141f 0%, #0b101a 100%);
             min-height: 100vh;
+            color: #e5edff;
         }
 
         .log-viewer {
@@ -44,10 +48,10 @@
         .level-CRITICAL, .level-FATAL { color: #F44336; font-weight: bold; }
 
         .glass-card {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            background: rgba(18, 24, 38, 0.65);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
         }
 
         .file-item {
@@ -60,14 +64,16 @@
         }
 
         .thread-badge {
-            display: inline-block;
-            padding: 0.25rem 0.5rem;
-            border-radius: 0.25rem;
-            font-size: 0.75rem;
-            font-weight: 600;
-            background: rgba(103, 126, 234, 0.2);
-            color: #667eea;
-            border: 1px solid rgba(103, 126, 234, 0.3);
+            display: inline-flex;
+            align-items: center;
+            padding: 0.15rem 0.4rem;
+            border-radius: 0.3rem;
+            font-size: 0.7rem;
+            font-weight: 700;
+            background: rgba(99, 123, 255, 0.16);
+            color: #cdd8ff;
+            border: 1px solid rgba(99, 123, 255, 0.35);
+            cursor: pointer;
         }
 
         .stat-card {
@@ -82,21 +88,21 @@
         }
 
         ::-webkit-scrollbar {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
         }
 
         ::-webkit-scrollbar-track {
-            background: #1e1e1e;
+            background: #0f141f;
         }
 
         ::-webkit-scrollbar-thumb {
-            background: #667eea;
-            border-radius: 5px;
+            background: #4452a3;
+            border-radius: 6px;
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: #764ba2;
+            background: #6274d3;
         }
     </style>
 </head>
@@ -122,7 +128,7 @@
 
     <div class="flex h-[calc(100vh-73px)]">
         <!-- Sidebar -->
-        <aside class="w-80 glass-card text-white p-4 overflow-y-auto">
+        <aside class="w-[21rem] glass-card text-white p-4 overflow-y-auto">
             <div class="space-y-6">
                 <!-- Active Files -->
                 <div>
@@ -158,27 +164,6 @@
                     </div>
                 </div>
 
-                <!-- Threads -->
-                <div x-show="threads.length > 0">
-                    <h2 class="text-lg font-semibold mb-3 flex items-center">
-                        <span class="mr-2">🧵</span> Threads
-                    </h2>
-                    <div class="space-y-2">
-                        <template x-for="thread in threads.slice(0, 10)" :key="thread.thread_id">
-                            <div class="p-2 bg-white bg-opacity-10 rounded cursor-pointer hover:bg-opacity-20 transition"
-                                 @click="filterByThread(thread.thread_id)">
-                                <div class="flex justify-between items-center">
-                                    <span class="thread-badge" x-text="thread.thread_id"></span>
-                                    <span class="text-xs text-gray-300" x-text="thread.log_count + ' logs'"></span>
-                                </div>
-                                <div x-show="thread.error_count > 0" class="text-xs text-red-400 mt-1">
-                                    <span x-text="thread.error_count + ' errors'"></span>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-                </div>
-
                 <!-- Filters -->
                 <div>
                     <h2 class="text-lg font-semibold mb-3 flex items-center">
@@ -188,6 +173,11 @@
                         <div>
                             <input type="text" x-model="searchQuery" @keyup.enter="applyFilters()"
                                    placeholder="Search logs..."
+                                   class="w-full px-3 py-2 bg-white bg-opacity-10 border border-white border-opacity-20 rounded focus:outline-none focus:ring-2 focus:ring-purple-400">
+                        </div>
+                        <div>
+                            <input type="text" x-model="correlationFilter" @keyup.enter="applyFilters()"
+                                   placeholder="Filter by correlation ID..."
                                    class="w-full px-3 py-2 bg-white bg-opacity-10 border border-white border-opacity-20 rounded focus:outline-none focus:ring-2 focus:ring-purple-400">
                         </div>
                         <div class="flex flex-wrap gap-2">
@@ -201,6 +191,45 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Threads -->
+                <div x-show="threads.length > 0">
+                    <div class="flex items-center justify-between mb-2">
+                        <h2 class="text-lg font-semibold flex items-center">
+                            <span class="mr-2">🧵</span> Threads
+                        </h2>
+                        <button class="text-xs px-2 py-1 bg-white bg-opacity-10 rounded hover:bg-opacity-20"
+                                @click="clearThreadSelection()" x-show="selectedThreads.length > 0">
+                            Clear selection
+                        </button>
+                    </div>
+                    <div class="space-y-3">
+                        <div x-show="selectedThreads.length > 0" class="flex flex-wrap gap-2">
+                            <template x-for="threadId in selectedThreads" :key="'chip-' + threadId">
+                                <span class="thread-badge bg-white bg-opacity-15 border-white/30 rounded-full px-2 py-1 text-xs flex items-center gap-2 max-w-full">
+                                    <span class="truncate max-w-[9rem]" :title="threadId" x-text="threadId"></span>
+                                    <button @click.stop="removeThread(threadId)" class="hover:text-red-300 focus:outline-none">✕</button>
+                                </span>
+                            </template>
+                        </div>
+                        <input type="text" x-model="threadSearch" @input="updateVisibleThreads()" placeholder="Search thread..."
+                               class="w-full px-3 py-2 bg-white bg-opacity-10 border border-white border-opacity-20 rounded focus:outline-none focus:ring-2 focus:ring-purple-400">
+                        <div id="thread-list" class="max-h-64 overflow-y-auto pr-1" @scroll.passive="updateVisibleThreads()">
+                            <div :style="`height:${threadTopSpacer}px`"></div>
+                            <template x-for="thread in visibleThreadsCache" :key="thread.thread_id">
+                                <label class="flex items-center gap-2 p-2 bg-white bg-opacity-5 rounded cursor-pointer hover:bg-opacity-20 transition">
+                                    <input type="checkbox" :value="thread.thread_id" x-model="selectedThreads" @change="applyFilters()" class="accent-indigo-400">
+                                    <div class="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                        <span class="thread-badge truncate" x-text="thread.thread_id" :title="thread.thread_id"></span>
+                                        <span class="text-[11px] text-gray-300 whitespace-nowrap" x-text="thread.log_count + ' logs'"></span>
+                                        <span x-show="thread.error_count > 0" class="text-[11px] text-red-300 whitespace-nowrap" x-text="thread.error_count + ' err'"></span>
+                                    </div>
+                                </label>
+                            </template>
+                            <div :style="`height:${threadBottomSpacer}px`"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </aside>
 
@@ -209,9 +238,19 @@
             <!-- Toolbar -->
             <div class="glass-card text-white p-3 flex items-center justify-between">
                 <div class="flex items-center space-x-4">
-                    <span class="text-sm">
-                        Showing <span x-text="filteredEntries.length"></span> entries
-                    </span>
+                    <div class="text-sm space-y-1">
+                        <div class="flex items-center gap-2 text-sm">
+                            <span>Showing <span x-text="visibleEntries.length"></span></span>
+                            <span x-show="totalAvailable > 0" class="text-xs text-gray-400">(of <span x-text="totalAvailable"></span> total)</span>
+                            <span x-show="filteredEntries.length > MAX_ENTRIES" class="text-xs text-gray-400">(latest window)</span>
+                        </div>
+                        <div class="text-xs text-gray-300" x-show="interleaved">
+                            Interleaved: <span x-text="currentFiles.join(', ')"></span>
+                        </div>
+                        <div class="text-xs text-gray-300" x-show="!interleaved && currentFile">
+                            File: <span x-text="currentFile"></span>
+                        </div>
+                    </div>
                 </div>
                 <div class="flex items-center space-x-2">
                     <button @click="autoScroll = !autoScroll"
@@ -219,11 +258,11 @@
                             class="px-3 py-1 rounded text-sm hover:opacity-80 transition">
                         <span x-text="autoScroll ? '📌 Auto-scroll ON' : '📌 Auto-scroll OFF'"></span>
                     </button>
-                    <button @click="followFile()" x-show="currentFile"
-                            class="px-3 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-sm transition">
-                        🔄 Follow
-                    </button>
-                </div>
+                <button @click="toggleFollow()" x-show="currentFile && !interleaved"
+                        class="px-3 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-sm transition">
+                    <span x-text="isFollowing ? '⏹ Stop Following' : '🔄 Follow'"></span>
+                </button>
+            </div>
             </div>
 
             <!-- Log Viewer -->
@@ -236,29 +275,32 @@
                     </div>
                 </div>
 
-                <div x-show="currentFile && filteredEntries.length === 0" class="flex items-center justify-center h-full">
+                <div x-show="currentFile && visibleEntries.length === 0" class="flex items-center justify-center h-full">
                     <div class="text-center text-gray-500">
                         <div class="text-4xl mb-4">🔍</div>
                         <div class="text-lg">No logs match the current filter</div>
                     </div>
                 </div>
 
-                <template x-for="entry in filteredEntries" :key="entry.line_number">
+                <div :style="`height:${logTopSpacer}px`"></div>
+                <template x-for="entry in visibleEntries" :key="entry.entry_id || entryKey(entry)">
                     <div class="log-line" :class="'level-' + entry.level">
                         <div class="flex items-start space-x-3">
                             <span class="text-gray-600 text-xs font-mono w-12 text-right flex-shrink-0" x-text="entry.line_number"></span>
-                            <span class="text-gray-500 text-xs flex-shrink-0 w-32" x-text="formatTimestamp(entry.timestamp)"></span>
+                            <span class="text-gray-400 text-xs flex-shrink-0 w-36" x-text="formatTimestamp(entry.timestamp)"></span>
                             <span class="text-xs font-bold flex-shrink-0 w-16" :class="'level-' + entry.level" x-text="entry.level"></span>
                             <div class="flex-1 min-w-0">
                                 <div class="break-words" x-text="entry.message"></div>
-                                <div x-show="entry.thread_id || entry.correlation_id" class="mt-1 flex items-center space-x-2 text-xs text-gray-500">
-                                    <span x-show="entry.thread_id" class="thread-badge" x-text="'🧵 ' + entry.thread_id"></span>
+                                <div x-show="entry.thread_id || entry.correlation_id || entry.service_name" class="mt-1 flex items-center space-x-2 text-xs text-gray-500">
+                                    <span x-show="entry.thread_id" class="thread-badge" @click.stop="toggleThreadFromEntry(entry.thread_id)" x-text="'🧵 ' + entry.thread_id"></span>
                                     <span x-show="entry.correlation_id" class="text-blue-400" x-text="'🔗 ' + entry.correlation_id"></span>
+                                    <span x-show="entry.service_name" class="text-green-300" x-text="'🛠 ' + entry.service_name"></span>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </template>
+                <div :style="`height:${logBottomSpacer}px`"></div>
             </div>
         </main>
     </div>
@@ -282,50 +324,225 @@
                     <span class="text-yellow-400">📁 ..</span>
                 </div>
 
-                <template x-for="file in files" :key="file.path">
-                    <div @click="openFile(file.path); showFilePicker = false"
+                <template x-for="dir in directories" :key="dir.path">
+                    <div @click="browseDirectory(dir.path)"
                          class="file-item p-3 rounded cursor-pointer bg-white bg-opacity-5">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-2">
-                                <span>📄</span>
-                                <span class="font-mono text-sm" x-text="file.name"></span>
-                            </div>
+                        <div class="flex items-center space-x-2">
+                            <span>📁</span>
+                            <span class="font-mono text-sm" x-text="dir.name"></span>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-for="file in files" :key="file.path">
+                    <div class="file-item p-3 rounded bg-white bg-opacity-5 flex items-center justify-between">
+                        <div class="flex items-center space-x-2 cursor-pointer" @click="openFile(file.path); showFilePicker = false">
+                            <span>📄</span>
+                            <span class="font-mono text-sm" x-text="file.name"></span>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <input type="checkbox" :value="file.path" x-model="selectedPaths">
                             <span class="text-xs text-gray-400" x-text="formatSize(file.size)"></span>
                         </div>
                     </div>
                 </template>
 
-                <div x-show="files.length === 0" class="text-center text-gray-400 py-8">
+                <div x-show="files.length === 0 && directories.length === 0" class="text-center text-gray-400 py-8">
                     No log files found in this directory
                 </div>
             </div>
 
-            <button @click="showFilePicker = false"
-                    class="w-full py-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded transition">
-                Close
-            </button>
+            <div class="space-y-2">
+                <button @click="openSelected()"
+                        class="w-full py-2 bg-green-500 hover:bg-green-600 rounded transition disabled:opacity-50"
+                        :disabled="selectedPaths.length === 0">
+                    Open Selected (interleave)
+                </button>
+                <button @click="showFilePicker = false"
+                        class="w-full py-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded transition">
+                    Close
+                </button>
+            </div>
         </div>
     </div>
 
     <script>
         function logViewer() {
             return {
+                MAX_ENTRIES: 10000,
+                LOG_ROW_HEIGHT: 56,
+                LOG_OVERSCAN: 20,
+                THREAD_ROW_HEIGHT: 40,
+                THREAD_OVERSCAN: 12,
                 showFilePicker: false,
                 currentDir: '.',
                 parentDir: null,
                 files: [],
+                directories: [],
                 activeFiles: [],
+                selectedPaths: [],
                 currentFile: null,
+                currentFiles: [],
+                interleaved: false,
                 entries: [],
                 filteredEntries: [],
+                visibleEntries: [],
+                logTopSpacer: 0,
+                logBottomSpacer: 0,
+                logViewportHeight: 600,
+                logScrollScheduled: false,
                 threads: [],
+                threadSearch: '',
+                selectedThreads: [],
+                visibleThreadsCache: [],
+                threadTopSpacer: 0,
+                threadBottomSpacer: 0,
+                threadViewportHeight: 256,
                 searchQuery: '',
+                correlationFilter: '',
                 selectedLevels: [],
+                totalAvailable: 0,
                 autoScroll: false,
+                ignoreScrollEvents: false,
                 websocketConnected: false,
+                isFollowing: false,
+                followSocket: null,
                 stats: {
                     total: 0,
                     errors: 0,
+                },
+
+                entryKey(entry) {
+                    const file = entry.file || this.currentFile || '';
+                    const ts = entry.timestamp || '';
+                    return `${file}:${entry.line_number || 0}:${ts}`;
+                },
+
+                currentFilterPayload() {
+                    return {
+                        query: this.searchQuery || null,
+                        correlation: this.correlationFilter || null,
+                        levels: this.selectedLevels || [],
+                        threads: this.selectedThreads || [],
+                    };
+                },
+
+                refreshLayout() {
+                    this.measureViewports();
+                    this.updateVisibleEntries(true);
+                    this.updateVisibleThreads();
+                },
+
+                measureViewports() {
+                    const logEl = document.getElementById('log-container');
+                    const threadEl = document.getElementById('thread-list');
+                    if (logEl) this.logViewportHeight = logEl.clientHeight || this.logViewportHeight;
+                    if (threadEl) this.threadViewportHeight = threadEl.clientHeight || this.threadViewportHeight;
+                },
+
+                updateVisibleEntries(forceStick = false) {
+                    const container = document.getElementById('log-container');
+                    if (!container) return;
+
+                    const total = this.filteredEntries.length;
+                    if (total === 0) {
+                        this.visibleEntries = [];
+                        this.logTopSpacer = 0;
+                        this.logBottomSpacer = 0;
+                        return;
+                    }
+
+                    const viewport = this.logViewportHeight || container.clientHeight || 1;
+                    const windowSize = Math.ceil(viewport / this.LOG_ROW_HEIGHT) + this.LOG_OVERSCAN * 2;
+
+                    if (forceStick && this.autoScroll) {
+                        const end = total;
+                        const start = Math.max(0, end - windowSize);
+                        this.logTopSpacer = start * this.LOG_ROW_HEIGHT;
+                        const rendered = end - start;
+                        this.visibleEntries = this.filteredEntries.slice(start, end);
+                        this.logBottomSpacer = Math.max(
+                            0,
+                            total * this.LOG_ROW_HEIGHT - this.logTopSpacer - rendered * this.LOG_ROW_HEIGHT
+                        );
+                        this.ignoreScrollEvents = true;
+                        container.scrollTop = container.scrollHeight;
+                        requestAnimationFrame(() => {
+                            const refreshed = document.getElementById('log-container');
+                            if (refreshed) {
+                                refreshed.scrollTop = refreshed.scrollHeight;
+                            }
+                            this.ignoreScrollEvents = false;
+                        });
+                        return;
+                    }
+
+                    let scrollTop = container.scrollTop;
+                    const start = Math.max(0, Math.floor(scrollTop / this.LOG_ROW_HEIGHT) - this.LOG_OVERSCAN);
+                    const end = Math.min(total, start + windowSize);
+
+                    this.logTopSpacer = start * this.LOG_ROW_HEIGHT;
+                    const rendered = end - start;
+                    this.visibleEntries = this.filteredEntries.slice(start, end);
+                    this.logBottomSpacer = Math.max(
+                        0,
+                        total * this.LOG_ROW_HEIGHT - this.logTopSpacer - rendered * this.LOG_ROW_HEIGHT
+                    );
+                },
+
+                updateVisibleThreads() {
+                    const pool = this.filteredThreadPool();
+                    const container = document.getElementById('thread-list');
+                    const viewport = this.threadViewportHeight || (container ? container.clientHeight : 1);
+                    const scrollTop = container ? container.scrollTop : 0;
+
+                    if (pool.length === 0) {
+                        this.visibleThreadsCache = [];
+                        this.threadTopSpacer = 0;
+                        this.threadBottomSpacer = 0;
+                        return;
+                    }
+
+                    const start = Math.max(0, Math.floor(scrollTop / this.THREAD_ROW_HEIGHT) - this.THREAD_OVERSCAN);
+                    const windowSize = Math.ceil(viewport / this.THREAD_ROW_HEIGHT) + this.THREAD_OVERSCAN * 2;
+                    const end = Math.min(pool.length, start + windowSize);
+
+                    this.threadTopSpacer = start * this.THREAD_ROW_HEIGHT;
+                    const rendered = end - start;
+                    this.visibleThreadsCache = pool.slice(start, end);
+                    this.threadBottomSpacer = Math.max(
+                        0,
+                        pool.length * this.THREAD_ROW_HEIGHT - this.threadTopSpacer - rendered * this.THREAD_ROW_HEIGHT
+                    );
+                },
+
+                async openSelected() {
+                    if (this.selectedPaths.length === 0) return;
+                    if (this.isFollowing && this.followSocket) {
+                        this.followSocket.close();
+                    }
+                    const response = await fetch('/api/files/open_many', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({paths: this.selectedPaths, filters: this.currentFilterPayload(), limit: this.MAX_ENTRIES})
+                    });
+                    const data = await response.json();
+                    this.currentFile = null;
+                    this.currentFiles = data.files || [];
+                    this.interleaved = true;
+                    this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
+                    this.totalAvailable = data.total || this.entries.length;
+                    this.showFilePicker = false;
+                    this.selectedThreads = [];
+                    this.threadSearch = '';
+                    await this.applyFilters();
+                    await this.loadThreads();
+                    this.updateStats();
+                    this.isFollowing = false;
+                    this.websocketConnected = false;
+                    if (this.autoScroll) {
+                        this.$nextTick(() => this.scrollToBottom());
+                    }
                 },
 
                 init() {
@@ -336,6 +553,10 @@
                         this.openFile(this.activeFiles[0]);
                     }
                     {% endif %}
+                    this.$nextTick(() => {
+                        this.refreshLayout();
+                        window.addEventListener('resize', () => this.refreshLayout());
+                    });
                 },
 
                 async browseDirectory(dir) {
@@ -344,13 +565,18 @@
                     this.currentDir = data.current_dir || dir;
                     this.parentDir = data.parent_dir;
                     this.files = data.files || [];
+                    this.directories = data.directories || [];
                 },
 
                 async openFile(path) {
+                    if (this.isFollowing && this.followSocket) {
+                        this.followSocket.close();
+                    }
+
                     const response = await fetch('/api/files/open', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({path})
+                        body: JSON.stringify({path, filters: this.currentFilterPayload(), limit: this.MAX_ENTRIES})
                     });
                     const data = await response.json();
 
@@ -360,11 +586,16 @@
                     }
 
                     this.currentFile = data.file_path;
+                    this.currentFiles = [data.file_path];
+                    this.interleaved = false;
                     if (!this.activeFiles.includes(this.currentFile)) {
                         this.activeFiles.push(this.currentFile);
                     }
-                    this.entries = data.entries;
-                    this.applyFilters();
+                    this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
+                    this.totalAvailable = data.total || this.entries.length;
+                    this.selectedThreads = [];
+                    this.threadSearch = '';
+                    await this.applyFilters();
                     await this.loadThreads();
                     this.updateStats();
 
@@ -376,22 +607,66 @@
                 async loadThreads() {
                     const response = await fetch('/api/threads');
                     this.threads = await response.json();
+                    this.$nextTick(() => this.updateVisibleThreads());
                 },
 
-                applyFilters() {
+                async applyFilters() {
+                    // Try server-side filtering to avoid shipping unused rows
+                    if (this.currentFiles.length > 0 && !this.isFollowing) {
+                        const payload = {
+                            paths: this.currentFiles,
+                            filters: this.currentFilterPayload(),
+                            limit: this.MAX_ENTRIES,
+                        };
+                        try {
+                            const resp = await fetch('/api/files/filter', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify(payload),
+                            });
+                            if (resp.ok) {
+                                const data = await resp.json();
+                                this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
+                                this.totalAvailable = data.total || this.entries.length;
+                                this.filteredEntries = this.entries;
+                                this.$nextTick(() => {
+                                    this.updateVisibleEntries(this.autoScroll);
+                                    this.updateStats();
+                                });
+                                return;
+                            }
+                        } catch (e) {
+                            console.warn('Server filter failed, falling back to client filter', e);
+                        }
+                    }
+
+                    // Client-side fallback
                     let filtered = this.entries;
 
                     if (this.searchQuery) {
                         const query = this.searchQuery.toLowerCase();
-                        filtered = filtered.filter(e => e.message.toLowerCase().includes(query));
+                        filtered = filtered.filter(e => (e.message || '').toLowerCase().includes(query));
+                    }
+
+                    if (this.correlationFilter) {
+                        const cq = this.correlationFilter.toLowerCase();
+                        filtered = filtered.filter(e => (e.correlation_id || '').toLowerCase().includes(cq));
                     }
 
                     if (this.selectedLevels.length > 0) {
                         filtered = filtered.filter(e => this.selectedLevels.includes(e.level));
                     }
 
+                    if (this.selectedThreads.length > 0) {
+                        const set = new Set(this.selectedThreads);
+                        filtered = filtered.filter(e => set.has(e.thread_id));
+                    }
+
                     this.filteredEntries = filtered;
-                    this.updateStats();
+                    this.$nextTick(() => {
+                        this.updateVisibleEntries(this.autoScroll);
+                        this.updateStats();
+                    });
                 },
 
                 updateStats() {
@@ -401,31 +676,79 @@
                     ).length;
                 },
 
-                filterByThread(threadId) {
-                    this.filteredEntries = this.entries.filter(e => e.thread_id === threadId);
-                    this.updateStats();
+                toggleThread(threadId) {
+                    const idx = this.selectedThreads.indexOf(threadId);
+                    if (idx >= 0) {
+                        this.selectedThreads.splice(idx, 1);
+                    } else {
+                        this.selectedThreads.push(threadId);
+                    }
+                    this.applyFilters();
+                },
+
+                removeThread(threadId) {
+                    const idx = this.selectedThreads.indexOf(threadId);
+                    if (idx >= 0) {
+                        this.selectedThreads.splice(idx, 1);
+                        this.applyFilters();
+                    }
+                },
+
+                toggleThreadFromEntry(threadId) {
+                    if (!threadId) return;
+                    if (!this.selectedThreads.includes(threadId)) {
+                        this.selectedThreads.push(threadId);
+                    }
+                    this.applyFilters();
+                },
+
+                clearThreadSelection() {
+                    this.selectedThreads = [];
+                    this.applyFilters();
+                },
+
+                filteredThreadPool() {
+                    const query = this.threadSearch.toLowerCase().trim();
+                    if (!query) return this.threads;
+                    return this.threads.filter(t => (t.thread_id || '').toLowerCase().includes(query));
                 },
 
                 selectFile(file) {
                     this.openFile(file);
                 },
 
-                followFile() {
-                    if (!this.currentFile) return;
+                toggleFollow() {
+                    if (this.isFollowing) {
+                        if (this.followSocket) {
+                            this.followSocket.close();
+                        }
+                        this.isFollowing = false;
+                        this.websocketConnected = false;
+                        return;
+                    }
 
-                    const ws = new WebSocket(`ws://${location.host}/ws`);
-                    ws.onopen = () => {
+                    if (!this.currentFile || this.interleaved) return;
+
+                    this.followSocket = new WebSocket(`ws://${location.host}/ws`);
+                    this.followSocket.onopen = () => {
                         this.websocketConnected = true;
-                        ws.send(JSON.stringify({
+                        this.isFollowing = true;
+                        this.autoScroll = true;
+                        this.followSocket.send(JSON.stringify({
                             action: 'follow',
-                            file_path: this.currentFile
+                            file_path: this.currentFile,
+                            filters: this.currentFilterPayload(),
                         }));
                     };
 
-                    ws.onmessage = (event) => {
+                    this.followSocket.onmessage = (event) => {
                         const data = JSON.parse(event.data);
                         if (data.type === 'log_entry') {
                             this.entries.push(data.entry);
+                            if (this.entries.length > this.MAX_ENTRIES) {
+                                this.entries = this.entries.slice(-this.MAX_ENTRIES);
+                            }
+                            this.totalAvailable += 1;
                             this.applyFilters();
                             if (this.autoScroll) {
                                 this.$nextTick(() => this.scrollToBottom());
@@ -433,8 +756,9 @@
                         }
                     };
 
-                    ws.onclose = () => {
+                    this.followSocket.onclose = () => {
                         this.websocketConnected = false;
+                        this.isFollowing = false;
                     };
                 },
 
@@ -451,13 +775,33 @@
 
                 scrollToBottom() {
                     const container = document.getElementById('log-container');
+                    if (!container) return;
+                    this.ignoreScrollEvents = true;
                     container.scrollTop = container.scrollHeight;
+                    requestAnimationFrame(() => {
+                        this.ignoreScrollEvents = false;
+                        this.updateVisibleEntries(true);
+                    });
                 },
 
                 handleScroll() {
-                    const container = document.getElementById('log-container');
-                    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
-                    this.autoScroll = isAtBottom;
+                    if (this.ignoreScrollEvents) return;
+                    if (this.logScrollScheduled) return;
+                    this.logScrollScheduled = true;
+                    requestAnimationFrame(() => {
+                        const container = document.getElementById('log-container');
+                        if (container) {
+                            const distanceFromBottom = container.scrollHeight - (container.scrollTop + container.clientHeight);
+                            const isAtBottom = distanceFromBottom <= 120;
+                            if (!isAtBottom) {
+                                this.autoScroll = false;
+                            } else {
+                                this.autoScroll = true;
+                            }
+                            this.updateVisibleEntries(this.autoScroll);
+                        }
+                        this.logScrollScheduled = false;
+                    });
                 }
             };
         }
