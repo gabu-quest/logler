@@ -64,11 +64,11 @@ else:
     print("Investigation complete!")
 
 print("\n" + "=" * 70)
-print("What analyze_with_insights() detected automatically:")
-print("1. High error rate (>10% threshold)")
-print("2. Repeated error patterns (systematic vs random)")
-print("3. Possible cascading failures (timing clusters)")
-print("4. Thread/correlation failures across requests")
-print("")
-print("All with actionable suggestions and severity ratings!")
+print("Summary of detected insights:")
+if result['insights']:
+    for i, insight in enumerate(result['insights'], 1):
+        print(f"{i}. {insight['type']} (severity: {insight['severity']})")
+else:
+    print("No notable insights detected.")
+print("\nAll with actionable suggestions when present.")
 print("=" * 70)

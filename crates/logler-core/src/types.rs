@@ -16,6 +16,7 @@ pub struct LogEntry {
     pub correlation_id: Option<String>,
     pub trace_id: Option<String>,
     pub span_id: Option<String>,
+    pub service_name: Option<String>,
     pub fields: HashMap<String, serde_json::Value>,
 }
 

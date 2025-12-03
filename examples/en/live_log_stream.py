@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 LOG_PATH = Path("examples/logs/live_follow_demo.log")
+MAX_LOGS = 2500
 
 
 def make_line(i: int) -> dict:
@@ -58,13 +59,16 @@ def main():
         signal.signal(signal.SIGINT, stop)
         signal.signal(signal.SIGTERM, stop)
 
-        i = 0
-        while True:
-            line = make_line(i)
-            f.write(json.dumps(line) + "\n")
+        for i in range(MAX_LOGS):
+            f.write(json.dumps(make_line(i)) + "\n")
             f.flush()
             time.sleep(0.15)
-            i += 1
+
+        final_line = make_line(MAX_LOGS)
+        final_line["message"] = "final log"
+        f.write(json.dumps(final_line) + "\n")
+        f.flush()
+        print("done!")
 
 
 if __name__ == "__main__":

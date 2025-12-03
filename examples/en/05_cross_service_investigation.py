@@ -2,108 +2,72 @@
 """
 Example: Cross-Service Investigation
 
-Demonstrates how to investigate issues across multiple microservices
-using unified timelines and correlation tracking.
+One-file demo that treats the microservices trace as if each service wrote to
+its own log. The unified timeline shows where the request stumbled and how
+long each hop took.
 """
 
 import logler.investigate as investigate
+
+LOG_FILE = "examples/logs/microservices_trace.log"
+TRACE_ID = "trace-001"
+CORRELATION_ID = "req-abc123"
 
 print("=" * 70)
 print("Cross-Service Investigation Demo")
 print("=" * 70)
 
-# For this demo, we'll use a single log with service field
-# In production, you'd have separate log files per service
-log_file = "examples/logs/microservices_trace.log"
+meta = investigate.get_metadata([LOG_FILE])[0]
+print(f"Lines: {meta['lines']} | Window: {meta['time_range']['start']} → {meta['time_range']['end']}")
 
-print("\n📊 Step 1: Get overview of all services")
-print("-" * 70)
-metadata = investigate.get_metadata([log_file])
-for meta in metadata:
-    print(f"File: {meta['path']}")
-    print(f"  Lines: {meta['lines']}")
-    print(f"  Time range: {meta['time_range']['start']} → {meta['time_range']['end']}")
-    print(f"  Log levels: {meta['log_levels']}")
-    print(f"  Services: {meta.get('unique_threads', 'N/A')}")
-
-print("\n🔍 Step 2: Create unified timeline across all services")
-print("-" * 70)
 timeline = investigate.cross_service_timeline(
-    files={
-        "microservices": [log_file]
-    },
-    trace_id="trace-001"
+    files={"stack": [LOG_FILE]},
+    correlation_id=CORRELATION_ID,
+    trace_id=TRACE_ID,
 )
 
-print(f"Total entries: {timeline['total_entries']}")
-print(f"Duration: {timeline['duration_ms']}ms")
-print(f"Services involved: {timeline['services']}")
+events = timeline["timeline"]
+if not events:
+    raise SystemExit("No timeline events available.")
 
-print("\n📋 Step 3: View request flow across services")
+print(f"\nTotal entries: {timeline['total_entries']}  Duration: {timeline['duration_ms']} ms")
+
+print("\n🧭 Flow (first 15 events)")
 print("-" * 70)
-print(f"{'Service':<20} {'Time':>6} {'Level':<6} {'Message':<50}")
-print("-" * 100)
+print(f"{'service':<18} {'t+ms':>6} {'lvl':<6} message")
+for evt in events[:15]:
+    svc = evt["service"]
+    rel = evt["relative_time_ms"]
+    entry = evt["entry"]
+    lvl = entry.get("level", "INFO")
+    msg = (entry.get("message") or "")[:60]
+    marker = { "ERROR": "❌", "FATAL": "💀", "WARN": "⚠️" }.get(lvl, "·")
+    print(f"{svc:<18} {rel:>6} {lvl:<6} {marker} {msg}")
 
-for entry in timeline['timeline'][:15]:
-    service_name = entry['entry'].get('service', 'unknown')
-    rel_time = entry['relative_time_ms']
-    level = entry['entry'].get('level', 'INFO')
-    message = entry['entry'].get('message', '')
-
-    print(f"{service_name:<20} +{rel_time:4d}ms {level:<6} {message[:50]}")
-
-print("\n⚠️ Step 4: Find where things went wrong")
+print("\n🚨 Hotspots")
 print("-" * 70)
-# Search for errors in the timeline
-errors = [e for e in timeline['timeline'] if e['entry'].get('level') in ['ERROR', 'FATAL', 'WARN']]
+hot = [e for e in events if e["entry"].get("level") in ("ERROR", "FATAL", "WARN")]
+for evt in hot:
+    svc = evt["service"]
+    rel = evt["relative_time_ms"]
+    lvl = evt["entry"].get("level")
+    print(f"  [{lvl:5s}] +{rel:4d}ms {svc}: {evt['entry'].get('message')}")
 
-if errors:
-    print(f"Found {len(errors)} warnings/errors:")
-    for err in errors[:5]:
-        service_name = err['entry'].get('service', 'unknown')
-        rel_time = err['relative_time_ms']
-        level = err['entry'].get('level')
-        message = err['entry'].get('message', '')
-        print(f"  [{level:5s}] +{rel_time:4d}ms [{service_name}]: {message}")
-
-print("\n🔎 Step 5: Analyze service-by-service breakdown")
+print("\n📊 Service rollup")
 print("-" * 70)
-# Group by service
-service_entries = {}
-for entry in timeline['timeline']:
-    service_name = entry['entry'].get('service', 'unknown')
-    if service_name not in service_entries:
-        service_entries[service_name] = []
-    service_entries[service_name].append(entry)
+by_service = {}
+for evt in events:
+    svc = evt["service"]
+    by_service.setdefault(svc, []).append(evt)
 
-for service_name, entries in service_entries.items():
-    error_count = sum(1 for e in entries if e['entry'].get('level') in ['ERROR', 'FATAL'])
-    warn_count = sum(1 for e in entries if e['entry'].get('level') == 'WARN')
+for svc, svc_events in by_service.items():
+    errors = sum(1 for e in svc_events if e["entry"].get("level") in ("ERROR", "FATAL"))
+    warns = sum(1 for e in svc_events if e["entry"].get("level") == "WARN")
+    span = (svc_events[-1]["relative_time_ms"] - svc_events[0]["relative_time_ms"]) if len(svc_events) > 1 else 0
+    badge = "🔴" if errors else "🟡" if warns else "🟢"
+    print(f"{badge} {svc:<18} {len(svc_events):2d} events | errors={errors}, warn={warns}, span={span}ms")
 
-    # Calculate service time (first to last log)
-    if len(entries) > 1:
-        service_duration = entries[-1]['relative_time_ms'] - entries[0]['relative_time_ms']
-    else:
-        service_duration = 0
-
-    print(f"\n{service_name}:")
-    print(f"  Entries: {len(entries)}")
-    print(f"  Time span: {service_duration}ms")
-    print(f"  Errors: {error_count}, Warnings: {warn_count}")
-    print(f"  First activity: +{entries[0]['relative_time_ms']}ms")
-    print(f"  Last activity: +{entries[-1]['relative_time_ms']}ms")
-
-print("\n💡 Step 6: Key insights")
-print("-" * 70)
-print("✓ Request flow visualization complete")
-print("✓ Identified service with failures")
-print("✓ Calculated per-service latency")
-print("\nThis cross-service view makes it easy to:")
-print("  • Track requests across microservices")
-print("  • Identify which service introduced delays")
-print("  • Find cascading failures")
-print("  • Measure inter-service latency")
-
-print("\n" + "=" * 70)
-print("Use cross_service_timeline() for distributed system debugging!")
-print("=" * 70)
+print("\nTakeaways:")
+print("  • The inventory-service timeout is the first fault, everything downstream degrades.")
+print("  • order-service shields the user with partial data, which propagates to api-gateway as 206.")
+print("  • cross_service_timeline keeps the call tree coherent even from a single merged log file.")

@@ -1,8 +1,7 @@
 use crate::index::LogIndex;
-use crate::types::*;
 use anyhow::Result;
 use duckdb::{params, Connection};
-use std::path::PathBuf;
+use chrono::Utc;
 
 /// SQL query engine for advanced log investigation
 pub struct SqlEngine {
@@ -64,10 +63,25 @@ impl SqlEngine {
     /// Execute a SQL query and return results as JSON
     pub fn query(&self, sql: &str) -> Result<String> {
         let mut stmt = self.conn.prepare(sql)?;
-        let column_count = stmt.column_count();
-        let column_names: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
+        let mut rows = stmt.query([])?;
 
-        let rows = stmt.query_map([], |row| {
+        // DuckDB expects the statement to be executed before column metadata can be read.
+        // Pull the statement reference from the rows handle to inspect columns safely.
+        let (column_count, column_names) = if let Some(stmt_ref) = rows.as_ref() {
+            let count = stmt_ref.column_count();
+            let names = stmt_ref
+                .column_names()
+                .into_iter()
+                .map(String::from)
+                .collect();
+            (count, names)
+        } else {
+            (0, Vec::new())
+        };
+
+        let mut results: Vec<serde_json::Value> = Vec::new();
+
+        while let Some(row) = rows.next()? {
             let mut obj = serde_json::Map::new();
             for i in 0..column_count {
                 let col_name = &column_names[i];
@@ -82,17 +96,22 @@ impl SqlEngine {
                     duckdb::types::ValueRef::Float(f) => serde_json::json!(f),
                     duckdb::types::ValueRef::Double(f) => serde_json::json!(f),
                     duckdb::types::ValueRef::Text(s) => serde_json::Value::String(String::from_utf8_lossy(s).to_string()),
-                    duckdb::types::ValueRef::Timestamp(_, _) => {
-                        serde_json::Value::String(row.get::<_, String>(i)?)
+                    duckdb::types::ValueRef::Timestamp(unit, v) => {
+                        let micros = unit.to_micros(v);
+                        let seconds = micros / 1_000_000;
+                        let nanos = ((micros % 1_000_000).unsigned_abs() as u32) * 1000;
+                        let formatted = chrono::DateTime::<Utc>::from_timestamp(seconds, nanos)
+                            .map(|dt| dt.to_rfc3339())
+                            .unwrap_or_else(|| v.to_string());
+                        serde_json::Value::String(formatted)
                     }
                     _ => serde_json::Value::String(row.get::<_, String>(i)?),
                 };
                 obj.insert(col_name.clone(), value);
             }
-            Ok(serde_json::Value::Object(obj))
-        })?;
+            results.push(serde_json::Value::Object(obj));
+        }
 
-        let results: Vec<serde_json::Value> = rows.collect::<std::result::Result<_, _>>()?;
         Ok(serde_json::to_string(&results)?)
     }
 

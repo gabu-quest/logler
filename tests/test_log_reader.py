@@ -1,5 +1,6 @@
 """Tests for log reader."""
 
+import json
 import pytest
 import tempfile
 from pathlib import Path
@@ -171,3 +172,43 @@ class TestLogReader:
         lines = list(reader.read_lines(reverse=True, max_lines=10))
         assert len(lines) == 10
         assert "Line 999" in lines[0]
+
+    def test_glob_tail_handles_multiple_files(self, tmp_path):
+        """Tail multiple files from a glob pattern."""
+        # create two files
+        paths = []
+        for idx in range(2):
+            p = tmp_path / f"file{idx}.log"
+            p.write_text("\n".join([f"A{idx}-{i}" for i in range(5)]))
+            paths.append(str(p))
+
+        # use glob
+        import glob
+        files = glob.glob(str(tmp_path / "*.log"))
+        assert len(files) == 2
+
+        # ensure tail returns last lines per file
+        for f in files:
+            reader = LogReader(f)
+            lines = list(reader.tail(num_lines=2, follow=False))
+            assert lines[-1].startswith("A")
+
+    def test_tail_glob_on_real_fixtures(self):
+        """Tail multiple real log fixtures and verify the last entries."""
+        fixtures = sorted(Path("examples/logs").glob("2025-11-0*.log"))
+        assert len(fixtures) == 3
+
+        expected_last = {
+            "2025-11-01.log": {"service": "api", "message": "log line 199 on day 1"},
+            "2025-11-02.log": {"service": "worker", "message": "log line 199 on day 2"},
+            "2025-11-03.log": {"service": "api", "message": "log line 199 on day 3"},
+        }
+
+        for path in fixtures:
+            reader = LogReader(path)
+            lines = list(reader.tail(num_lines=1, follow=False))
+            assert len(lines) == 1
+            entry = json.loads(lines[0])
+
+            assert entry["service"] == expected_last[path.name]["service"]
+            assert entry["message"] == expected_last[path.name]["message"]

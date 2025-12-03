@@ -59,4 +59,12 @@ def test_plain_entry_without_metadata_uses_raw_message():
 
     assert entry.message == line
     assert entry.level == "UNKNOWN"
-    assert entry.timestamp is None
+
+
+def test_service_name_propagates_from_json():
+    parser = LogParser()
+    line = '{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"payments","message":"ok"}'
+    entry = parser.parse_line(1, line)
+    assert entry.service_name == "payments"
+    assert entry.level == "INFO"
+    assert entry.timestamp is not None
