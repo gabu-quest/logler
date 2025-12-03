@@ -18,6 +18,7 @@ _investigator_lock = threading.Lock()
 _investigator_cache: Dict[tuple, logler_rs.PyInvestigator] = {}
 _cache_max_size = 10  # Keep up to 10 file sets in cache
 
+
 def _get_cached_investigator(files: tuple) -> logler_rs.PyInvestigator:
     """
     Get or create a cached Investigator for the given files.
@@ -42,6 +43,14 @@ def _get_cached_investigator(files: tuple) -> logler_rs.PyInvestigator:
 
         _investigator_cache[files] = inv
         return inv
+
+
+def get_cached_investigator(files) -> logler_rs.PyInvestigator:
+    """
+    Public accessor that normalizes the incoming file list into a stable cache key.
+    """
+    key = tuple(sorted(str(f) for f in files))
+    return _get_cached_investigator(key)
 
 def clear_cache():
     """Clear the investigator cache (useful for testing or freeing memory)"""

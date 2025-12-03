@@ -37,12 +37,33 @@ def test_open_api_returns_service_names_and_totals():
     assert any(entry.get("level") == "ERROR" for entry in data["entries"])
 
 
+def test_threads_endpoint_populated_after_rust_load():
+    resp = client.post("/api/files/open", json={"path": str(HUGE_LOG)})
+    assert resp.status_code == 200, resp.text
+
+    threads = client.get("/api/threads").json()
+    assert threads, "threads endpoint returned no threads"
+    assert any(t.get("log_count", 0) > 0 for t in threads)
+
+    chosen_threads = [t["thread_id"] for t in threads[:2]]
+    resp_filter = client.post(
+        "/api/files/filter",
+        json={"paths": [str(HUGE_LOG)], "filters": {"threads": chosen_threads}, "limit": 2000},
+    )
+    assert resp_filter.status_code == 200, resp_filter.text
+    filtered = resp_filter.json()["entries"]
+    assert filtered, "thread-filtered entries missing"
+    assert all(entry["thread_id"] in chosen_threads for entry in filtered)
+    assert all(str(entry["level"]).isupper() for entry in filtered)
+
+
 def test_open_many_interleaves_and_preserves_service_names():
     resp = client.post("/api/files/open_many", json={"paths": [str(p) for p in GLOB_LOGS]})
     assert resp.status_code == 200, resp.text
     data = resp.json()
 
-    assert data["total"] == 597  # 199 lines per file across 3 files
+    expected_total = sum(len(p.read_text().splitlines()) for p in GLOB_LOGS)
+    assert data["total"] == expected_total
     assert len(data["entries"]) == data["total"]
     assert set(data["files"]) == {str(p.resolve()) for p in GLOB_LOGS}
 
