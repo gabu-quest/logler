@@ -19,6 +19,9 @@ examples/
 │   ├── 10_comparison_and_diff.py                # NEW!
 │   ├── 11_explain_errors.py                     # NEW!
 │   └── 12_complete_workflow.py                  # NEW!
+├── en/live_log_stream.py      # NEW! Live log generator for frontend tailing
+├── frontend_walkthrough.md    # NEW! Browser-based UI tour (no code to run)
+├── frontend_live_walkthrough.md # NEW! Live follow/tail UI tour (no code to run)
 ├── ja/              # Japanese examples (日本語)
 │   └── 01_本番環境インシデント調査.py
 └── logs/            # Sample log files
@@ -140,6 +143,15 @@ python examples/en/08_investigation_sessions.py
 
 # Japanese examples
 python examples/ja/01_本番環境インシデント調査.py
+
+# Browser walkthrough (no Python execution)
+# Open the UI and click through the steps:
+#   see examples/frontend_walkthrough.md
+#   see examples/frontend_live_walkthrough.md
+
+# Live tail demo (generates logs you can follow in the UI)
+uv run python examples/en/live_log_stream.py
+uv run logler serve --auto-port examples/logs/live_follow_demo.log
 ```
 
 ## 💾 Sample Log Files
