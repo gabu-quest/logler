@@ -37,8 +37,55 @@ try:
     import logler_rs
     RUST_AVAILABLE = True
 except ImportError:
-    RUST_AVAILABLE = False
-    print("Warning: Rust backend not available. Using Python fallback.")
+    try:
+        from .bootstrap import ensure_rust_backend
+        if ensure_rust_backend():
+            import logler_rs  # type: ignore
+            RUST_AVAILABLE = True
+        else:
+            RUST_AVAILABLE = False
+            print("Warning: Rust backend not available. Using Python fallback.")
+    except Exception:
+        RUST_AVAILABLE = False
+        print("Warning: Rust backend not available. Using Python fallback.")
+
+
+def _normalize_entry(entry: Dict[str, Any]) -> None:
+    """Normalize a single log entry in-place (e.g., ensure uppercase levels)."""
+    if not isinstance(entry, dict):
+        return
+    level = entry.get("level")
+    if isinstance(level, str):
+        entry["level"] = level.upper()
+
+
+def _normalize_entries(entries: List[Dict[str, Any]]) -> None:
+    for entry in entries or []:
+        _normalize_entry(entry)
+
+
+def _normalize_search_result_levels(result: Dict[str, Any]) -> None:
+    """Ensure search results and their contexts use consistent level casing."""
+    for item in result.get("results", []) or []:
+        _normalize_entry(item.get("entry", {}))
+        for ctx in item.get("context_before", []) or []:
+            _normalize_entry(ctx)
+        for ctx in item.get("context_after", []) or []:
+            _normalize_entry(ctx)
+
+
+def _normalize_pattern_examples(result: Dict[str, Any]) -> None:
+    """Normalize example entries inside pattern detection results."""
+    for pattern in result.get("patterns", []) or []:
+        for example in pattern.get("examples", []) or []:
+            _normalize_entry(example)
+
+
+def _normalize_context_payload(payload: Dict[str, Any]) -> None:
+    """Normalize context payload returned from Rust backend."""
+    _normalize_entry(payload.get("target", {}))
+    _normalize_entries(payload.get("context_before", []))
+    _normalize_entries(payload.get("context_after", []))
 
 
 def search(
@@ -110,10 +157,26 @@ def search(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
+    investigator = logler_rs.PyInvestigator()
+    investigator.load_files(files)
+
     # Build query
-    filters = {}
+    filters = {"levels": []}
     if level:
-        filters["levels"] = [level.upper()]
+        level_map = {
+            "trace": "Trace",
+            "debug": "Debug",
+            "info": "Info",
+            "warn": "Warn",
+            "warning": "Warn",
+            "error": "Error",
+            "fatal": "Fatal",
+            "critical": "Fatal",
+        }
+        normalized_level = level_map.get(level.lower())
+        if not normalized_level:
+            raise ValueError(f"Unknown log level: {level}")
+        filters["levels"] = [normalized_level]
     if thread_id:
         filters["thread_id"] = thread_id
     if correlation_id:
@@ -127,9 +190,10 @@ def search(
         "context_lines": context_lines,
     }
 
-    # Call Rust function
-    result_json = logler_rs.search(files, query or "", limit)
+    # Call Rust engine with the full query payload
+    result_json = investigator.search(json.dumps(query_dict))
     result = json.loads(result_json)
+    _normalize_search_result_levels(result)
 
     # Transform based on output_format
     if output_format == "full":
@@ -172,7 +236,9 @@ def follow_thread(
         raise RuntimeError("Rust backend not available")
 
     result_json = logler_rs.follow_thread(files, thread_id, correlation_id, trace_id)
-    return json.loads(result_json)
+    result = json.loads(result_json)
+    _normalize_entries(result.get("entries", []))
+    return result
 
 
 def get_context(
@@ -205,7 +271,9 @@ def get_context(
     investigator = logler_rs.PyInvestigator()
     investigator.load_files([file])
     result_json = investigator.get_context(file, line_number, lines_before, lines_after, False)
-    return json.loads(result_json)
+    result = json.loads(result_json)
+    _normalize_context_payload(result)
+    return result
 
 
 def find_patterns(
@@ -238,7 +306,9 @@ def find_patterns(
         raise RuntimeError("Rust backend not available")
 
     result_json = logler_rs.find_patterns(files, min_occurrences)
-    return json.loads(result_json)
+    result = json.loads(result_json)
+    _normalize_pattern_examples(result)
+    return result
 
 
 def get_metadata(files: List[str]) -> Dict[str, Any]:
@@ -326,7 +396,9 @@ class Investigator:
         }
 
         result_json = self._investigator.search(json.dumps(query_dict))
-        return json.loads(result_json)
+        result = json.loads(result_json)
+        _normalize_search_result_levels(result)
+        return result
 
     def follow_thread(
         self,
@@ -336,12 +408,16 @@ class Investigator:
     ) -> Dict[str, Any]:
         """Follow thread in loaded files."""
         result_json = self._investigator.follow_thread(self._files, thread_id, correlation_id, trace_id)
-        return json.loads(result_json)
+        result = json.loads(result_json)
+        _normalize_entries(result.get("entries", []))
+        return result
 
     def find_patterns(self, min_occurrences: int = 3) -> Dict[str, Any]:
         """Find patterns in loaded files."""
         result_json = self._investigator.find_patterns(self._files, min_occurrences)
-        return json.loads(result_json)
+        result = json.loads(result_json)
+        _normalize_pattern_examples(result)
+        return result
 
     def get_metadata(self) -> Dict[str, Any]:
         """Get metadata for loaded files."""
@@ -357,7 +433,9 @@ class Investigator:
     ) -> Dict[str, Any]:
         """Get context around a line."""
         result_json = self._investigator.get_context(file, line_number, lines_before, lines_after, False)
-        return json.loads(result_json)
+        result = json.loads(result_json)
+        _normalize_context_payload(result)
+        return result
 
     def sql_query(self, query: str) -> List[Dict[str, Any]]:
         """
@@ -766,7 +844,7 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
         message = entry.get('message', '')
         messages.append(message)
 
-        service = entry.get('service')
+        service = entry.get('service') or entry.get('service_name')
         if service:
             services.add(service)
 
@@ -1462,7 +1540,7 @@ class InvestigationSession:
         key_insights = []
 
         for entry in self.history:
-            summary = entry.get('result_summary', {})
+            summary = entry.get('result_summary') or {}
             if 'total_matches' in summary and entry['operation'] == 'search':
                 error_counts.append(f"- Found {summary['total_matches']} matches in {entry['description']}")
             if 'pattern_count' in summary:

@@ -1,330 +1,206 @@
 """
 Advanced SQL Analysis for LLM Agents
 
-This example demonstrates how LLM agents can use SQL queries to perform
-sophisticated log analysis that goes beyond the built-in investigation tools.
-
-Topics covered:
-- Statistical anomaly detection
-- Correlation analysis between errors
-- Performance regression detection
-- Request flow analysis
-- Time-series patterns
-
-These are the kinds of queries an LLM would write after initial investigation
-to dig deeper into specific issues.
+A sharper, story-driven SQL playbook for the production incident log.
+Each query answers a specific investigation question an LLM would ask
+after the first triage pass.
 """
 
 from logler.investigate import Investigator
-import json
 
 LOG_FILE = "examples/logs/production_incident.log"
 
 print("=" * 80)
-print("ADVANCED SQL ANALYSIS FOR LLM AGENTS")
+print("ADVANCED SQL ANALYSIS PLAYBOOK")
 print("=" * 80)
-print()
 
-# Initialize investigator
 investigator = Investigator()
 investigator.load_files([LOG_FILE])
 
-# Query 1: Statistical Anomaly Detection
-print("📊 QUERY 1: Statistical Anomaly Detection")
-print("-" * 80)
-print("Finding time windows where error rate deviates significantly from baseline")
-print()
 
-try:
-    anomalies = investigator.sql_query("""
-        WITH error_per_second AS (
-            SELECT
-                strftime('%H:%M:%S', timestamp) as second,
-                COUNT(CASE WHEN level IN ('ERROR', 'FATAL') THEN 1 END) as errors,
-                COUNT(*) as total
-            FROM logs
-            GROUP BY second
-        ),
-        stats AS (
-            SELECT
-                AVG(errors * 1.0 / total) as mean_error_rate,
-                AVG((errors * 1.0 / total) * (errors * 1.0 / total)) -
-                    (AVG(errors * 1.0 / total) * AVG(errors * 1.0 / total)) as variance
-            FROM error_per_second
-        )
+def section(title: str):
+    print("\n" + title)
+    print("-" * len(title))
+
+
+def run_sql(title: str, query: str, render=None):
+    section(title)
+    try:
+        rows = investigator.sql_query(query)
+    except Exception as exc:  # pragma: no cover - demo only
+        print(f"SQL feature not available: {exc}\n")
+        return
+
+    if not rows:
+        print("No rows returned\n")
+        return
+
+    if render:
+        render(rows)
+    else:
+        for row in rows:
+            print(row)
+    print()
+
+
+meta = investigator.get_metadata()[0]
+section("📡 Context")
+print(f"File: {meta['path']}")
+print(f"Lines: {meta['lines']}")
+print(f"Levels: {meta['log_levels']}")
+print(f"Window: {meta['time_range']['start']} → {meta['time_range']['end']}")
+
+
+def render_spike(rows):
+    for r in rows:
+        print(f"  ⚠️  {r['second']}: {r['error_rate_pct']}% errors (z={r['z_score']})")
+
+
+run_sql(
+    "📈 Where did the spike happen? (z-score over seconds)",
+    """
+    WITH per_second AS (
         SELECT
-            eps.second,
-            eps.errors,
-            eps.total,
-            ROUND(eps.errors * 100.0 / eps.total, 2) as error_rate,
-            ROUND(s.mean_error_rate * 100, 2) as baseline_rate,
-            ROUND(
-                (eps.errors * 1.0 / eps.total - s.mean_error_rate) /
-                SQRT(s.variance),
-                2
-            ) as z_score
-        FROM error_per_second eps, stats s
-        WHERE ABS(
-            (eps.errors * 1.0 / eps.total - s.mean_error_rate) / SQRT(s.variance)
-        ) > 2.0
-        ORDER BY z_score DESC
-    """)
+            strftime('%H:%M:%S', timestamp) AS second,
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE level IN ('ERROR','FATAL','CRITICAL')) AS errors
+        FROM logs
+        GROUP BY 1
+    )
+    SELECT
+        second,
+        total,
+        errors,
+        ROUND(errors * 100.0 / NULLIF(total, 0), 2) AS error_rate_pct,
+        ROUND(
+            (errors * 1.0 / NULLIF(total, 1) - AVG(errors * 1.0 / NULLIF(total, 1)) OVER ()) /
+            NULLIF(stddev_pop(errors * 1.0 / NULLIF(total, 1)) OVER (), 0),
+            2
+        ) AS z_score
+    FROM per_second
+    ORDER BY error_rate_pct DESC
+    LIMIT 5;
+    """,
+    render=render_spike,
+)
 
-    print("Anomalies detected (Z-score > 2.0):")
-    for row in anomalies:
-        print(f"  ⚠️  {row['second']}: {row['error_rate']}% error rate "
-              f"(baseline: {row['baseline_rate']}%, Z-score: {row['z_score']})")
-    print()
-except Exception as e:
-    print(f"SQL feature not available: {e}\n")
 
-# Query 2: Error Correlation Matrix
-print("📊 QUERY 2: Error Correlation Matrix")
-print("-" * 80)
-print("Finding which types of errors tend to occur together")
-print()
+def render_signatures(rows):
+    for r in rows:
+        print(f"  {r['signature']:<18} {r['occurrences']:2d} hits ({r['first_seen']} → {r['last_seen']})")
 
-try:
-    correlations = investigator.sql_query("""
-        WITH error_types AS (
-            SELECT DISTINCT
-                CASE
-                    WHEN message LIKE '%timeout%' THEN 'timeout'
-                    WHEN message LIKE '%connection%' THEN 'connection'
-                    WHEN message LIKE '%pool%' THEN 'pool'
-                    WHEN message LIKE '%query%' THEN 'query'
-                    ELSE 'other'
-                END as error_type
-            FROM logs
-            WHERE level IN ('ERROR', 'FATAL')
-        )
+
+run_sql(
+    "🧭 What signatures dominate the outage?",
+    """
+    SELECT
+        CASE
+            WHEN message ILIKE '%connection timeout%' THEN 'connection timeout'
+            WHEN message ILIKE '%pool%' THEN 'pool saturation'
+            WHEN message ILIKE '%slow query%' THEN 'slow queries'
+            WHEN message ILIKE '%rollback%' THEN 'rollbacks'
+            ELSE 'other'
+        END AS signature,
+        COUNT(*) AS occurrences,
+        MIN(timestamp) AS first_seen,
+        MAX(timestamp) AS last_seen
+    FROM logs
+    WHERE level IN ('ERROR','FATAL','CRITICAL','WARN')
+    GROUP BY 1
+    ORDER BY occurrences DESC;
+    """,
+    render=render_signatures,
+)
+
+
+def render_requests(rows):
+    for r in rows:
+        print(f"  {r['correlation_id']}: {r['errors']} errors over {r['duration_ms']}ms ({r['total']} log lines)")
+
+
+run_sql(
+    "⏱️  Which requests suffered the most?",
+    """
+    WITH per_request AS (
         SELECT
-            e1.error_type as error_a,
-            e2.error_type as error_b,
-            COUNT(DISTINCT l1.correlation_id) as co_occurrences
-        FROM logs l1
-        JOIN logs l2 ON l1.correlation_id = l2.correlation_id
-        CROSS JOIN error_types e1
-        CROSS JOIN error_types e2
-        WHERE
-            l1.level IN ('ERROR', 'FATAL') AND
-            l2.level IN ('ERROR', 'FATAL') AND
-            l1.message LIKE '%' || e1.error_type || '%' AND
-            l2.message LIKE '%' || e2.error_type || '%' AND
-            e1.error_type < e2.error_type AND
-            l1.correlation_id IS NOT NULL
-        GROUP BY e1.error_type, e2.error_type
-        HAVING co_occurrences > 0
-        ORDER BY co_occurrences DESC
-    """)
+            correlation_id,
+            MIN(timestamp) AS start_ts,
+            MAX(timestamp) AS end_ts,
+            DATEDIFF('millisecond', MIN(timestamp), MAX(timestamp)) AS duration_ms,
+            SUM(CASE WHEN level IN ('ERROR','FATAL','CRITICAL') THEN 1 ELSE 0 END) AS errors,
+            COUNT(*) AS total
+        FROM logs
+        WHERE correlation_id IS NOT NULL
+        GROUP BY correlation_id
+    )
+    SELECT
+        correlation_id,
+        errors,
+        total,
+        duration_ms
+    FROM per_request
+    WHERE errors > 0
+    ORDER BY errors DESC, duration_ms DESC
+    LIMIT 5;
+    """,
+    render=render_requests,
+)
 
-    print("Error type correlations:")
-    for row in correlations:
-        print(f"  {row['error_a']} + {row['error_b']}: {row['co_occurrences']} requests")
-    print()
-except Exception as e:
-    print(f"SQL feature not available: {e}\n")
 
-# Query 3: Request Latency Percentiles
-print("📊 QUERY 3: Request Latency Analysis")
-print("-" * 80)
-print("Calculating request duration percentiles")
-print()
+def render_retries(rows):
+    for r in rows:
+        print(f"  {r['thread_id']}: {r['retry_logs']} retries ({r['first_retry']} → {r['last_retry']})")
 
-try:
-    latencies = investigator.sql_query("""
-        WITH request_durations AS (
-            SELECT
-                correlation_id,
-                (julianday(MAX(timestamp)) - julianday(MIN(timestamp))) * 86400000 as duration_ms,
-                MAX(CASE WHEN level IN ('ERROR', 'FATAL') THEN 1 ELSE 0 END) as had_error
-            FROM logs
-            WHERE correlation_id IS NOT NULL
-            GROUP BY correlation_id
-        ),
-        percentiles AS (
-            SELECT
-                had_error,
-                COUNT(*) as count,
-                MIN(duration_ms) as min_duration,
-                MAX(duration_ms) as max_duration,
-                AVG(duration_ms) as avg_duration
-            FROM request_durations
-            GROUP BY had_error
-        )
+
+run_sql(
+    "🔄 Who was thrashing retries?",
+    """
+    SELECT
+        thread_id,
+        COUNT(*) AS retry_logs,
+        MIN(timestamp) AS first_retry,
+        MAX(timestamp) AS last_retry
+    FROM logs
+    WHERE message ILIKE 'Retrying database connection%'
+    GROUP BY thread_id
+    ORDER BY retry_logs DESC;
+    """,
+    render=render_retries,
+)
+
+
+def render_ops(rows):
+    for r in rows:
+        print(f"  {r['ts']} | {r['message']}")
+    print(f"\n  ⏳ Full incident length: {rows[0]['resolution_ms']} ms")
+
+
+run_sql(
+    "🛠️  Did the ops response close the incident fast enough?",
+    """
+    WITH bounds AS (
         SELECT
-            CASE WHEN had_error = 1 THEN 'Failed' ELSE 'Successful' END as status,
-            count,
-            ROUND(min_duration, 2) as min_ms,
-            ROUND(avg_duration, 2) as avg_ms,
-            ROUND(max_duration, 2) as max_ms
-        FROM percentiles
-    """)
-
-    print("Request duration statistics:")
-    for row in latencies:
-        print(f"  {row['status']:12s}: {row['count']} requests, "
-              f"avg={row['avg_ms']}ms, min={row['min_ms']}ms, max={row['max_ms']}ms")
-    print()
-except Exception as e:
-    print(f"SQL feature not available: {e}\n")
-
-# Query 4: Thread Hotspots
-print("📊 QUERY 4: Thread Hotspot Analysis")
-print("-" * 80)
-print("Identifying threads that are bottlenecks or error-prone")
-print()
-
-try:
-    hotspots = investigator.sql_query("""
-        WITH thread_stats AS (
-            SELECT
-                thread_id,
-                COUNT(*) as total_logs,
-                COUNT(CASE WHEN level IN ('ERROR', 'FATAL') THEN 1 END) as errors,
-                COUNT(DISTINCT correlation_id) as unique_requests,
-                MIN(timestamp) as first_log,
-                MAX(timestamp) as last_log
-            FROM logs
-            WHERE thread_id IS NOT NULL
-              AND thread_id NOT LIKE '%health%'
-              AND thread_id NOT LIKE '%ops%'
-            GROUP BY thread_id
-        ),
-        avg_stats AS (
-            SELECT AVG(errors * 1.0 / total_logs) as avg_error_rate
-            FROM thread_stats
-        )
+            MIN(CASE WHEN message ILIKE '%Incident detected%' THEN timestamp END) AS detected_at,
+            MAX(CASE WHEN message ILIKE '%Incident resolved%' THEN timestamp END) AS resolved_at
+        FROM logs
+    ),
+    actions AS (
         SELECT
-            ts.thread_id,
-            ts.total_logs,
-            ts.errors,
-            ts.unique_requests,
-            ROUND(ts.errors * 100.0 / ts.total_logs, 1) as error_rate,
-            ROUND((julianday(ts.last_log) - julianday(ts.first_log)) * 86400, 2) as active_seconds,
-            CASE
-                WHEN ts.errors * 1.0 / ts.total_logs > avg.avg_error_rate * 2 THEN 'HIGH'
-                WHEN ts.errors * 1.0 / ts.total_logs > avg.avg_error_rate THEN 'MEDIUM'
-                ELSE 'LOW'
-            END as risk_level
-        FROM thread_stats ts, avg_stats avg
-        WHERE ts.errors > 0
-        ORDER BY ts.errors DESC
-    """)
+            message,
+            strftime('%H:%M:%S.%f', timestamp) AS ts
+        FROM logs
+        WHERE message ILIKE '%Incident%' OR message ILIKE 'Scaling database connection pool%'
+           OR message ILIKE 'Restarting slow query killer%' OR message ILIKE 'Killing slow queries%'
+        ORDER BY timestamp
+    )
+    SELECT
+        message,
+        ts,
+        (SELECT DATEDIFF('millisecond', detected_at, resolved_at) FROM bounds) AS resolution_ms
+    FROM actions;
+    """,
+    render=render_ops,
+)
 
-    print("Thread hotspots:")
-    for row in hotspots:
-        risk_emoji = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(row['risk_level'], "⚪")
-        print(f"  {risk_emoji} {row['thread_id']:12s}: {row['errors']} errors "
-              f"({row['error_rate']}% rate), {row['unique_requests']} requests, "
-              f"active {row['active_seconds']}s")
-    print()
-except Exception as e:
-    print(f"SQL feature not available: {e}\n")
-
-# Query 5: Cascading Failure Detection
-print("📊 QUERY 5: Cascading Failure Pattern Detection")
-print("-" * 80)
-print("Finding sequences of errors that propagate across threads")
-print()
-
-try:
-    cascades = investigator.sql_query("""
-        WITH error_sequence AS (
-            SELECT
-                timestamp,
-                thread_id,
-                message,
-                LAG(timestamp) OVER (ORDER BY timestamp) as prev_timestamp,
-                LAG(thread_id) OVER (ORDER BY timestamp) as prev_thread
-            FROM logs
-            WHERE level IN ('ERROR', 'FATAL')
-        ),
-        cascades AS (
-            SELECT
-                prev_thread,
-                thread_id,
-                COUNT(*) as cascade_count,
-                MIN(timestamp) as first_cascade,
-                (julianday(MAX(timestamp)) - julianday(MIN(prev_timestamp))) * 1000 as spread_time_ms
-            FROM error_sequence
-            WHERE prev_thread IS NOT NULL
-              AND thread_id != prev_thread
-              AND (julianday(timestamp) - julianday(prev_timestamp)) * 1000 < 1000
-            GROUP BY prev_thread, thread_id
-            HAVING cascade_count > 1
-        )
-        SELECT *
-        FROM cascades
-        ORDER BY cascade_count DESC
-    """)
-
-    print("Cascading failure patterns:")
-    for row in cascades:
-        print(f"  ⛓️  {row['prev_thread']} → {row['thread_id']}: "
-              f"{row['cascade_count']} cascades in {row['spread_time_ms']:.0f}ms")
-    print()
-except Exception as e:
-    print(f"SQL feature not available: {e}\n")
-
-# Query 6: Recovery Time Analysis
-print("📊 QUERY 6: Recovery Time Analysis")
-print("-" * 80)
-print("Measuring how long it took the system to recover")
-print()
-
-try:
-    recovery = investigator.sql_query("""
-        WITH incident_bounds AS (
-            SELECT
-                MIN(timestamp) as incident_start,
-                MAX(CASE WHEN level IN ('ERROR', 'FATAL') THEN timestamp END) as last_error,
-                MAX(timestamp) as logs_end
-            FROM logs
-        ),
-        recovery_logs AS (
-            SELECT
-                timestamp,
-                message,
-                level
-            FROM logs
-            WHERE message LIKE '%recover%' OR message LIKE '%resolved%' OR message LIKE '%health%'
-            ORDER BY timestamp
-        )
-        SELECT
-            (julianday(ib.last_error) - julianday(ib.incident_start)) * 86400 as incident_duration_s,
-            rl.timestamp as recovery_timestamp,
-            (julianday(rl.timestamp) - julianday(ib.last_error)) * 1000 as recovery_time_ms,
-            rl.message as recovery_action
-        FROM incident_bounds ib, recovery_logs rl
-        WHERE rl.timestamp > ib.last_error
-        ORDER BY rl.timestamp
-        LIMIT 5
-    """)
-
-    print("Recovery timeline:")
-    for row in recovery:
-        print(f"  ✅ +{row['recovery_time_ms']:.0f}ms: {row['recovery_action'][:60]}")
-    print()
-    print(f"Total incident duration: {recovery[0]['incident_duration_s']:.1f} seconds")
-    print()
-except Exception as e:
-    print(f"SQL feature not available: {e}\n")
-
-# Summary
-print("=" * 80)
-print("📋 ADVANCED ANALYSIS SUMMARY")
-print("=" * 80)
-print()
-print("These SQL queries demonstrate how LLM agents can:")
-print("  1. Detect statistical anomalies using Z-scores")
-print("  2. Find correlations between different error types")
-print("  3. Analyze request latency distributions")
-print("  4. Identify thread hotspots and bottlenecks")
-print("  5. Detect cascading failure patterns")
-print("  6. Measure recovery times")
-print()
-print("💡 This level of analysis would be difficult with just grep/awk!")
-print("   SQL + Rust speed = powerful investigation for LLMs")
-print()
+print("Done. Use these query shapes as building blocks for your own LLM prompts.")
 print("=" * 80)

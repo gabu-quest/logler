@@ -72,10 +72,11 @@ impl LogParser {
         let correlation_id = self.extract_json_field(obj, &["correlation_id", "request_id", "req_id"]);
         let trace_id = self.extract_json_field(obj, &["trace_id", "traceId"]);
         let span_id = self.extract_json_field(obj, &["span_id", "spanId"]);
+        let service_name = self.extract_json_field(obj, &["service", "service_name", "serviceName"]);
 
         let mut fields = HashMap::new();
         for (key, value) in obj.iter() {
-            if !matches!(key.as_str(), "timestamp" | "time" | "level" | "message" | "msg" | "thread" | "thread_id") {
+            if !matches!(key.as_str(), "timestamp" | "time" | "level" | "message" | "msg" | "thread" | "thread_id" | "service" | "service_name" | "serviceName" | "correlation_id" | "request_id" | "req_id" | "trace_id" | "traceId" | "span_id" | "spanId") {
                 fields.insert(key.clone(), value.clone());
             }
         }
@@ -91,6 +92,7 @@ impl LogParser {
             correlation_id,
             trace_id,
             span_id,
+            service_name,
             fields,
         })
     }
@@ -115,6 +117,7 @@ impl LogParser {
             correlation_id,
             trace_id,
             span_id,
+            service_name: None,
             fields: HashMap::new(),
         }
     }

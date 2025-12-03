@@ -90,3 +90,6 @@ setup: build install-frontend ## Initial setup (build + install dependencies)
 example: ## Run with example log file
 	@echo "📝 Running with example log..."
 	@cargo run --bin logler -- view examples/sample.log
+
+build-tailwind: ## Build bundled Tailwind CSS for the web UI
+	@npx tailwindcss@3.4.13 -i src/logler/web/static/css/tailwind.input.css -o src/logler/web/static/css/tailwind.css --minify --config src/logler/web/tailwind.config.cjs
