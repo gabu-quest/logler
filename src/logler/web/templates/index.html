@@ -409,6 +409,12 @@
                 </div>
 
                 <div x-show="browseMode === 'glob'">
+                    <div class="flex items-center flex-wrap gap-2 mb-3">
+                        <span class="px-2 py-1 text-xs bg-white bg-opacity-10 rounded border border-white/10" x-text="'Base: ' + (globBaseDir || '.')"></span>
+                        <template x-for="preset in globPresets" :key="preset">
+                            <button @click="globPattern = preset; searchGlob()" class="px-2 py-1 text-xs bg-white bg-opacity-5 rounded hover:bg-opacity-15 border border-white/5" x-text="preset"></button>
+                        </template>
+                    </div>
                     <div x-show="globLoading" class="text-center text-gray-300 py-4">Searching…</div>
                     <div x-show="globError" class="text-center text-amber-300 text-xs py-2" x-text="globError"></div>
                     <template x-for="file in globResults" :key="file.path">
@@ -496,6 +502,7 @@
                 globResults: [],
                 globLoading: false,
                 globError: '',
+                globPresets: ['*.log', '**/*.log', '**/app-*.log', '**/*error*.log'],
                 currentFile: null,
                 currentFiles: [],
                 interleaved: false,
