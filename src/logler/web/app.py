@@ -460,10 +460,18 @@ async def open_many(request: FilesRequest):
     entries.sort(key=lambda e: e["timestamp"] or "")
 
     file_counts: Dict[str, int] = {}
+    file_meta: Dict[str, Dict[str, Any]] = {}
     for entry in entries:
         file = entry.get("file")
         if file:
             file_counts[file] = file_counts.get(file, 0) + 1
+            ts = entry.get("timestamp")
+            meta = file_meta.setdefault(file, {"first": None, "last": None})
+            if ts:
+                if meta["first"] is None or ts < meta["first"]:
+                    meta["first"] = ts
+                if meta["last"] is None or ts > meta["last"]:
+                    meta["last"] = ts
 
     for lf in valid_files:
         if lf not in active_files:
@@ -474,6 +482,7 @@ async def open_many(request: FilesRequest):
         "entries": entries,
         "total": len(entries),
         "file_counts": file_counts,
+        "file_meta": [{"file": f, "count": file_counts.get(f, 0), "first": meta.get("first"), "last": meta.get("last")} for f, meta in file_meta.items()],
     }
 
 
