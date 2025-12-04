@@ -274,6 +274,9 @@
                     </div>
                 </div>
                 <div class="flex items-center space-x-2">
+                    <button x-show="interleaved && currentFiles.length > 0" @click="showInterleaveModal = true" class="px-3 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-sm transition">
+                        Interleave details
+                    </button>
                     <button x-show="partialLoad && !indexing" @click="loadFullCurrent()" class="px-3 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-sm transition">
                         Load full log
                     </button>
@@ -390,6 +393,35 @@
         </div>
     </div>
 
+    <!-- Interleave Details Modal -->
+    <div x-show="showInterleaveModal" x-cloak
+         class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
+         @click.self="showInterleaveModal = false">
+        <div class="glass-card text-white p-6 rounded-xl max-w-xl w-full mx-4 max-h-[70vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-bold">Interleave Details</h2>
+                <button @click="showInterleaveModal = false" class="text-sm px-2 py-1 bg-white bg-opacity-10 rounded hover:bg-opacity-20">Close</button>
+            </div>
+            <template x-if="interleaveMeta.length === 0">
+                <div class="text-gray-300 text-sm">No metadata available.</div>
+            </template>
+            <div x-show="interleaveMeta.length > 0" class="space-y-3">
+                <template x-for="item in interleaveMeta" :key="item.file">
+                    <div class="p-3 bg-white bg-opacity-5 rounded border border-white/10">
+                        <div class="flex items-center justify-between text-sm">
+                            <div class="font-mono truncate" :title="item.file" x-text="item.file.split('/').pop() || item.file"></div>
+                            <div class="text-xs text-gray-300" x-text="(interleaveCounts[item.file] || item.count || 0) + ' rows'"></div>
+                        </div>
+                        <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-300">
+                            <div>First: <span class="text-gray-100" x-text="item.first || 'N/A'"></span></div>
+                            <div>Last: <span class="text-gray-100" x-text="item.last || 'N/A'"></span></div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
     <script>
         function logViewer() {
             return {
@@ -409,6 +441,7 @@
                 currentFiles: [],
                 interleaved: false,
                 interleaveCounts: {},
+                interleaveMeta: [],
                 entries: [],
                 filteredEntries: [],
                 visibleEntries: [],
@@ -435,6 +468,7 @@
                 indexing: false,
                 partialLoad: false,
                 skipFullIndex: true,
+                showInterleaveModal: false,
                 followSocket: null,
                 stats: {
                     total: 0,
@@ -561,6 +595,7 @@
                     this.currentFile = null;
                     this.currentFiles = data.files || [];
                     this.interleaveCounts = data.file_counts || {};
+                    this.interleaveMeta = data.file_meta || [];
                     this.activeFiles = Array.from(new Set([...this.activeFiles, ...this.currentFiles]));
                     this.interleaved = true;
                     this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
@@ -634,6 +669,7 @@
                         this.currentFiles = [quickData.file_path];
                         this.interleaved = false;
                         this.interleaveCounts = {};
+                        this.interleaveMeta = [];
                         if (!this.activeFiles.includes(this.currentFile)) {
                             this.activeFiles.push(this.currentFile);
                         }

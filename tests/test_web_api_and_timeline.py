@@ -77,6 +77,7 @@ def test_open_many_interleaves_and_preserves_service_names():
     assert data["total"] == expected_total
     assert len(data["entries"]) == data["total"]
     assert set(data["files"]) == {str(p.resolve()) for p in GLOB_LOGS}
+    assert set(data["file_counts"].keys()) == set(str(p.resolve()) for p in GLOB_LOGS)
 
     # Ensure last entries correspond to expected last lines and keep service_name
     last_by_file = {}
