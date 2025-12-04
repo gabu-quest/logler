@@ -111,11 +111,8 @@
     <header class="glass-card text-white p-4">
         <div class="container mx-auto flex items-center justify-between">
             <div class="flex items-center space-x-3">
-                <img src="{{ url_for('static', path='logler-logo.png') }}" alt="Logler logo" class="h-8 w-8 rounded-lg bg-white bg-opacity-5 border border-white/10 shadow-lg">
-                <div>
-                    <h1 class="text-2xl font-bold">Logler</h1>
-                    <p class="text-xs text-gray-300 hidden sm:block">Beautiful Log Viewer</p>
-                </div>
+                <img src="{{ url_for('static', path='logler-logo.png') }}" alt="Logler logo" class="h-8 w-8 rounded-md bg-white bg-opacity-5 shadow-lg" style="height:2rem;width:2rem;">
+                <h1 class="text-2xl font-bold">Logler</h1>
             </div>
             <div class="flex items-center space-x-4">
                 <span x-show="websocketConnected" class="flex items-center space-x-2">
@@ -143,8 +140,9 @@
                     </div>
                     <div class="space-y-2">
                         <template x-for="file in activeFiles" :key="file">
-                            <div class="p-2 bg-white bg-opacity-10 rounded cursor-pointer hover:bg-opacity-20 transition" @click="selectFile(file)">
+                            <div class="p-2 bg-white bg-opacity-10 rounded cursor-pointer hover:bg-opacity-20 transition relative" @click="selectFile(file)" :title="file">
                                 <div class="text-sm font-mono truncate" x-text="file.split('/').pop()"></div>
+                                <div x-show="interleaved && currentFiles.includes(file)" class="absolute top-1 right-1 text-[10px] text-amber-300">interleaved</div>
                             </div>
                         </template>
                     </div>
@@ -286,7 +284,7 @@
             <div class="flex-1 log-viewer overflow-auto" id="log-container" @scroll="handleScroll()">
                 <div x-show="!currentFile" class="flex items-center justify-center h-full">
                     <div class="text-center text-gray-500">
-                        <img src="{{ url_for('static', path='logler-logo.png') }}" alt="Logler logo" class="h-12 w-12 mx-auto mb-4 opacity-90">
+                        <img src="{{ url_for('static', path='logler-logo.png') }}" alt="Logler logo" class="h-8 w-8 mx-auto mb-4 opacity-90" style="height:2rem;width:2rem;">
                         <div class="text-xl mb-2">No file opened</div>
                         <div class="text-sm">Click "Open File" to get started</div>
                     </div>
@@ -552,6 +550,7 @@
                     this.loading = false;
                     this.currentFile = null;
                     this.currentFiles = data.files || [];
+                    this.activeFiles = Array.from(new Set([...this.activeFiles, ...this.currentFiles]));
                     this.interleaved = true;
                     this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
                     this.totalAvailable = data.total || this.entries.length;

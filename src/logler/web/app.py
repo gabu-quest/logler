@@ -572,6 +572,11 @@ async def follow_file(websocket: WebSocket, file_path: str, filters: Dict[str, A
     try:
         while True:
             with open(path, 'r') as f:
+                current_size = path.stat().st_size
+                if current_size < position:
+                    # File was truncated/rotated; restart from beginning
+                    position = 0
+                    line_number = 0
                 f.seek(position)
                 new_lines = f.readlines()
                 position = f.tell()
