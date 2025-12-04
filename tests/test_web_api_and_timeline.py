@@ -88,6 +88,16 @@ def test_open_many_interleaves_and_preserves_service_names():
     assert last_by_file[str(GLOB_LOGS[2].resolve())]["service_name"] == "api"
 
 
+def test_glob_endpoint_returns_matches():
+    pattern = str(Path("examples/logs/2025-11-*.log"))
+    resp = client.get(f"/api/files/glob?pattern={pattern}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["files"], "glob endpoint returned no files"
+    paths = {f["path"] for f in data["files"]}
+    assert str(GLOB_LOGS[0].resolve()) in paths
+
+
 def test_cross_service_timeline_rust_path(investigate_module):
     inv = investigate_module
     timeline = inv.cross_service_timeline(

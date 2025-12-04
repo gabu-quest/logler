@@ -3,6 +3,7 @@ FastAPI web application for Logler.
 """
 
 import asyncio
+import glob
 import json
 import os
 from datetime import datetime
@@ -33,6 +34,37 @@ def _ensure_within_root(path: Path) -> Path:
     if resolved == LOG_ROOT or LOG_ROOT in resolved.parents:
         return resolved
     raise HTTPException(status_code=403, detail="Requested path is outside the configured log root")
+
+
+def _glob_within_root(pattern: str) -> List[Path]:
+    """
+    Run a glob pattern scoped to LOG_ROOT, returning file paths only.
+    """
+    if not pattern:
+        return []
+
+    # Normalize relative patterns to LOG_ROOT
+    raw_pattern = pattern
+    if not Path(pattern).is_absolute():
+        raw_pattern = str(LOG_ROOT / pattern)
+
+    matches = glob.glob(raw_pattern, recursive=True)
+    results: List[Path] = []
+    seen = set()
+    for match in matches:
+        p = Path(match)
+        try:
+            p = _ensure_within_root(p)
+        except HTTPException:
+            continue
+        if not p.is_file():
+            continue
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(p)
+    return sorted(results)
 
 
 app = FastAPI(
@@ -388,6 +420,25 @@ async def browse_files(directory: str = "."):
         "files": files,
         "directories": directories,
     }
+
+
+@app.get("/api/files/glob")
+async def glob_files(pattern: str = "**/*.log", limit: int = 200):
+    """Search for files by glob pattern within LOG_ROOT."""
+    matches = _glob_within_root(pattern)
+    files = []
+    for p in matches[:limit]:
+        try:
+            stat = p.stat()
+            files.append({
+                "name": p.name,
+                "path": str(p),
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+            })
+        except OSError:
+            continue
+    return {"pattern": pattern, "count": len(matches), "files": files, "truncated": len(matches) > limit}
 
 
 @app.post("/api/files/open")
