@@ -98,6 +98,15 @@ def test_glob_endpoint_returns_matches():
     assert str(GLOB_LOGS[0].resolve()) in paths
 
 
+def test_glob_endpoint_respects_base_dir():
+    base = Path("examples/logs/interleave")
+    resp = client.get(f"/api/files/glob?pattern=*.log&base_dir={base}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    names = {Path(f["path"]).name for f in data["files"]}
+    assert names == {"api.log", "search.log", "worker.log"}
+
+
 def test_cross_service_timeline_rust_path(investigate_module):
     inv = investigate_module
     timeline = inv.cross_service_timeline(

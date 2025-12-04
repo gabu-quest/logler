@@ -423,9 +423,18 @@ async def browse_files(directory: str = "."):
 
 
 @app.get("/api/files/glob")
-async def glob_files(pattern: str = "**/*.log", limit: int = 200):
-    """Search for files by glob pattern within LOG_ROOT."""
-    matches = _glob_within_root(pattern)
+async def glob_files(pattern: str = "**/*.log", base_dir: str = ".", limit: int = 200):
+    """Search for files by glob pattern within LOG_ROOT. When base_dir is provided, pattern is resolved relative to it."""
+    try:
+        base = _ensure_within_root(Path(base_dir))
+    except HTTPException:
+        base = LOG_ROOT
+
+    raw_pattern = pattern
+    if not Path(pattern).is_absolute():
+        raw_pattern = str((base / pattern))
+
+    matches = _glob_within_root(raw_pattern)
     files = []
     for p in matches[:limit]:
         try:
