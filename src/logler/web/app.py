@@ -459,6 +459,12 @@ async def open_many(request: FilesRequest):
     # Sort by timestamp if available
     entries.sort(key=lambda e: e["timestamp"] or "")
 
+    file_counts: Dict[str, int] = {}
+    for entry in entries:
+        file = entry.get("file")
+        if file:
+            file_counts[file] = file_counts.get(file, 0) + 1
+
     for lf in valid_files:
         if lf not in active_files:
             active_files.append(lf)
@@ -467,6 +473,7 @@ async def open_many(request: FilesRequest):
         "files": valid_files,
         "entries": entries,
         "total": len(entries),
+        "file_counts": file_counts,
     }
 
 

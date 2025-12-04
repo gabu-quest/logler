@@ -1,0 +1,5 @@
+2024-01-15T15:00:00Z INFO service=worker thread_id=worker-01 correlation_id=demo-01 message="worker picking task"
+2024-01-15T15:00:01Z INFO service=worker thread_id=worker-01 correlation_id=demo-01 message="queued retry"
+2024-01-15T15:00:02Z ERROR service=worker thread_id=worker-02 correlation_id=demo-02 message="job failed: timeout"
+2024-01-15T15:00:03Z INFO service=worker thread_id=worker-02 correlation_id=demo-02 message="retry scheduled"
+2024-01-15T15:00:04Z INFO service=worker thread_id=worker-03 correlation_id=demo-03 message="task done"

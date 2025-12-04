@@ -1,0 +1,5 @@
+2024-01-15T15:00:00.500Z INFO service=search thread_id=search-100 correlation_id=demo-01 message="search start"
+2024-01-15T15:00:01.000Z INFO service=search thread_id=search-100 correlation_id=demo-01 message="query cache cold"
+2024-01-15T15:00:01.500Z ERROR service=search thread_id=search-101 correlation_id=demo-02 message="upstream timeout"
+2024-01-15T15:00:02.000Z WARN service=search thread_id=search-101 correlation_id=demo-02 message="backing off"
+2024-01-15T15:00:02.500Z INFO service=search thread_id=search-102 correlation_id=demo-03 message="search ok"

@@ -135,6 +135,13 @@
                     <h2 class="text-lg font-semibold mb-3 flex items-center">
                         <span class="mr-2">📄</span> Active Files
                     </h2>
+                    <div x-show="interleaved && Object.keys(interleaveCounts).length > 0" class="flex flex-wrap gap-2 mb-3">
+                        <template x-for="(count, path) in interleaveCounts" :key="'chip-' + path">
+                            <span class="thread-badge bg-white bg-opacity-10 border-white/20 rounded-full px-2 py-1 text-xs" :title="path + ' — ' + count + ' rows'">
+                                <span x-text="(path.split('/').pop() || path) + ' • ' + count"></span>
+                            </span>
+                        </template>
+                    </div>
                     <div x-show="activeFiles.length === 0" class="text-sm text-gray-300">
                         No files open yet
                     </div>
@@ -142,7 +149,9 @@
                         <template x-for="file in activeFiles" :key="file">
                             <div class="p-2 bg-white bg-opacity-10 rounded cursor-pointer hover:bg-opacity-20 transition relative" @click="selectFile(file)" :title="file">
                                 <div class="text-sm font-mono truncate" x-text="file.split('/').pop()"></div>
-                                <div x-show="interleaved && currentFiles.includes(file)" class="absolute top-1 right-1 text-[10px] text-amber-300">interleaved</div>
+                                <div x-show="interleaved && currentFiles.includes(file)" class="absolute top-1 right-1 text-[10px] text-amber-300" :title="(interleaveCounts[file] || 0) + ' rows'">
+                                    interleaved
+                                </div>
                             </div>
                         </template>
                     </div>
@@ -399,6 +408,7 @@
                 currentFile: null,
                 currentFiles: [],
                 interleaved: false,
+                interleaveCounts: {},
                 entries: [],
                 filteredEntries: [],
                 visibleEntries: [],
@@ -550,6 +560,7 @@
                     this.loading = false;
                     this.currentFile = null;
                     this.currentFiles = data.files || [];
+                    this.interleaveCounts = data.file_counts || {};
                     this.activeFiles = Array.from(new Set([...this.activeFiles, ...this.currentFiles]));
                     this.interleaved = true;
                     this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
@@ -622,6 +633,7 @@
                         this.currentFile = quickData.file_path;
                         this.currentFiles = [quickData.file_path];
                         this.interleaved = false;
+                        this.interleaveCounts = {};
                         if (!this.activeFiles.includes(this.currentFile)) {
                             this.activeFiles.push(this.currentFile);
                         }

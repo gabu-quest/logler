@@ -1,0 +1,5 @@
+2024-01-15T15:00:00Z INFO service=api thread_id=api-001 correlation_id=demo-01 message="API start"
+2024-01-15T15:00:01Z WARN service=api thread_id=api-001 correlation_id=demo-01 message="cache miss spike"
+2024-01-15T15:00:02Z ERROR service=api thread_id=api-002 correlation_id=demo-02 message="timeout talking to search"
+2024-01-15T15:00:03Z INFO service=api thread_id=api-002 correlation_id=demo-02 message="retrying request"
+2024-01-15T15:00:04Z INFO service=api thread_id=api-003 correlation_id=demo-03 message="API ok"
