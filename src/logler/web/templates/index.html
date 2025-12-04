@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Logler - Beautiful Log Viewer</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%23111a2c'/><text x='50%' y='50%' dy='.35em' text-anchor='middle' font-family='monospace' font-size='28' fill='%23b3c7ff'>L</text></svg>">
-    <link rel="stylesheet" href="/static/css/tailwind.css">
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='logler-logo.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/tailwind.css') }}">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://unpkg.com/htmx-ext-ws@2.0.1/ws.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -111,8 +111,11 @@
     <header class="glass-card text-white p-4">
         <div class="container mx-auto flex items-center justify-between">
             <div class="flex items-center space-x-3">
-                <span class="text-3xl">🔍</span>
-                <h1 class="text-2xl font-bold">Logler</h1>
+                <img src="{{ url_for('static', path='logler-logo.png') }}" alt="Logler logo" class="h-8 w-8 rounded-lg bg-white bg-opacity-5 border border-white/10 shadow-lg">
+                <div>
+                    <h1 class="text-2xl font-bold">Logler</h1>
+                    <p class="text-xs text-gray-300 hidden sm:block">Beautiful Log Viewer</p>
+                </div>
             </div>
             <div class="flex items-center space-x-4">
                 <span x-show="websocketConnected" class="flex items-center space-x-2">
@@ -264,6 +267,9 @@
                     </div>
                 </div>
                 <div class="flex items-center space-x-2">
+                    <button x-show="partialLoad && !indexing" @click="loadFullCurrent()" class="px-3 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-sm transition">
+                        Load full log
+                    </button>
                     <button @click="autoScroll = !autoScroll"
                             :class="autoScroll ? 'bg-green-500' : 'bg-white bg-opacity-20'"
                             class="px-3 py-1 rounded text-sm hover:opacity-80 transition">
@@ -280,7 +286,7 @@
             <div class="flex-1 log-viewer overflow-auto" id="log-container" @scroll="handleScroll()">
                 <div x-show="!currentFile" class="flex items-center justify-center h-full">
                     <div class="text-center text-gray-500">
-                        <div class="text-6xl mb-4">📁</div>
+                        <img src="{{ url_for('static', path='logler-logo.png') }}" alt="Logler logo" class="h-12 w-12 mx-auto mb-4 opacity-90">
                         <div class="text-xl mb-2">No file opened</div>
                         <div class="text-sm">Click "Open File" to get started</div>
                     </div>
@@ -420,6 +426,7 @@
                 loading: false,
                 indexing: false,
                 partialLoad: false,
+                skipFullIndex: true,
                 followSocket: null,
                 stats: {
                     total: 0,
@@ -591,6 +598,7 @@
                     this.loading = true;
                     this.partialLoad = false;
                     this.indexing = false;
+                    this.skipFullIndex = true;
 
                     const quickPayload = {
                         path,
@@ -621,46 +629,19 @@
                         this.entries = (quickData.entries || []).slice(-this.MAX_ENTRIES);
                         this.totalAvailable = quickData.total || this.entries.length;
                         this.selectedThreads = [];
-                        this.threadSearch = '';
-                        this.partialLoad = !!quickData.partial;
-                        this.loading = false;
-                        await this.applyFilters();
-                        await this.loadThreads();
-                        this.updateStats();
-                        if (this.autoScroll) {
+                            this.threadSearch = '';
+                            this.partialLoad = !!quickData.partial;
+                            this.skipFullIndex = true;
+                            this.loading = false;
+                            await this.applyFilters();
+                            await this.loadThreads();
+                            this.updateStats();
+                            if (this.autoScroll) {
                             this.$nextTick(() => this.scrollToBottom());
                         }
 
                         // Kick off full indexing in the background
-                        this.indexing = true;
-                        const fullPayload = {
-                            path,
-                            filters: this.currentFilterPayload(),
-                            limit: this.MAX_ENTRIES,
-                        };
-                        fetch('/api/files/open', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify(fullPayload),
-                        }).then(r => r.json()).then(data => {
-                            if (data.error || this.currentFile !== data.file_path) {
-                                return;
-                            }
-                            this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
-                            this.totalAvailable = data.total || this.entries.length;
-                            this.selectedThreads = [];
-                            this.threadSearch = '';
-                            this.partialLoad = false;
-                            this.applyFilters();
-                            this.loadThreads();
-                            this.updateStats();
-                            this.indexing = false;
-                            if (this.autoScroll) {
-                                this.$nextTick(() => this.scrollToBottom());
-                            }
-                        }).catch(() => {
-                            this.indexing = false;
-                        });
+                        this.indexing = false;
                     } catch (e) {
                         console.error(e);
                         alert('Failed to open file');
@@ -676,8 +657,32 @@
                 },
 
                 async applyFilters() {
-                    // Try server-side filtering to avoid shipping unused rows (skip during partial/indexing)
-                    if (this.currentFiles.length > 0 && !this.isFollowing && !(this.indexing && this.partialLoad)) {
+                    if (this.partialLoad || this.indexing) {
+                        this.filteredEntries = this.entries;
+                        if (this.searchQuery) {
+                            const query = this.searchQuery.toLowerCase();
+                            this.filteredEntries = this.filteredEntries.filter(e => (e.message || '').toLowerCase().includes(query));
+                        }
+                        if (this.correlationFilter) {
+                            const cq = this.correlationFilter.toLowerCase();
+                            this.filteredEntries = this.filteredEntries.filter(e => (e.correlation_id || '').toLowerCase().includes(cq));
+                        }
+                        if (this.selectedLevels.length > 0) {
+                            this.filteredEntries = this.filteredEntries.filter(e => this.selectedLevels.includes(e.level));
+                        }
+                        if (this.selectedThreads.length > 0) {
+                            const set = new Set(this.selectedThreads);
+                            this.filteredEntries = this.filteredEntries.filter(e => set.has(e.thread_id));
+                        }
+                        this.$nextTick(() => {
+                            this.updateVisibleEntries(this.autoScroll);
+                            this.updateStats();
+                        });
+                        return;
+                    }
+
+                    // Try server-side filtering to avoid shipping unused rows
+                    if (this.currentFiles.length > 0 && !this.isFollowing) {
                         const payload = {
                             paths: this.currentFiles,
                             filters: this.currentFilterPayload(),
@@ -770,6 +775,47 @@
                 clearThreadSelection() {
                     this.selectedThreads = [];
                     this.applyFilters();
+                },
+
+                async loadFullCurrent() {
+                    if (!this.currentFile) return;
+                    this.indexing = true;
+                    this.partialLoad = false;
+                    this.skipFullIndex = false;
+                    try {
+                        const response = await fetch('/api/files/open', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                path: this.currentFile,
+                                filters: this.currentFilterPayload(),
+                                limit: this.MAX_ENTRIES,
+                                quick: false,
+                            }),
+                        });
+                        const data = await response.json();
+                        if (data.error) {
+                            alert(data.error);
+                            this.indexing = false;
+                            return;
+                        }
+                        this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
+                        this.totalAvailable = data.total || this.entries.length;
+                        this.selectedThreads = [];
+                        this.threadSearch = '';
+                        this.partialLoad = false;
+                        this.applyFilters();
+                        this.loadThreads();
+                        this.updateStats();
+                        if (this.autoScroll) {
+                            this.$nextTick(() => this.scrollToBottom());
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        alert('Failed to load full log');
+                    } finally {
+                        this.indexing = false;
+                    }
                 },
 
                 filteredThreadPool() {
