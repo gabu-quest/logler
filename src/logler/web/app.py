@@ -323,7 +323,7 @@ class FileRequest(BaseModel):
     path: str
     filters: Optional[Dict[str, Any]] = None
     limit: Optional[int] = None
-    quick: Optional[bool] = False
+    quick: Optional[bool] = None
 
 
 class FilesRequest(BaseModel):
@@ -399,7 +399,8 @@ async def open_file(request: FileRequest):
     if not file_path.exists():
         return {"error": "File not found"}
 
-    if request.quick:
+    quick_mode = request.quick is not False  # default to quick unless explicitly disabled
+    if quick_mode:
         tracker = ThreadTracker()
         quick_limit = min(request.limit or 1000, MAX_RETURNED_ENTRIES)
         entries, total_lines = _tail_entries(file_path, quick_limit)

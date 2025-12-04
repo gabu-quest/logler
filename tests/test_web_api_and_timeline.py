@@ -35,6 +35,7 @@ def test_open_api_returns_service_names_and_totals():
     assert len(data["entries"]) == 1000  # capped slice
     assert any(entry.get("service_name") for entry in data["entries"])
     assert any(entry.get("level") == "ERROR" for entry in data["entries"])
+    assert data.get("partial") is True  # quick mode default
 
 
 def test_threads_endpoint_populated_after_rust_load():
