@@ -57,6 +57,16 @@ def test_threads_endpoint_populated_after_rust_load():
     assert all(str(entry["level"]).isupper() for entry in filtered)
 
 
+def test_quick_open_returns_partial_tail():
+    resp = client.post("/api/files/open", json={"path": str(HUGE_LOG), "quick": True, "limit": 200})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    assert data.get("partial") is True
+    assert data["total"] >= len(data["entries"])
+    assert len(data["entries"]) == 200
+
+
 def test_open_many_interleaves_and_preserves_service_names():
     resp = client.post("/api/files/open_many", json={"paths": [str(p) for p in GLOB_LOGS]})
     assert resp.status_code == 200, resp.text

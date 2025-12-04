@@ -234,7 +234,17 @@
         </aside>
 
         <!-- Main Content -->
-        <main class="flex-1 flex flex-col overflow-hidden">
+        <main class="flex-1 flex flex-col overflow-hidden relative">
+            <div x-show="loading" class="absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-30 flex items-center justify-center">
+                <div class="flex flex-col items-center gap-3">
+                    <div class="h-10 w-10 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <div class="text-sm text-gray-200">Loading log...</div>
+                </div>
+            </div>
+            <div x-show="indexing && !loading" class="absolute top-3 right-3 z-20 px-3 py-2 rounded-lg bg-white bg-opacity-10 border border-white/20 text-xs flex items-center gap-2">
+                <span class="h-3 w-3 rounded-full bg-amber-400 animate-pulse"></span>
+                <span>Indexing large log…</span>
+            </div>
             <!-- Toolbar -->
             <div class="glass-card text-white p-3 flex items-center justify-between">
                 <div class="flex items-center space-x-4">
@@ -243,6 +253,7 @@
                             <span>Showing <span x-text="visibleEntries.length"></span></span>
                             <span x-show="totalAvailable > 0" class="text-xs text-gray-400">(of <span x-text="totalAvailable"></span> total)</span>
                             <span x-show="filteredEntries.length > MAX_ENTRIES" class="text-xs text-gray-400">(latest window)</span>
+                            <span x-show="partialLoad" class="text-xs text-amber-300">Quick view</span>
                         </div>
                         <div class="text-xs text-gray-300" x-show="interleaved">
                             Interleaved: <span x-text="currentFiles.join(', ')"></span>
@@ -406,6 +417,9 @@
                 ignoreScrollEvents: false,
                 websocketConnected: false,
                 isFollowing: false,
+                loading: false,
+                indexing: false,
+                partialLoad: false,
                 followSocket: null,
                 stats: {
                     total: 0,
@@ -521,12 +535,14 @@
                     if (this.isFollowing && this.followSocket) {
                         this.followSocket.close();
                     }
+                    this.loading = true;
                     const response = await fetch('/api/files/open_many', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({paths: this.selectedPaths, filters: this.currentFilterPayload(), limit: this.MAX_ENTRIES})
                     });
                     const data = await response.json();
+                    this.loading = false;
                     this.currentFile = null;
                     this.currentFiles = data.files || [];
                     this.interleaved = true;
@@ -572,35 +588,84 @@
                     if (this.isFollowing && this.followSocket) {
                         this.followSocket.close();
                     }
+                    this.loading = true;
+                    this.partialLoad = false;
+                    this.indexing = false;
 
-                    const response = await fetch('/api/files/open', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({path, filters: this.currentFilterPayload(), limit: this.MAX_ENTRIES})
-                    });
-                    const data = await response.json();
+                    const quickPayload = {
+                        path,
+                        filters: this.currentFilterPayload(),
+                        limit: this.MAX_ENTRIES,
+                        quick: true,
+                    };
 
-                    if (data.error) {
-                        alert(data.error);
-                        return;
-                    }
+                    try {
+                        const quickResp = await fetch('/api/files/open', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(quickPayload),
+                        });
+                        const quickData = await quickResp.json();
+                        if (quickData.error) {
+                            alert(quickData.error);
+                            this.loading = false;
+                            return;
+                        }
 
-                    this.currentFile = data.file_path;
-                    this.currentFiles = [data.file_path];
-                    this.interleaved = false;
-                    if (!this.activeFiles.includes(this.currentFile)) {
-                        this.activeFiles.push(this.currentFile);
-                    }
-                    this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
-                    this.totalAvailable = data.total || this.entries.length;
-                    this.selectedThreads = [];
-                    this.threadSearch = '';
-                    await this.applyFilters();
-                    await this.loadThreads();
-                    this.updateStats();
+                        this.currentFile = quickData.file_path;
+                        this.currentFiles = [quickData.file_path];
+                        this.interleaved = false;
+                        if (!this.activeFiles.includes(this.currentFile)) {
+                            this.activeFiles.push(this.currentFile);
+                        }
+                        this.entries = (quickData.entries || []).slice(-this.MAX_ENTRIES);
+                        this.totalAvailable = quickData.total || this.entries.length;
+                        this.selectedThreads = [];
+                        this.threadSearch = '';
+                        this.partialLoad = !!quickData.partial;
+                        this.loading = false;
+                        await this.applyFilters();
+                        await this.loadThreads();
+                        this.updateStats();
+                        if (this.autoScroll) {
+                            this.$nextTick(() => this.scrollToBottom());
+                        }
 
-                    if (this.autoScroll) {
-                        this.$nextTick(() => this.scrollToBottom());
+                        // Kick off full indexing in the background
+                        this.indexing = true;
+                        const fullPayload = {
+                            path,
+                            filters: this.currentFilterPayload(),
+                            limit: this.MAX_ENTRIES,
+                        };
+                        fetch('/api/files/open', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(fullPayload),
+                        }).then(r => r.json()).then(data => {
+                            if (data.error || this.currentFile !== data.file_path) {
+                                return;
+                            }
+                            this.entries = (data.entries || []).slice(-this.MAX_ENTRIES);
+                            this.totalAvailable = data.total || this.entries.length;
+                            this.selectedThreads = [];
+                            this.threadSearch = '';
+                            this.partialLoad = false;
+                            this.applyFilters();
+                            this.loadThreads();
+                            this.updateStats();
+                            this.indexing = false;
+                            if (this.autoScroll) {
+                                this.$nextTick(() => this.scrollToBottom());
+                            }
+                        }).catch(() => {
+                            this.indexing = false;
+                        });
+                    } catch (e) {
+                        console.error(e);
+                        alert('Failed to open file');
+                        this.loading = false;
+                        this.indexing = false;
                     }
                 },
 
@@ -611,8 +676,8 @@
                 },
 
                 async applyFilters() {
-                    // Try server-side filtering to avoid shipping unused rows
-                    if (this.currentFiles.length > 0 && !this.isFollowing) {
+                    // Try server-side filtering to avoid shipping unused rows (skip during partial/indexing)
+                    if (this.currentFiles.length > 0 && !this.isFollowing && !(this.indexing && this.partialLoad)) {
                         const payload = {
                             paths: this.currentFiles,
                             filters: this.currentFilterPayload(),

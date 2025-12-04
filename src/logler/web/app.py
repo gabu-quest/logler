@@ -16,6 +16,7 @@ from pydantic import BaseModel
 import aiofiles
 
 from ..parser import LogEntry, LogParser
+from ..log_reader import LogReader
 from ..tracker import ThreadTracker
 
 # Get package directory
@@ -246,6 +247,37 @@ def filter_entries(
     return [_normalize_entry_dict(e) for e in entries if isinstance(e, dict)]
 
 
+def _tail_entries(path: Path, limit: int) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Fast tail path: avoids indexing the entire file and only parses the last N lines.
+    Returns parsed entries and the total line count.
+    """
+    total_lines = sum(1 for _ in path.open("r", encoding="utf-8", errors="replace"))
+    reader = LogReader(str(path))
+    raw_lines = list(reader.tail(num_lines=limit, follow=False))
+    start_line = max(1, total_lines - len(raw_lines) + 1)
+
+    entries: List[Dict[str, Any]] = []
+    for idx, raw in enumerate(raw_lines):
+        line_no = start_line + idx
+        entry = parser.parse_line(line_no, raw.rstrip())
+        entries.append({
+            "entry_id": f"{path}:{line_no}",
+            "file": str(path),
+            "line_number": line_no,
+            "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
+            "level": entry.level,
+            "message": entry.message,
+            "thread_id": entry.thread_id,
+            "correlation_id": entry.correlation_id,
+            "service_name": entry.service_name,
+            "trace_id": entry.trace_id,
+            "span_id": entry.span_id,
+        })
+
+    return entries, total_lines
+
+
 def sample_entries(entries: List[Dict[str, Any]], per_level: Optional[int], per_thread: Optional[int]) -> List[Dict[str, Any]]:
     if not entries:
         return entries
@@ -291,6 +323,7 @@ class FileRequest(BaseModel):
     path: str
     filters: Optional[Dict[str, Any]] = None
     limit: Optional[int] = None
+    quick: Optional[bool] = False
 
 
 class FilesRequest(BaseModel):
@@ -365,6 +398,19 @@ async def open_file(request: FileRequest):
 
     if not file_path.exists():
         return {"error": "File not found"}
+
+    if request.quick:
+        tracker = ThreadTracker()
+        quick_limit = min(request.limit or 1000, MAX_RETURNED_ENTRIES)
+        entries, total_lines = _tail_entries(file_path, quick_limit)
+        tracker = ThreadTracker()
+        _track_entries(entries)
+        return {
+            "file_path": str(file_path),
+            "entries": entries,
+            "total": total_lines,
+            "partial": True,
+        }
 
     # Reset tracker to avoid double-counting between file loads
     tracker = ThreadTracker()
