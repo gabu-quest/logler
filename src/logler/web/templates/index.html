@@ -353,10 +353,19 @@
                 </template>
                 <template x-if="browseMode === 'glob'">
                     <div class="flex gap-2">
-                        <input type="text" x-model="globPattern" @keyup.enter="searchGlob()"
-                               placeholder="Pattern (e.g. **/*.log)"
-                               class="w-full px-4 py-2 bg-white bg-opacity-10 border border-white border-opacity-20 rounded focus:outline-none focus:ring-2 focus:ring-purple-400">
-                        <button @click="searchGlob" class="px-3 py-2 bg-white bg-opacity-20 rounded hover:bg-opacity-30">Search</button>
+                        <div class="flex-1">
+                            <label class="text-xs text-gray-300 block mb-1">Pattern</label>
+                            <input type="text" x-model="globPattern" @keyup.enter="searchGlob()"
+                                   placeholder="Pattern (e.g. **/*.log)"
+                                   class="w-full px-4 py-2 bg-white bg-opacity-10 border border-white border-opacity-20 rounded focus:outline-none focus:ring-2 focus:ring-purple-400">
+                        </div>
+                        <div class="flex-1">
+                            <label class="text-xs text-gray-300 block mb-1">Base directory</label>
+                            <input type="text" x-model="globBaseDir" @keyup.enter="searchGlob()"
+                                   placeholder="Base directory"
+                                   class="w-full px-4 py-2 bg-white bg-opacity-10 border border-white border-opacity-20 rounded focus:outline-none focus:ring-2 focus:ring-purple-400">
+                        </div>
+                        <button @click="searchGlob" class="px-3 py-2 bg-white bg-opacity-20 rounded hover:bg-opacity-30 self-end">Search</button>
                     </div>
                 </template>
             </div>
@@ -382,7 +391,10 @@
                         <div class="file-item p-3 rounded bg-white bg-opacity-5 flex items-center justify-between">
                             <div class="flex items-center space-x-2 cursor-pointer" @click="openFile(file.path); showFilePicker = false">
                                 <span>📄</span>
-                                <span class="font-mono text-sm" x-text="file.name"></span>
+                                <div class="flex flex-col">
+                                    <span class="font-mono text-sm truncate" x-text="file.name"></span>
+                                    <span class="text-[11px] text-gray-400 truncate" x-text="file.path"></span>
+                                </div>
                             </div>
                             <div class="flex items-center space-x-3">
                                 <input type="checkbox" :value="file.path" x-model="selectedPaths">
@@ -480,6 +492,7 @@
                 selectedPaths: [],
                 browseMode: 'browse',
                 globPattern: '**/*.log',
+                globBaseDir: '.',
                 globResults: [],
                 globLoading: false,
                 globError: '',
@@ -676,6 +689,7 @@
                 async browseDirectory(dir) {
                     this.browseMode = 'browse';
                     this.globError = '';
+                    this.globBaseDir = dir || '.';
                     const response = await fetch(`/api/files/browse?directory=${encodeURIComponent(dir)}`);
                     const data = await response.json();
                     this.currentDir = data.current_dir || dir;
@@ -687,6 +701,8 @@
                 toggleBrowseMode(mode) {
                     this.browseMode = mode;
                     if (mode === 'glob' && this.globResults.length === 0) {
+                        this.globBaseDir = this.currentDir || '.';
+                        this.globPattern = '**/*.log';
                         this.searchGlob();
                     }
                 },
@@ -695,7 +711,7 @@
                     this.globLoading = true;
                     this.globError = '';
                     try {
-                        const resp = await fetch(`/api/files/glob?pattern=${encodeURIComponent(this.globPattern)}`);
+                        const resp = await fetch(`/api/files/glob?pattern=${encodeURIComponent(this.globPattern)}&base_dir=${encodeURIComponent(this.globBaseDir)}`);
                         const data = await resp.json();
                         this.globResults = data.files || [];
                         this.globError = data.truncated ? `Showing first ${this.globResults.length} of ${data.count} matches` : '';
