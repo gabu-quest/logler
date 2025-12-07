@@ -419,6 +419,7 @@ async def browse_files(directory: str = "."):
         "parent_dir": str(parent_dir) if parent_dir else None,
         "files": files,
         "directories": directories,
+        "log_root": str(LOG_ROOT),
     }
 
 
