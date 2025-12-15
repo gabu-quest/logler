@@ -117,12 +117,6 @@ impl LogParser {
     }
 
     pub fn parse_line(&self, line_number: usize, raw: &str) -> anyhow::Result<LogEntry> {
-        if let Some(regex) = &self.config.custom_regex {
-            if let Some(entry) = self.try_parse_custom(line_number, raw, regex) {
-                return Ok(entry);
-            }
-        }
-
         let format = self
             .config
             .force_format
@@ -140,7 +134,29 @@ impl LogParser {
                 .and_then(|regex| self.try_parse_custom(line_number, raw, regex)),
         };
 
-        Ok(parsed.unwrap_or_else(|| self.parse_plain(line_number, raw)))
+        let mut entry = parsed.unwrap_or_else(|| self.parse_plain(line_number, raw));
+
+        // If a custom regex was provided but not matched earlier, try again on the parsed line.
+        if entry.format == LogFormat::PlainText {
+            if let Some(regex) = &self.config.custom_regex {
+                if let Some(custom_entry) = self.try_parse_custom(line_number, raw, regex) {
+                    entry = custom_entry;
+                }
+            }
+        }
+
+        // Fallback: if syslog priority is present but detection missed, still parse as syslog.
+        if entry.format == LogFormat::PlainText {
+            if let Some(syslog_re) = SYSLOG_PRIORITY_RE.get() {
+                if syslog_re.is_match(raw) {
+                    if let Some(syslog_entry) = self.parse_syslog(line_number, raw) {
+                        entry = syslog_entry;
+                    }
+                }
+            }
+        }
+
+        Ok(entry)
     }
 
     pub fn detect_format(line: &str) -> LogFormat {
@@ -387,8 +403,7 @@ impl LogParser {
 
         entry.timestamp = caps
             .name("timestamp")
-            .and_then(|m| DateTime::parse_from_rfc3339(m.as_str()).ok())
-            .map(|dt| dt.with_timezone(&Utc));
+            .and_then(|m| self.parse_timestamp_flex(m.as_str()));
         entry.level = caps
             .name("level")
             .and_then(|m| LogLevel::from_str(m.as_str()));
@@ -413,6 +428,19 @@ impl LogParser {
         }
 
         Some(entry)
+    }
+
+    fn parse_timestamp_flex(&self, value: &str) -> Option<DateTime<Utc>> {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
+            return Some(dt.with_timezone(&Utc));
+        }
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S") {
+            return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+        }
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(value, "%d-%m-%Y %H:%M:%S") {
+            return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+        }
+        None
     }
 
     fn extract_json_timestamp(

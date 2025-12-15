@@ -1,4 +1,5 @@
 use logler_core::*;
+use regex::Regex;
 use pyo3::prelude::*;
 use std::path::PathBuf;
 
@@ -22,6 +23,33 @@ impl PyInvestigator {
         let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
         self.investigator
             .load_files(&paths)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Load log files with optional parser config (force_format/custom_regex)
+    fn load_files_with_config(
+        &mut self,
+        files: Vec<String>,
+        force_format: Option<String>,
+        custom_regex: Option<String>,
+    ) -> PyResult<()> {
+        let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+
+        let mut config = logler_core::ParserConfig::new();
+
+        if let Some(format_str) = force_format.as_ref() {
+            let fmt = parse_format_string(format_str)?;
+            config = config.with_force_format(fmt);
+        }
+
+        if let Some(re) = custom_regex.as_ref() {
+            let regex = Regex::new(re)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+            config = config.with_custom_regex(regex);
+        }
+
+        self.investigator
+            .load_files_with_config(&paths, &config)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
@@ -68,7 +96,13 @@ impl PyInvestigator {
     ) -> PyResult<String> {
         let context = self
             .investigator
-            .get_context(&file, line_number, lines_before, lines_after, include_related_threads)
+            .get_context(
+                &file,
+                line_number,
+                lines_before,
+                lines_after,
+                include_related_threads,
+            )
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         serde_json::to_string(&context)
@@ -214,4 +248,20 @@ fn logler_rs(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_patterns, m)?)?;
     m.add_function(wrap_pyfunction!(get_metadata, m)?)?;
     Ok(())
+}
+
+fn parse_format_string(fmt: &str) -> PyResult<logler_core::LogFormat> {
+    let fmt_lower = fmt.to_lowercase();
+    match fmt_lower.as_str() {
+        "json" => Ok(logler_core::LogFormat::Json),
+        "plain" | "plaintext" | "text" => Ok(logler_core::LogFormat::PlainText),
+        "syslog" => Ok(logler_core::LogFormat::Syslog),
+        "commonlog" | "clf" => Ok(logler_core::LogFormat::CommonLog),
+        "logfmt" => Ok(logler_core::LogFormat::Logfmt),
+        "custom" => Ok(logler_core::LogFormat::Custom),
+        other => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Unknown log format: {}",
+            other
+        ))),
+    }
 }
