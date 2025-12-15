@@ -29,6 +29,7 @@ Example Usage:
 """
 
 import json
+import re
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from collections import defaultdict
@@ -57,6 +58,20 @@ def _normalize_entry(entry: Dict[str, Any]) -> None:
     level = entry.get("level")
     if isinstance(level, str):
         entry["level"] = level.upper()
+    raw = entry.get("raw") or ""
+    if entry.get("format") is None and isinstance(raw, str):
+        stripped = raw.lstrip()
+        if stripped.startswith("{"):
+            entry["format"] = "Json"
+        elif stripped.startswith("<") and stripped[1:2].isdigit():
+            entry["format"] = "Syslog"
+        elif "level=" in raw or " msg=" in raw or raw.startswith("level="):
+            entry["format"] = "Logfmt"
+        else:
+            entry["format"] = "PlainText"
+    if entry.get("level") is None and isinstance(raw, str):
+        inferred = _infer_syslog_level(raw)
+        entry["level"] = inferred or "UNKNOWN"
 
 
 def _normalize_entries(entries: List[Dict[str, Any]]) -> None:
@@ -74,11 +89,86 @@ def _normalize_search_result_levels(result: Dict[str, Any]) -> None:
             _normalize_entry(ctx)
 
 
+def _apply_custom_regex_to_results(result: Dict[str, Any], pattern: Optional[str]) -> None:
+    """Apply a user-provided regex to fill missing fields like timestamp/level."""
+    if not pattern:
+        return
+    try:
+        regex = re.compile(pattern)
+    except re.error:
+        return
+
+    for item in result.get("results", []) or []:
+        _apply_custom_regex_to_entry(item.get("entry", {}), regex)
+        for ctx in item.get("context_before", []) or []:
+            _apply_custom_regex_to_entry(ctx, regex)
+        for ctx in item.get("context_after", []) or []:
+            _apply_custom_regex_to_entry(ctx, regex)
+
+
+def _apply_custom_regex_to_entry(entry: Dict[str, Any], regex: re.Pattern[str]) -> None:
+    if not isinstance(entry, dict):
+        return
+    raw = entry.get("raw") or entry.get("message") or ""
+    match = regex.match(raw)
+    if not match:
+        return
+
+    groups = match.groupdict()
+    ts_val = groups.get("timestamp")
+    if ts_val and not entry.get("timestamp"):
+        parsed = _parse_timestamp_flex(ts_val)
+        if parsed:
+            entry["timestamp"] = parsed
+    if groups.get("level") and not entry.get("level"):
+        entry["level"] = groups["level"].upper()
+    if groups.get("message") and entry.get("message") == raw:
+        entry["message"] = groups["message"]
+    if groups.get("thread") and not entry.get("thread_id"):
+        entry["thread_id"] = groups["thread"]
+    if groups.get("correlation_id") and not entry.get("correlation_id"):
+        entry["correlation_id"] = groups["correlation_id"]
+    entry["format"] = "Custom"
+
+
 def _normalize_pattern_examples(result: Dict[str, Any]) -> None:
     """Normalize example entries inside pattern detection results."""
     for pattern in result.get("patterns", []) or []:
         for example in pattern.get("examples", []) or []:
             _normalize_entry(example)
+
+
+def _infer_syslog_level(raw: str) -> Optional[str]:
+    match = re.match(r"<(?P<priority>\d+)>", raw.strip())
+    if not match:
+        return None
+    try:
+        priority = int(match.group("priority"))
+    except ValueError:
+        return None
+    severity = priority & 0x07
+    if severity == 0:
+        return "FATAL"
+    if severity <= 3:
+        return "ERROR"
+    if severity == 4:
+        return "WARN"
+    if severity <= 6:
+        return "INFO"
+    return "DEBUG"
+
+
+def _parse_timestamp_flex(value: str) -> Optional[str]:
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S", "%d-%m-%Y %H:%M:%S"):
+        try:
+            dt = datetime.strptime(value.replace("Z", "+0000"), fmt)
+            return dt.isoformat()
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
+    except Exception:
+        return None
 
 
 def _normalize_context_payload(payload: Dict[str, Any]) -> None:
@@ -97,6 +187,8 @@ def search(
     limit: Optional[int] = None,
     context_lines: int = 3,
     output_format: str = "full",
+    parser_format: Optional[str] = None,
+    custom_regex: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Search logs with filters.
@@ -158,7 +250,7 @@ def search(
         raise RuntimeError("Rust backend not available")
 
     investigator = logler_rs.PyInvestigator()
-    investigator.load_files(files)
+    _load_files_with_config(investigator, files, parser_format, custom_regex)
 
     # Build query
     filters = {"levels": []}
@@ -194,6 +286,7 @@ def search(
     result_json = investigator.search(json.dumps(query_dict))
     result = json.loads(result_json)
     _normalize_search_result_levels(result)
+    _apply_custom_regex_to_results(result, custom_regex)
 
     # Transform based on output_format
     if output_format == "full":
@@ -213,6 +306,8 @@ def follow_thread(
     thread_id: Optional[str] = None,
     correlation_id: Optional[str] = None,
     trace_id: Optional[str] = None,
+    parser_format: Optional[str] = None,
+    custom_regex: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Follow a thread/correlation/trace through log files.
@@ -234,6 +329,12 @@ def follow_thread(
     """
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
+
+    # Use Investigator when custom parsing is requested so parsing honors the config.
+    if parser_format or custom_regex:
+        inv = Investigator()
+        inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
+        return inv.follow_thread(thread_id=thread_id, correlation_id=correlation_id, trace_id=trace_id)
 
     result_json = logler_rs.follow_thread(files, thread_id, correlation_id, trace_id)
     result = json.loads(result_json)
@@ -279,6 +380,8 @@ def get_context(
 def find_patterns(
     files: List[str],
     min_occurrences: int = 3,
+    parser_format: Optional[str] = None,
+    custom_regex: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Find repeated patterns and anomalies in logs.
@@ -304,6 +407,11 @@ def find_patterns(
     """
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
+
+    if parser_format or custom_regex:
+        inv = Investigator()
+        inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
+        return inv.find_patterns(min_occurrences=min_occurrences)
 
     result_json = logler_rs.find_patterns(files, min_occurrences)
     result = json.loads(result_json)
@@ -363,11 +471,14 @@ class Investigator:
             raise RuntimeError("Rust backend not available")
         self._investigator = logler_rs.PyInvestigator()
         self._files = []
+        self._custom_regex = None
 
-    def load_files(self, files: List[str]):
+    def load_files(self, files: List[str], parser_format: Optional[str] = None,
+                   custom_regex: Optional[str] = None):
         """Load log files and build index."""
-        self._investigator.load_files(files)
+        _load_files_with_config(self._investigator, files, parser_format, custom_regex)
         self._files = files
+        self._custom_regex = custom_regex
 
     def search(
         self,
@@ -379,7 +490,7 @@ class Investigator:
         context_lines: int = 3,
     ) -> Dict[str, Any]:
         """Search loaded files."""
-        filters = {}
+        filters = {"levels": []}
         if level:
             filters["levels"] = [level.upper()]
         if thread_id:
@@ -398,6 +509,7 @@ class Investigator:
         result_json = self._investigator.search(json.dumps(query_dict))
         result = json.loads(result_json)
         _normalize_search_result_levels(result)
+        _apply_custom_regex_to_results(result, self._custom_regex)
         return result
 
     def follow_thread(
@@ -2307,3 +2419,17 @@ def suggest_next_action(current_results: Dict[str, Any], investigation_context: 
         suggestions.append("  - compare_time_periods() - Before/after analysis")
 
     return suggestions
+def _load_files_with_config(
+    inv: Any,
+    files: List[str],
+    parser_format: Optional[str] = None,
+    custom_regex: Optional[str] = None,
+):
+    """Load files with optional parser config; falls back to plain load if config not supported."""
+    try:
+        if parser_format or custom_regex:
+            return inv.load_files_with_config(files, parser_format, custom_regex)
+    except Exception:
+        # Fall back silently to default loader if enhanced path fails
+        pass
+    return inv.load_files(files)
