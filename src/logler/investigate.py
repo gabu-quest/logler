@@ -416,6 +416,7 @@ def find_patterns(
     result_json = logler_rs.find_patterns(files, min_occurrences)
     result = json.loads(result_json)
     _normalize_pattern_examples(result)
+    _apply_custom_regex_to_results(result, custom_regex)
     return result
 
 
@@ -593,7 +594,9 @@ def cross_service_timeline(
     time_window: Optional[Tuple[str, str]] = None,
     correlation_id: Optional[str] = None,
     trace_id: Optional[str] = None,
-    limit: Optional[int] = None
+    limit: Optional[int] = None,
+    parser_format: Optional[str] = None,
+    custom_regex: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a unified timeline across multiple services/log files.
@@ -670,7 +673,7 @@ def cross_service_timeline(
             entries = result.get('entries', [])
         else:
             # Get all entries
-            result = search(service_files, limit=None)
+            result = search(service_files, limit=None, parser_format=parser_format, custom_regex=custom_regex)
             entries = [r['entry'] for r in result.get('results', [])]
 
         # Add service label to each entry
