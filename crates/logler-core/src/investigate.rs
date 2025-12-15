@@ -1,4 +1,5 @@
 use crate::index::LogIndex;
+use crate::parser::ParserConfig;
 use crate::types::*;
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
@@ -21,9 +22,18 @@ impl Investigator {
 
     /// Load log files and build indices
     pub fn load_files(&mut self, files: &[PathBuf]) -> anyhow::Result<()> {
+        self.load_files_with_config(files, &ParserConfig::default())
+    }
+
+    /// Load log files with a custom parser configuration (custom regex/forced format).
+    pub fn load_files_with_config(
+        &mut self,
+        files: &[PathBuf],
+        config: &ParserConfig,
+    ) -> anyhow::Result<()> {
         for file in files {
             let path_str = file.to_string_lossy().to_string();
-            let index = LogIndex::build(file)?;
+            let index = LogIndex::build_with_config(file, config)?;
             self.indices.insert(path_str, index);
         }
         Ok(())
@@ -54,11 +64,9 @@ impl Investigator {
             b.relevance_score
                 .partial_cmp(&a.relevance_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    match (&a.entry.timestamp, &b.entry.timestamp) {
-                        (Some(t1), Some(t2)) => t1.cmp(t2),
-                        _ => std::cmp::Ordering::Equal,
-                    }
+                .then_with(|| match (&a.entry.timestamp, &b.entry.timestamp) {
+                    (Some(t1), Some(t2)) => t1.cmp(t2),
+                    _ => std::cmp::Ordering::Equal,
                 })
         });
 
@@ -77,10 +85,15 @@ impl Investigator {
     }
 
     /// Search within a single index
-    fn search_in_index(&self, index: &LogIndex, query: &SearchQuery) -> anyhow::Result<Vec<SearchResult>> {
-        let entries = index.entries.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Index has no entries loaded")
-        })?;
+    fn search_in_index(
+        &self,
+        index: &LogIndex,
+        query: &SearchQuery,
+    ) -> anyhow::Result<Vec<SearchResult>> {
+        let entries = index
+            .entries
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Index has no entries loaded"))?;
 
         let results: Vec<SearchResult> = entries
             .par_iter()
@@ -232,13 +245,11 @@ impl Investigator {
         }
 
         // Sort by timestamp
-        all_entries.sort_by(|a, b| {
-            match (&a.timestamp, &b.timestamp) {
-                (Some(t1), Some(t2)) => t1.cmp(t2),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => a.line_number.cmp(&b.line_number),
-            }
+        all_entries.sort_by(|a, b| match (&a.timestamp, &b.timestamp) {
+            (Some(t1), Some(t2)) => t1.cmp(t2),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.line_number.cmp(&b.line_number),
         });
 
         let duration_ms = if !all_entries.is_empty() {
@@ -276,16 +287,18 @@ impl Investigator {
         lines_after: usize,
         include_related_threads: bool,
     ) -> anyhow::Result<LogContext> {
-        let index = self.indices.get(file).ok_or_else(|| {
-            anyhow::anyhow!("File not indexed: {}", file)
-        })?;
+        let index = self
+            .indices
+            .get(file)
+            .ok_or_else(|| anyhow::anyhow!("File not indexed: {}", file))?;
 
         let target = index
             .get_entry(line_number)
             .ok_or_else(|| anyhow::anyhow!("Line not found: {}", line_number))?
             .clone();
 
-        let (context_before, context_after) = index.get_context(line_number, lines_before, lines_after);
+        let (context_before, context_after) =
+            index.get_context(line_number, lines_before, lines_after);
 
         let related_threads = if include_related_threads {
             let mut related = Vec::new();
@@ -321,7 +334,9 @@ impl Investigator {
 
         for (file_path, index) in &self.indices {
             if !files.is_empty() {
-                let file_matches = files.iter().any(|f| f.to_string_lossy().as_ref() == file_path);
+                let file_matches = files
+                    .iter()
+                    .any(|f| f.to_string_lossy().as_ref() == file_path);
                 if !file_matches {
                     continue;
                 }
@@ -332,7 +347,10 @@ impl Investigator {
                     if matches!(entry.level, Some(LogLevel::Error) | Some(LogLevel::Fatal)) {
                         // Group by message prefix (first 50 chars)
                         let prefix = entry.message.chars().take(50).collect::<String>();
-                        error_messages.entry(prefix).or_insert_with(Vec::new).push(entry.clone());
+                        error_messages
+                            .entry(prefix)
+                            .or_insert_with(Vec::new)
+                            .push(entry.clone());
                     }
                 }
             }
@@ -344,10 +362,8 @@ impl Investigator {
             if entries.len() >= min_occurrences {
                 let first_seen = entries.iter().filter_map(|e| e.timestamp).min().unwrap();
                 let last_seen = entries.iter().filter_map(|e| e.timestamp).max().unwrap();
-                let affected_threads: HashSet<String> = entries
-                    .iter()
-                    .filter_map(|e| e.thread_id.clone())
-                    .collect();
+                let affected_threads: HashSet<String> =
+                    entries.iter().filter_map(|e| e.thread_id.clone()).collect();
 
                 patterns.push(Pattern {
                     pattern_type: PatternType::RepeatedError,
@@ -373,7 +389,9 @@ impl Investigator {
 
         for (file_path, index) in &self.indices {
             if !files.is_empty() {
-                let file_matches = files.iter().any(|f| f.to_string_lossy().as_ref() == file_path);
+                let file_matches = files
+                    .iter()
+                    .any(|f| f.to_string_lossy().as_ref() == file_path);
                 if !file_matches {
                     continue;
                 }
@@ -384,10 +402,8 @@ impl Investigator {
             let entries = index.entries.as_ref().unwrap_or(&empty_vec);
 
             let time_range = if !entries.is_empty() {
-                let timestamps: Vec<DateTime<Utc>> = entries
-                    .iter()
-                    .filter_map(|e| e.timestamp)
-                    .collect();
+                let timestamps: Vec<DateTime<Utc>> =
+                    entries.iter().filter_map(|e| e.timestamp).collect();
                 if !timestamps.is_empty() {
                     Some(TimeRange {
                         start: timestamps.iter().min().copied(),
@@ -400,16 +416,13 @@ impl Investigator {
                 None
             };
 
-            // Detect format
-            let format = if let Some(first_entry) = entries.first() {
-                if first_entry.raw.trim().starts_with('{') {
-                    LogFormat::Json
-                } else {
-                    LogFormat::PlainText
-                }
-            } else {
-                LogFormat::Unknown
-            };
+            // Detect format using the first entry
+            let format = entries
+                .first()
+                .map(|e| crate::parser::LogParser::detect_format(&e.raw))
+                .unwrap_or(LogFormat::Unknown);
+
+            let size_bytes = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
 
             // Get available fields
             let available_fields: HashSet<String> = entries
@@ -419,14 +432,18 @@ impl Investigator {
 
             metadata.push(FileMetadata {
                 path: file_path.clone(),
-                size_bytes: 0, // TODO: get actual file size
+                size_bytes,
                 lines: stats.total_lines,
                 format,
                 time_range,
                 available_fields: available_fields.into_iter().collect(),
                 unique_threads: stats.unique_threads,
                 unique_correlation_ids: stats.unique_correlations,
-                log_levels: stats.level_counts.iter().map(|(k, v)| (k.as_str().to_string(), *v)).collect(),
+                log_levels: stats
+                    .level_counts
+                    .iter()
+                    .map(|(k, v)| (k.as_str().to_string(), *v))
+                    .collect(),
             });
         }
 

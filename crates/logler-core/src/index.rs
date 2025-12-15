@@ -1,4 +1,4 @@
-use crate::parser::LogParser;
+use crate::parser::ParserConfig;
 use crate::types::{LogEntry, LogLevel};
 use dashmap::DashMap;
 use rayon::prelude::*;
@@ -37,9 +37,17 @@ pub struct LogIndex {
 impl LogIndex {
     /// Build index from a log file
     pub fn build<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+        Self::build_with_config(path, &ParserConfig::default())
+    }
+
+    /// Build index with a custom parser configuration (e.g., custom regex).
+    pub fn build_with_config<P: AsRef<Path>>(
+        path: P,
+        config: &ParserConfig,
+    ) -> anyhow::Result<Self> {
         let path = path.as_ref();
         let file_path = path.to_string_lossy().to_string();
-        let parser = LogParser::new(file_path.clone());
+        let parser = config.build_for_file(file_path.clone());
 
         // Phase 1: Build line offsets
         let file = File::open(path)?;
@@ -118,7 +126,10 @@ impl LogIndex {
 
     /// Get entry by line number
     pub fn get_entry(&self, line_number: usize) -> Option<&LogEntry> {
-        self.entries.as_ref()?.iter().find(|e| e.line_number == line_number)
+        self.entries
+            .as_ref()?
+            .iter()
+            .find(|e| e.line_number == line_number)
     }
 
     /// Get entries by line numbers
@@ -170,7 +181,12 @@ impl LogIndex {
     }
 
     /// Get context around a line number
-    pub fn get_context(&self, line_number: usize, before: usize, after: usize) -> (Vec<LogEntry>, Vec<LogEntry>) {
+    pub fn get_context(
+        &self,
+        line_number: usize,
+        before: usize,
+        after: usize,
+    ) -> (Vec<LogEntry>, Vec<LogEntry>) {
         let entries = match &self.entries {
             Some(e) => e,
             None => return (Vec::new(), Vec::new()),
@@ -231,7 +247,11 @@ impl LogIndex {
             unique_threads: self.thread_index.len(),
             unique_correlations: self.correlation_index.len(),
             unique_traces: self.trace_index.len(),
-            level_counts: self.level_index.iter().map(|(k, v)| (*k, v.len())).collect(),
+            level_counts: self
+                .level_index
+                .iter()
+                .map(|(k, v)| (*k, v.len()))
+                .collect(),
         }
     }
 }

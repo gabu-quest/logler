@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use logler_core::{LogFilter, LogReader};
 use std::path::PathBuf;
@@ -62,10 +63,12 @@ async fn main() -> anyhow::Result<()> {
 
             // Apply level filter if specified
             let filtered: Vec<_> = if let Some(level_str) = level {
-                let target_level = logler_core::types::LogLevel::from_str(&level_str);
+                let target_level = logler_core::types::LogLevel::from_str(&level_str)
+                    .filter(|lvl| *lvl != logler_core::types::LogLevel::Unknown)
+                    .ok_or_else(|| anyhow!("Unknown log level: {}", level_str))?;
                 entries
                     .into_iter()
-                    .filter(|e| e.level == target_level)
+                    .filter(|e| e.level == Some(target_level))
                     .collect()
             } else {
                 entries
@@ -83,10 +86,7 @@ async fn main() -> anyhow::Result<()> {
             let mut filter = LogFilter::new();
             filter.pattern = Some(query);
 
-            let results: Vec<_> = entries
-                .into_iter()
-                .filter(|e| filter.matches(e))
-                .collect();
+            let results: Vec<_> = entries.into_iter().filter(|e| filter.matches(e)).collect();
 
             println!("Found {} matching entries:\n", results.len());
             for entry in results {
@@ -119,7 +119,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn format_log_entry(entry: &logler_core::LogEntry) -> String {
-    let level_str = format!("{:?}", entry.level);
+    let level_str = entry
+        .level
+        .map(|lvl| lvl.as_str().to_string())
+        .unwrap_or_else(|| "UNKNOWN".to_string());
     let timestamp = entry
         .timestamp
         .map(|t| t.to_rfc3339())

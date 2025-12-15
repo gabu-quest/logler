@@ -30,17 +30,29 @@
 //! println!("Found {} errors", results.total_matches);
 //! ```
 
+pub mod filter;
 pub mod index;
 pub mod investigate;
 pub mod parser;
+#[cfg(feature = "async")]
+pub mod reader;
+pub mod stats;
+pub mod thread_tracker;
+pub mod trace;
 pub mod types;
 
 #[cfg(feature = "sql")]
 pub mod sql;
 
-pub use index::{LogIndex, IndexStats};
+pub use filter::LogFilter;
+pub use index::{IndexStats, LogIndex};
 pub use investigate::Investigator;
-pub use parser::LogParser;
+pub use parser::{LogParser, ParserConfig};
+#[cfg(feature = "async")]
+pub use reader::LogReader;
+pub use stats::LogStats;
+pub use thread_tracker::ThreadTracker;
+pub use trace::TraceExporter;
 pub use types::*;
 
 #[cfg(feature = "sql")]
@@ -81,7 +93,10 @@ mod tests {
 
         let results = investigator.search(&query).unwrap();
         assert_eq!(results.total_matches, 1);
-        assert_eq!(results.results[0].entry.message, "Database connection failed");
+        assert_eq!(
+            results.results[0].entry.message,
+            "Database connection failed"
+        );
         assert_eq!(results.results[0].context_after.len(), 1);
 
         // Follow thread

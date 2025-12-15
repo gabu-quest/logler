@@ -1,4 +1,5 @@
 use crate::types::{LogEntry, LogLevel};
+use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -11,8 +12,8 @@ pub struct LogFilter {
     pub correlation_id: Option<String>,
     pub trace_id: Option<String>,
     pub service_name: Option<String>,
-    pub time_start: Option<chrono::DateTime<chrono::Utc>>,
-    pub time_end: Option<chrono::DateTime<chrono::Utc>>,
+    pub time_start: Option<DateTime<Utc>>,
+    pub time_end: Option<DateTime<Utc>>,
 }
 
 impl LogFilter {
@@ -33,16 +34,18 @@ impl LogFilter {
     pub fn matches(&self, entry: &LogEntry) -> bool {
         // Filter by log level
         if let Some(ref levels) = self.levels {
-            if !levels.contains(&entry.level) {
-                return false;
+            match entry.level {
+                Some(level) if levels.contains(&level) => {}
+                _ => return false,
             }
         }
 
         // Filter by pattern (case-insensitive substring)
         if let Some(ref pattern) = self.pattern {
-            if !entry.message.to_lowercase().contains(&pattern.to_lowercase())
-                && !entry.raw.to_lowercase().contains(&pattern.to_lowercase())
-            {
+            let pattern_lower = pattern.to_lowercase();
+            let msg = entry.message.to_lowercase();
+            let raw = entry.raw.to_lowercase();
+            if !msg.contains(&pattern_lower) && !raw.contains(&pattern_lower) {
                 return false;
             }
         }

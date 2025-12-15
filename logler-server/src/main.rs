@@ -18,8 +18,9 @@ async fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "logler_server=debug,logler_core=debug,tower_http=debug".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "logler_server=debug,logler_core=debug,tower_http=debug".into()
+            }),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -43,7 +44,10 @@ async fn main() -> Result<()> {
         .route("/api/traces", get(api::get_traces))
         .route("/api/traces/:trace_id", get(api::get_trace))
         .route("/api/correlations", get(api::get_correlations))
-        .route("/api/correlations/:correlation_id", get(api::get_correlation_logs))
+        .route(
+            "/api/correlations/:correlation_id",
+            get(api::get_correlation_logs),
+        )
         .route("/ws", get(api::websocket_handler))
         .layer(CorsLayer::permissive())
         .with_state(state);

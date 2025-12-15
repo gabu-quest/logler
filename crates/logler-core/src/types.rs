@@ -2,20 +2,24 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Log entry representing a single log line
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
+    pub id: Uuid,
     pub file: String,
     pub line_number: usize,
     pub raw: String,
     pub timestamp: Option<DateTime<Utc>>,
     pub level: Option<LogLevel>,
+    pub format: LogFormat,
     pub message: String,
     pub thread_id: Option<String>,
     pub correlation_id: Option<String>,
     pub trace_id: Option<String>,
     pub span_id: Option<String>,
+    pub parent_span_id: Option<String>,
     pub service_name: Option<String>,
     pub fields: HashMap<String, serde_json::Value>,
 }
@@ -29,6 +33,7 @@ pub enum LogLevel {
     Warn,
     Error,
     Fatal,
+    Unknown,
 }
 
 impl LogLevel {
@@ -40,7 +45,7 @@ impl LogLevel {
             "WARN" | "WARNING" => Some(Self::Warn),
             "ERROR" => Some(Self::Error),
             "FATAL" | "CRITICAL" => Some(Self::Fatal),
-            _ => None,
+            _ => Some(Self::Unknown),
         }
     }
 
@@ -52,6 +57,7 @@ impl LogLevel {
             Self::Warn => "WARN",
             Self::Error => "ERROR",
             Self::Fatal => "FATAL",
+            Self::Unknown => "UNKNOWN",
         }
     }
 }
@@ -108,6 +114,37 @@ pub struct ThreadTimeline {
     pub total_entries: usize,
     pub duration_ms: Option<i64>,
     pub unique_spans: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadContext {
+    pub thread_id: String,
+    pub first_seen: DateTime<Utc>,
+    pub last_seen: DateTime<Utc>,
+    pub log_count: usize,
+    pub error_count: usize,
+    pub correlation_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceContext {
+    pub trace_id: String,
+    pub spans: Vec<SpanInfo>,
+    pub services: Vec<String>,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub duration_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpanInfo {
+    pub span_id: String,
+    pub parent_span_id: Option<String>,
+    pub operation_name: Option<String>,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub duration_ms: Option<f64>,
+    pub logs: Vec<Uuid>,
 }
 
 /// Context around a specific log entry
@@ -271,5 +308,8 @@ pub enum LogFormat {
     Json,
     PlainText,
     Syslog,
+    CommonLog,
+    Logfmt,
+    Custom,
     Unknown,
 }

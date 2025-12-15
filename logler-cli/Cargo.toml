@@ -10,7 +10,7 @@ name = "logler"
 path = "src/main.rs"
 
 [dependencies]
-logler-core = { path = "../logler-core" }
+logler-core = { path = "../crates/logler-core", features = ["async"] }
 
 # Async
 tokio.workspace = true

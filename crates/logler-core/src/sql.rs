@@ -1,7 +1,7 @@
 use crate::index::LogIndex;
 use anyhow::Result;
-use duckdb::{params, Connection};
 use chrono::Utc;
+use duckdb::{params, Connection};
 
 /// SQL query engine for advanced log investigation
 pub struct SqlEngine {
@@ -16,7 +16,10 @@ impl SqlEngine {
     }
 
     /// Load log files into SQL tables
-    pub fn load_files(&mut self, indices: &std::collections::HashMap<String, LogIndex>) -> Result<()> {
+    pub fn load_files(
+        &mut self,
+        indices: &std::collections::HashMap<String, LogIndex>,
+    ) -> Result<()> {
         // Create logs table
         self.conn.execute(
             "CREATE TABLE logs (
@@ -95,7 +98,9 @@ impl SqlEngine {
                     duckdb::types::ValueRef::HugeInt(i) => serde_json::json!(i),
                     duckdb::types::ValueRef::Float(f) => serde_json::json!(f),
                     duckdb::types::ValueRef::Double(f) => serde_json::json!(f),
-                    duckdb::types::ValueRef::Text(s) => serde_json::Value::String(String::from_utf8_lossy(s).to_string()),
+                    duckdb::types::ValueRef::Text(s) => {
+                        serde_json::Value::String(String::from_utf8_lossy(s).to_string())
+                    }
                     duckdb::types::ValueRef::Timestamp(unit, v) => {
                         let micros = unit.to_micros(v);
                         let seconds = micros / 1_000_000;
@@ -117,7 +122,9 @@ impl SqlEngine {
 
     /// Get available tables
     pub fn get_tables(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT name FROM sqlite_master WHERE type='table'")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table'")?;
         let tables = stmt
             .query_map([], |row| row.get(0))?
             .collect::<std::result::Result<Vec<String>, _>>()?;
@@ -146,15 +153,15 @@ mod tests {
         let mut engine = SqlEngine::new().unwrap();
 
         // Create test table
-        engine.conn.execute(
-            "CREATE TABLE test (id INTEGER, name TEXT)",
-            [],
-        ).unwrap();
+        engine
+            .conn
+            .execute("CREATE TABLE test (id INTEGER, name TEXT)", [])
+            .unwrap();
 
-        engine.conn.execute(
-            "INSERT INTO test VALUES (1, 'foo')",
-            [],
-        ).unwrap();
+        engine
+            .conn
+            .execute("INSERT INTO test VALUES (1, 'foo')", [])
+            .unwrap();
 
         let result = engine.query("SELECT * FROM test").unwrap();
         assert!(result.contains("foo"));
