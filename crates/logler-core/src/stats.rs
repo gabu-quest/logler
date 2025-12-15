@@ -1,4 +1,5 @@
 use crate::types::{LogEntry, LogLevel};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -9,8 +10,8 @@ pub struct LogStats {
     pub service_counts: HashMap<String, usize>,
     pub thread_counts: HashMap<String, usize>,
     pub error_rate: f64,
-    pub first_timestamp: Option<chrono::DateTime<chrono::Utc>>,
-    pub last_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    pub first_timestamp: Option<DateTime<Utc>>,
+    pub last_timestamp: Option<DateTime<Utc>>,
 }
 
 impl LogStats {
@@ -38,10 +39,13 @@ impl LogStats {
 
         for entry in entries {
             // Count by level
-            let level_key = format!("{:?}", entry.level);
-            *stats.level_counts.entry(level_key).or_insert(0) += 1;
+            let level_key = entry
+                .level
+                .map(|l| l.as_str().to_string())
+                .unwrap_or_else(|| LogLevel::Unknown.as_str().to_string());
+            *stats.level_counts.entry(level_key.clone()).or_insert(0) += 1;
 
-            if matches!(entry.level, LogLevel::Error | LogLevel::Fatal) {
+            if matches!(entry.level, Some(LogLevel::Error | LogLevel::Fatal)) {
                 error_count += 1;
             }
 

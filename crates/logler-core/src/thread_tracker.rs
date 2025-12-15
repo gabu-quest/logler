@@ -1,10 +1,10 @@
-use crate::types::{LogEntry, ThreadContext, TraceContext, SpanInfo};
+use crate::types::{LogEntry, SpanInfo, ThreadContext, TraceContext};
 use chrono::Utc;
 use dashmap::DashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Thread tracker for correlating logs by thread ID and correlation ID
+/// Thread tracker for correlating logs by thread/correlation/trace IDs.
 #[derive(Clone)]
 pub struct ThreadTracker {
     threads: Arc<DashMap<String, ThreadContext>>,
@@ -21,7 +21,7 @@ impl ThreadTracker {
         }
     }
 
-    /// Track a log entry and update thread/trace contexts
+    /// Track a log entry and update thread/trace contexts.
     pub fn track(&self, entry: &LogEntry) {
         // Track by thread ID
         if let Some(thread_id) = &entry.thread_id {
@@ -44,7 +44,10 @@ impl ThreadTracker {
 
     fn track_thread(&self, thread_id: String, entry: &LogEntry) {
         let timestamp = entry.timestamp.unwrap_or_else(Utc::now);
-        let is_error = matches!(entry.level, crate::types::LogLevel::Error | crate::types::LogLevel::Fatal);
+        let is_error = matches!(
+            entry.level,
+            Some(crate::types::LogLevel::Error | crate::types::LogLevel::Fatal)
+        );
 
         self.threads
             .entry(thread_id)
@@ -61,7 +64,7 @@ impl ThreadTracker {
                 }
             })
             .or_insert_with(|| ThreadContext {
-                thread_id: entry.thread_id.clone().unwrap(),
+                thread_id: entry.thread_id.clone().unwrap_or_default(),
                 first_seen: timestamp,
                 last_seen: timestamp,
                 log_count: 1,
@@ -80,7 +83,6 @@ impl ThreadTracker {
         self.traces
             .entry(trace_id.clone())
             .and_modify(|ctx| {
-                // Update service list
                 if let Some(service) = &entry.service_name {
                     if !ctx.services.contains(service) {
                         ctx.services.push(service.clone());
@@ -90,7 +92,6 @@ impl ThreadTracker {
                 // Track span
                 if let Some(span_id) = &entry.span_id {
                     if let Some(span) = ctx.spans.iter_mut().find(|s| s.span_id == *span_id) {
-                        // Update existing span
                         span.logs.push(entry.id);
                         if let Some(end_time) = entry.timestamp {
                             if span.end_time.is_none() || span.end_time.unwrap() < end_time {
@@ -107,11 +108,14 @@ impl ThreadTracker {
                             }
                         }
                     } else {
-                        // New span
                         ctx.spans.push(SpanInfo {
                             span_id: span_id.clone(),
                             parent_span_id: entry.parent_span_id.clone(),
-                            operation_name: entry.fields.get("operation").and_then(|v| v.as_str()).map(String::from),
+                            operation_name: entry
+                                .fields
+                                .get("operation")
+                                .and_then(|v| v.as_str())
+                                .map(String::from),
                             start_time: timestamp,
                             end_time: None,
                             duration_ms: None,
@@ -137,7 +141,11 @@ impl ThreadTracker {
                     vec![SpanInfo {
                         span_id: span_id.clone(),
                         parent_span_id: entry.parent_span_id.clone(),
-                        operation_name: entry.fields.get("operation").and_then(|v| v.as_str()).map(String::from),
+                        operation_name: entry
+                            .fields
+                            .get("operation")
+                            .and_then(|v| v.as_str())
+                            .map(String::from),
                         start_time: timestamp,
                         end_time: None,
                         duration_ms: None,
@@ -157,37 +165,46 @@ impl ThreadTracker {
             });
     }
 
-    /// Get thread context by thread ID
+    /// Get thread context by thread ID.
     pub fn get_thread(&self, thread_id: &str) -> Option<ThreadContext> {
         self.threads.get(thread_id).map(|ctx| ctx.clone())
     }
 
-    /// Get all threads
+    /// Get all tracked threads.
     pub fn get_all_threads(&self) -> Vec<ThreadContext> {
-        self.threads.iter().map(|entry| entry.value().clone()).collect()
+        self.threads
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect()
     }
 
-    /// Get trace context by trace ID
+    /// Get trace context by trace ID.
     pub fn get_trace(&self, trace_id: &str) -> Option<TraceContext> {
         self.traces.get(trace_id).map(|ctx| ctx.clone())
     }
 
-    /// Get all traces
+    /// Get all traces.
     pub fn get_all_traces(&self) -> Vec<TraceContext> {
-        self.traces.iter().map(|entry| entry.value().clone()).collect()
+        self.traces
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect()
     }
 
-    /// Get log IDs by correlation ID
+    /// Get log IDs by correlation ID.
     pub fn get_by_correlation(&self, correlation_id: &str) -> Option<Vec<Uuid>> {
         self.correlations.get(correlation_id).map(|ids| ids.clone())
     }
 
-    /// Get all correlation IDs
+    /// Get all correlation IDs.
     pub fn get_all_correlations(&self) -> Vec<String> {
-        self.correlations.iter().map(|entry| entry.key().clone()).collect()
+        self.correlations
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
     }
 
-    /// Clear all tracking data
+    /// Clear all tracking data.
     pub fn clear(&self) {
         self.threads.clear();
         self.traces.clear();

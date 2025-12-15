@@ -15,10 +15,9 @@ impl TraceExporter {
         }
     }
 
-    /// Export a log entry as an OpenTelemetry trace
+    /// Export a log entry as an OpenTelemetry trace (placeholder).
     pub async fn export(&self, _entry: &LogEntry) -> anyhow::Result<()> {
-        // In a full implementation, this would export to an OTLP endpoint
-        // For now, this is a placeholder
+        // TODO: Implement OTLP export if needed.
         Ok(())
     }
 }

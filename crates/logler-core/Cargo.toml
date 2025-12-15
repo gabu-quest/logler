@@ -12,6 +12,9 @@ crate-type = ["lib", "cdylib"]
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+tokio-stream = { workspace = true, optional = true }
+async-stream = { version = "0.3", optional = true }
 anyhow.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
@@ -33,5 +36,5 @@ tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 default = []
-async = ["tokio"]
+async = ["tokio", "futures", "tokio-stream", "async-stream"]
 sql = ["duckdb"]

@@ -1,10 +1,10 @@
+use axum::extract::ws::{Message, WebSocket};
 use axum::{
     extract::{Path, Query, State, WebSocketUpgrade},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
-use axum::extract::ws::{Message, WebSocket};
 use futures::{sink::SinkExt, stream::StreamExt};
 use logler_core::{LogFilter, LogReader, LogStats};
 use serde::{Deserialize, Serialize};
@@ -118,12 +118,7 @@ pub async fn get_logs(
     let offset = query.offset.unwrap_or(0);
     let limit = query.limit.unwrap_or(100);
 
-    let result = entries
-        .iter()
-        .skip(offset)
-        .take(limit)
-        .cloned()
-        .collect();
+    let result = entries.iter().skip(offset).take(limit).cloned().collect();
 
     Ok(Json(result))
 }
@@ -140,10 +135,7 @@ pub async fn search_logs(
 
     let result = entries
         .iter()
-        .filter(|entry| {
-            entry.message.contains(&req.query)
-                || entry.raw.contains(&req.query)
-        })
+        .filter(|entry| entry.message.contains(&req.query) || entry.raw.contains(&req.query))
         .take(req.limit.unwrap_or(100))
         .cloned()
         .collect();
@@ -291,10 +283,7 @@ pub async fn get_correlation_logs(
 }
 
 // WebSocket handler for real-time log streaming
-pub async fn websocket_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> Response {
+pub async fn websocket_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
@@ -324,7 +313,11 @@ async fn handle_socket(socket: WebSocket, _state: AppState) {
             // 2. Parse new lines
             // 3. Send them to the client
 
-            if sender.send(Message::Text("heartbeat".to_string())).await.is_err() {
+            if sender
+                .send(Message::Text("heartbeat".to_string()))
+                .await
+                .is_err()
+            {
                 break;
             }
         }
