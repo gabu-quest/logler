@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Logler - Advanced Log Viewer</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='logler-logo.png') }}">
 
     <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
@@ -65,7 +66,10 @@
         <!-- Header -->
         <header class="bg-gray-900 border-b border-gray-700 p-4">
             <div class="container mx-auto flex items-center justify-between">
-                <h1 class="text-2xl font-bold text-blue-400">🔍 Logler</h1>
+                <div class="flex items-center space-x-3">
+                    <img src="{{ url_for('static', path='logler-logo.png') }}" alt="Logler logo" class="h-8 w-8 rounded-md bg-gray-800 shadow-lg" style="height:2rem;width:2rem;">
+                    <h1 class="text-2xl font-bold text-blue-400">Logler</h1>
+                </div>
                 <div class="flex items-center space-x-4">
                     <div class="text-sm">
                         <span class="text-gray-400">Status:</span>
@@ -277,7 +281,7 @@
                 >
                     <div x-show="!currentFileId" class="flex items-center justify-center h-full">
                         <div class="text-center text-gray-500">
-                            <div class="text-6xl mb-4">📁</div>
+                            <img src="{{ url_for('static', path='logler-logo.png') }}" alt="Logler logo" class="h-8 w-8 mx-auto mb-4 opacity-90" style="height:2rem;width:2rem;">
                             <div class="text-xl">No file opened</div>
                             <div class="text-sm mt-2">Open a log file to get started</div>
                         </div>
