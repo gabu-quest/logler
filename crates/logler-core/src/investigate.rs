@@ -479,6 +479,45 @@ impl Investigator {
         engine.load_files(&self.indices)?;
         engine.get_schema(table)
     }
+
+    /// Build hierarchical view of threads/spans for a given identifier
+    pub fn build_hierarchy(
+        &self,
+        files: &[PathBuf],
+        root_identifier: &str,
+        config: Option<crate::hierarchy::HierarchyConfig>,
+    ) -> anyhow::Result<crate::hierarchy::ThreadHierarchy> {
+        use crate::hierarchy::HierarchyBuilder;
+
+        let config = config.unwrap_or_default();
+        let mut builder = HierarchyBuilder::new(config);
+
+        // Collect all relevant entries from the indices
+        for (file_path, index) in &self.indices {
+            if !files.is_empty() {
+                let file_matches = files
+                    .iter()
+                    .any(|f| f.to_string_lossy().as_ref() == file_path);
+                if !file_matches {
+                    continue;
+                }
+            }
+
+            let entries = index
+                .entries
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Index has no entries loaded"))?;
+
+            for entry in entries.iter() {
+                builder.add_entry(entry.clone());
+            }
+        }
+
+        // Build the hierarchy
+        builder
+            .build(root_identifier)
+            .ok_or_else(|| anyhow::anyhow!("No hierarchy found for identifier: {}", root_identifier))
+    }
 }
 
 impl Default for Investigator {

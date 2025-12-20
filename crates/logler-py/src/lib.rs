@@ -156,6 +156,41 @@ impl PyInvestigator {
             .sql_schema(&table)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
+
+    /// Build hierarchical view of threads/spans
+    fn build_hierarchy(
+        &self,
+        files: Vec<String>,
+        root_identifier: String,
+        max_depth: Option<usize>,
+        use_naming_patterns: Option<bool>,
+        use_temporal_inference: Option<bool>,
+        min_confidence: Option<f64>,
+    ) -> PyResult<String> {
+        let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+
+        let mut config = logler_core::hierarchy::HierarchyConfig::default();
+        if let Some(depth) = max_depth {
+            config.max_depth = depth;
+        }
+        if let Some(use_patterns) = use_naming_patterns {
+            config.use_naming_patterns = use_patterns;
+        }
+        if let Some(use_temporal) = use_temporal_inference {
+            config.use_temporal_inference = use_temporal;
+        }
+        if let Some(confidence) = min_confidence {
+            config.min_confidence = confidence;
+        }
+
+        let hierarchy = self
+            .investigator
+            .build_hierarchy(&paths, &root_identifier, Some(config))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        serde_json::to_string(&hierarchy)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
 }
 
 /// Standalone search function (convenience)
@@ -239,6 +274,32 @@ fn get_metadata(files: Vec<String>) -> PyResult<String> {
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
 }
 
+/// Standalone build_hierarchy function (convenience)
+#[pyfunction]
+fn build_hierarchy(
+    files: Vec<String>,
+    root_identifier: String,
+    max_depth: Option<usize>,
+) -> PyResult<String> {
+    let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+    let mut investigator = Investigator::new();
+    investigator
+        .load_files(&paths)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+    let config = logler_core::hierarchy::HierarchyConfig {
+        max_depth: max_depth.unwrap_or(50),
+        ..Default::default()
+    };
+
+    let hierarchy = investigator
+        .build_hierarchy(&paths, &root_identifier, Some(config))
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+    serde_json::to_string(&hierarchy)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+}
+
 /// Python module
 #[pymodule]
 fn logler_rs(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -247,6 +308,7 @@ fn logler_rs(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(follow_thread, m)?)?;
     m.add_function(wrap_pyfunction!(find_patterns, m)?)?;
     m.add_function(wrap_pyfunction!(get_metadata, m)?)?;
+    m.add_function(wrap_pyfunction!(build_hierarchy, m)?)?;
     Ok(())
 }
 
