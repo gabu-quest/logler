@@ -22,40 +22,30 @@
 
 ## 📋 Implementation Phases
 
-### Phase 1: Core Detection & Data Structures ⏳
+### Phase 1: Core Detection & Data Structures ✅
 
 **Goal**: Build the foundation for detecting and representing hierarchies
 
-- [ ] **1.1** Add hierarchy detection to Rust parser
-  - [ ] Parse `parent_span_id` from OpenTelemetry logs
-  - [ ] Parse `parent_thread_id` or similar custom fields
-  - [ ] Detect thread naming patterns (`worker-1.task-a`, `main:subtask-1`)
-  - [ ] Create `SpanHierarchy` struct in Rust
-  - [ ] Build parent-child index during parsing
+- [x] **1.1** Add hierarchy detection to Rust parser ✅
+  - [x] Parse `parent_span_id` from OpenTelemetry logs (already in LogEntry!)
+  - [x] Parse `parent_thread_id` or similar custom fields
+  - [x] Detect thread naming patterns (`worker-1.task-a`, `main:subtask-1`)
+  - [x] Create `SpanHierarchy` struct in Rust → `ThreadHierarchy`
+  - [x] Build parent-child index during parsing → `HierarchyBuilder`
 
-- [ ] **1.2** Add hierarchy data structures to Rust
-  ```rust
-  pub struct SpanNode {
-      pub span_id: Option<String>,
-      pub thread_id: Option<String>,
-      pub parent_span_id: Option<String>,
-      pub children: Vec<SpanNode>,
-      pub entries: Vec<LogEntry>,
-      pub duration_ms: Option<u64>,
-      pub error_count: u32,
-  }
+- [x] **1.2** Add hierarchy data structures to Rust ✅
+  - [x] `SpanNode` with full metadata (duration, errors, confidence, evidence)
+  - [x] `ThreadHierarchy` with statistics (depth, concurrent count, bottleneck)
+  - [x] `HierarchyBuilder` for efficient tree construction
+  - [x] `HierarchyConfig` for fine-grained control
+  - [x] `DetectionMethod` enum (Explicit, NamingPattern, Temporal, Mixed)
+  - [x] Confidence scoring (1.0 for explicit, 0.8 for naming, 0.6 for temporal)
 
-  pub struct ThreadHierarchy {
-      pub root: SpanNode,
-      pub total_depth: usize,
-      pub total_nodes: usize,
-  }
-  ```
-
-- [ ] **1.3** Expose hierarchy building to Python API
-  - [ ] Add `build_hierarchy()` method to PyInvestigator
-  - [ ] Add Python wrapper types for SpanNode
-  - [ ] Serialize hierarchy as JSON for Python consumption
+- [x] **1.3** Expose hierarchy building to Python API ✅
+  - [x] Add `build_hierarchy()` method to PyInvestigator
+  - [x] Add standalone `build_hierarchy()` function
+  - [x] Serialize hierarchy as JSON for Python consumption
+  - [x] Full configuration options (max_depth, naming_patterns, temporal_inference, min_confidence)
 
 - [ ] **1.4** Write unit tests for hierarchy detection
   - [ ] Test OpenTelemetry span relationships
@@ -63,11 +53,14 @@
   - [ ] Test nested transaction detection
   - [ ] Test edge cases (orphaned spans, cycles, missing parents)
 
-**Files to modify**:
-- `crates/logler-core/src/parser.rs`
-- `crates/logler-core/src/types.rs`
-- `crates/logler-py/src/lib.rs`
-- `tests/test_hierarchy_detection.py` (new)
+**Files modified**:
+- ✅ `crates/logler-core/src/hierarchy.rs` (NEW - 730+ lines)
+- ✅ `crates/logler-core/src/lib.rs` (added hierarchy module)
+- ✅ `crates/logler-core/src/investigate.rs` (added build_hierarchy method)
+- ✅ `crates/logler-py/src/lib.rs` (Python bindings)
+- ⏳ `tests/test_hierarchy_detection.py` (TODO)
+
+**Commit**: `005eb03` - Rust hierarchy detection implementation complete!
 
 ---
 
