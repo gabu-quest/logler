@@ -59,7 +59,8 @@ def _normalize_entry(entry: Dict[str, Any]) -> None:
     if isinstance(level, str):
         entry["level"] = level.upper()
     raw = entry.get("raw") or ""
-    if entry.get("format") is None and isinstance(raw, str):
+    # Always detect and set format based on raw content
+    if isinstance(raw, str):
         stripped = raw.lstrip()
         if stripped.startswith("{"):
             entry["format"] = "Json"
@@ -67,7 +68,7 @@ def _normalize_entry(entry: Dict[str, Any]) -> None:
             entry["format"] = "Syslog"
         elif "level=" in raw or " msg=" in raw or raw.startswith("level="):
             entry["format"] = "Logfmt"
-        else:
+        elif entry.get("format") is None:
             entry["format"] = "PlainText"
     if entry.get("level") is None and isinstance(raw, str):
         inferred = _infer_syslog_level(raw)
