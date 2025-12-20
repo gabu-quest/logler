@@ -178,14 +178,19 @@ def stats(files: tuple, output_json: bool):
 @click.option("--patterns", is_flag=True, help="Find repeated patterns")
 @click.option("--thread", type=str, help="Follow specific thread ID")
 @click.option("--correlation", type=str, help="Follow specific correlation ID")
+@click.option("--hierarchy", is_flag=True, help="Show thread hierarchy tree (with --thread or --correlation)")
+@click.option("--waterfall", is_flag=True, help="Show waterfall timeline (with --hierarchy)")
+@click.option("--max-depth", type=int, help="Maximum hierarchy depth to display")
+@click.option("--min-confidence", type=float, default=0.0, help="Minimum confidence for hierarchy detection (0.0-1.0)")
 @click.option("--context", type=int, default=3, help="Number of context lines (default: 3)")
 @click.option("--output", type=click.Choice(['full', 'summary', 'count', 'compact']),
               default='summary', help="Output format (default: summary)")
 @click.option("--json", "output_json", is_flag=True, help="Output as JSON")
 @click.option("--min-occurrences", type=int, default=3, help="Minimum pattern occurrences (default: 3)")
 def investigate(files: tuple, auto_insights: bool, errors: bool, patterns: bool,
-                thread: Optional[str], correlation: Optional[str], context: int,
-                output: str, output_json: bool, min_occurrences: int):
+                thread: Optional[str], correlation: Optional[str], hierarchy: bool,
+                waterfall: bool, max_depth: Optional[int], min_confidence: float,
+                context: int, output: str, output_json: bool, min_occurrences: int):
     """
     Investigate log files with smart analysis and insights.
 
@@ -195,10 +200,13 @@ def investigate(files: tuple, auto_insights: bool, errors: bool, patterns: bool,
         logler investigate app.log --patterns          # Find repeated patterns
         logler investigate app.log --thread worker-1   # Follow specific thread
         logler investigate app.log --correlation req-123  # Follow request
+        logler investigate app.log --thread req-123 --hierarchy   # Show hierarchy tree
+        logler investigate app.log --thread req-123 --hierarchy --waterfall  # Show waterfall timeline
         logler investigate app.log --output summary    # Token-efficient output
     """
     from .investigate import (
-        analyze_with_insights, search, find_patterns, follow_thread
+        analyze_with_insights, search, find_patterns, follow_thread,
+        follow_thread_hierarchy, get_hierarchy_summary
     )
     from rich.console import Console
     from rich.table import Table
@@ -294,46 +302,99 @@ def investigate(files: tuple, auto_insights: bool, errors: bool, patterns: bool,
         elif thread or correlation:
             identifier = thread or correlation
             id_type = "thread" if thread else "correlation"
-            console.print(f"[bold cyan]🧵 Following {id_type}: {identifier}...[/bold cyan]\n")
 
-            result = follow_thread(
-                files=file_list,
-                thread_id=thread,
-                correlation_id=correlation
-            )
+            # Hierarchy mode
+            if hierarchy:
+                console.print(f"[bold cyan]🌳 Building hierarchy for {id_type}: {identifier}...[/bold cyan]\n")
 
-            if output_json:
-                console.print_json(data=result)
-                return
+                try:
+                    hier_result = follow_thread_hierarchy(
+                        files=file_list,
+                        root_identifier=identifier,
+                        max_depth=max_depth,
+                        min_confidence=min_confidence
+                    )
 
-            entries = result.get('entries', [])
-            total = result.get('total_entries', len(entries))
-            duration = result.get('duration_ms', 0)
+                    if output_json:
+                        console.print_json(data=hier_result)
+                        return
 
-            console.print(f"[bold]Found {total} entries[/bold]")
-            if duration:
-                console.print(f"[bold]Duration:[/bold] {duration}ms\n")
+                    # Import tree formatter
+                    import sys
+                    import os
+                    # Add parent directory to path to import tree_formatter
+                    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+                    from tree_formatter import format_tree, format_waterfall
 
-            # Display entries
-            for entry in entries[:50]:  # Limit display to 50
-                timestamp = entry.get('timestamp', 'N/A')
-                level = entry.get('level', 'INFO')
-                message = entry.get('message', '')[:100]
+                    # Show summary first
+                    summary = get_hierarchy_summary(hier_result)
+                    console.print(summary)
+                    console.print()
 
-                level_color = {
-                    'ERROR': 'red',
-                    'FATAL': 'red',
-                    'WARN': 'yellow',
-                    'WARNING': 'yellow',
-                    'INFO': 'cyan',
-                    'DEBUG': 'dim',
-                    'TRACE': 'dim'
-                }.get(level, 'white')
+                    # Show tree visualization
+                    if waterfall:
+                        console.print("[bold cyan]📊 Waterfall Timeline[/bold cyan]\n")
+                        waterfall_str = format_waterfall(hier_result, width=100)
+                        console.print(waterfall_str)
+                    else:
+                        console.print("[bold cyan]🌲 Hierarchy Tree[/bold cyan]\n")
+                        tree_str = format_tree(
+                            hier_result,
+                            mode="detailed",
+                            show_duration=True,
+                            show_errors=True,
+                            max_depth=max_depth,
+                            use_colors=True
+                        )
+                        console.print(tree_str)
 
-                console.print(f"[dim]{timestamp}[/dim] [{level_color}]{level:8s}[/{level_color}] {message}")
+                except Exception as e:
+                    console.print(f"[red]❌ Error building hierarchy: {e}[/red]")
+                    console.print("[yellow]Falling back to regular thread following...[/yellow]\n")
+                    hierarchy = False  # Fall through to regular mode
 
-            if len(entries) > 50:
-                console.print(f"\n[dim]... and {len(entries) - 50} more entries[/dim]")
+            # Regular thread following mode
+            if not hierarchy:
+                console.print(f"[bold cyan]🧵 Following {id_type}: {identifier}...[/bold cyan]\n")
+
+                result = follow_thread(
+                    files=file_list,
+                    thread_id=thread,
+                    correlation_id=correlation
+                )
+
+                if output_json:
+                    console.print_json(data=result)
+                    return
+
+                entries = result.get('entries', [])
+                total = result.get('total_entries', len(entries))
+                duration = result.get('duration_ms', 0)
+
+                console.print(f"[bold]Found {total} entries[/bold]")
+                if duration:
+                    console.print(f"[bold]Duration:[/bold] {duration}ms\n")
+
+                # Display entries
+                for entry in entries[:50]:  # Limit display to 50
+                    timestamp = entry.get('timestamp', 'N/A')
+                    level = entry.get('level', 'INFO')
+                    message = entry.get('message', '')[:100]
+
+                    level_color = {
+                        'ERROR': 'red',
+                        'FATAL': 'red',
+                        'WARN': 'yellow',
+                        'WARNING': 'yellow',
+                        'INFO': 'cyan',
+                        'DEBUG': 'dim',
+                        'TRACE': 'dim'
+                    }.get(level, 'white')
+
+                    console.print(f"[dim]{timestamp}[/dim] [{level_color}]{level:8s}[/{level_color}] {message}")
+
+                if len(entries) > 50:
+                    console.print(f"\n[dim]... and {len(entries) - 50} more entries[/dim]")
 
         # Error analysis mode
         elif errors:
