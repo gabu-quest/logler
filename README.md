@@ -143,6 +143,16 @@ logler stats app.log             # Show statistics
 logler stats app.log --json      # JSON output
 ```
 
+**Investigate logs with smart analysis:**
+```bash
+logler investigate app.log --auto-insights        # Auto-detect issues
+logler investigate app.log --errors               # Analyze errors
+logler investigate app.log --patterns             # Find repeated patterns
+logler investigate app.log --thread worker-1      # Follow specific thread
+logler investigate app.log --correlation req-123  # Follow correlation ID
+logler investigate app.log --output summary       # Token-efficient output
+```
+
 **Watch for new files:**
 ```bash
 logler watch "*.log"             # Watch for new log files
@@ -211,6 +221,33 @@ logler stats app.log
 
 # JSON for scripting
 logler stats app.log --json | jq '.by_level'
+```
+
+### Investigation & Analysis
+
+```bash
+# Auto-detect issues with insights
+logler investigate app.log --auto-insights
+# Output: Automatic error analysis, pattern detection, actionable suggestions
+
+# Analyze errors with context
+logler investigate app.log --errors
+# Shows error frequency, top error messages, time ranges
+
+# Find repeated patterns
+logler investigate app.log --patterns --min-occurrences 5
+# Identifies logs that repeat 5+ times
+
+# Follow a specific thread or request
+logler investigate app.log --thread worker-1
+logler investigate app.log --correlation req-abc123
+
+# Token-efficient output for LLMs
+logler investigate app.log --auto-insights --output summary
+# Returns aggregated statistics instead of full logs
+
+# JSON output for automation
+logler investigate app.log --errors --json
 ```
 
 ## 🎨 Log Format Support

@@ -172,6 +172,260 @@ def stats(files: tuple, output_json: bool):
 
 
 @main.command()
+@click.argument("files", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option("--auto-insights", is_flag=True, help="Run automatic insights analysis")
+@click.option("--errors", is_flag=True, help="Show only errors with analysis")
+@click.option("--patterns", is_flag=True, help="Find repeated patterns")
+@click.option("--thread", type=str, help="Follow specific thread ID")
+@click.option("--correlation", type=str, help="Follow specific correlation ID")
+@click.option("--context", type=int, default=3, help="Number of context lines (default: 3)")
+@click.option("--output", type=click.Choice(['full', 'summary', 'count', 'compact']),
+              default='summary', help="Output format (default: summary)")
+@click.option("--json", "output_json", is_flag=True, help="Output as JSON")
+@click.option("--min-occurrences", type=int, default=3, help="Minimum pattern occurrences (default: 3)")
+def investigate(files: tuple, auto_insights: bool, errors: bool, patterns: bool,
+                thread: Optional[str], correlation: Optional[str], context: int,
+                output: str, output_json: bool, min_occurrences: int):
+    """
+    Investigate log files with smart analysis and insights.
+
+    Examples:
+        logler investigate app.log --auto-insights     # Auto-detect issues
+        logler investigate app.log --errors            # Analyze errors
+        logler investigate app.log --patterns          # Find repeated patterns
+        logler investigate app.log --thread worker-1   # Follow specific thread
+        logler investigate app.log --correlation req-123  # Follow request
+        logler investigate app.log --output summary    # Token-efficient output
+    """
+    from .investigate import (
+        analyze_with_insights, search, find_patterns, follow_thread
+    )
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    import json as json_module
+
+    console = Console()
+    file_list = list(files)
+
+    try:
+        # Auto-insights mode (most powerful)
+        if auto_insights:
+            console.print("[bold cyan]🎯 Running automatic insights analysis...[/bold cyan]\n")
+            result = analyze_with_insights(files=file_list, auto_investigate=True)
+
+            if output_json:
+                console.print_json(data=result)
+                return
+
+            # Display overview
+            overview = result['overview']
+            console.print(Panel(
+                f"[bold]Total Logs:[/bold] {overview['total_logs']}\n"
+                f"[bold]Error Count:[/bold] {overview['error_count']}\n"
+                f"[bold]Error Rate:[/bold] {overview['error_rate']:.1%}\n"
+                f"[bold]Log Levels:[/bold] {overview['log_levels']}",
+                title="📊 Overview",
+                border_style="cyan"
+            ))
+
+            # Display insights
+            if result['insights']:
+                console.print("\n[bold cyan]💡 Automatic Insights[/bold cyan]\n")
+                for i, insight in enumerate(result['insights'], 1):
+                    severity_color = {
+                        'high': 'red',
+                        'medium': 'yellow',
+                        'low': 'green'
+                    }.get(insight['severity'], 'white')
+
+                    severity_icon = {
+                        'high': '🔴',
+                        'medium': '🟡',
+                        'low': '🟢'
+                    }.get(insight['severity'], '⚪')
+
+                    console.print(f"{severity_icon} [bold {severity_color}]Insight #{i}:[/bold {severity_color}] {insight['type']}")
+                    console.print(f"   [dim]Severity:[/dim] [{severity_color}]{insight['severity'].upper()}[/{severity_color}]")
+                    console.print(f"   [dim]Description:[/dim] {insight['description']}")
+                    console.print(f"   [dim]Suggestion:[/dim] {insight['suggestion']}\n")
+
+            # Display suggestions
+            if result['suggestions']:
+                console.print("[bold cyan]📝 Suggestions[/bold cyan]\n")
+                for i, suggestion in enumerate(result['suggestions'], 1):
+                    console.print(f"  {i}. {suggestion}")
+
+            # Display next steps
+            if result['next_steps']:
+                console.print("\n[bold cyan]🚀 Next Steps[/bold cyan]\n")
+                for i, step in enumerate(result['next_steps'], 1):
+                    console.print(f"  {i}. {step}")
+
+        # Pattern detection mode
+        elif patterns:
+            console.print(f"[bold cyan]🔍 Finding repeated patterns (min {min_occurrences} occurrences)...[/bold cyan]\n")
+            result = find_patterns(files=file_list, min_occurrences=min_occurrences)
+
+            if output_json:
+                console.print_json(data=result)
+                return
+
+            pattern_list = result.get('patterns', [])
+            if pattern_list:
+                table = Table(title=f"Found {len(pattern_list)} Patterns")
+                table.add_column("Pattern", style="cyan", no_wrap=False)
+                table.add_column("Count", justify="right", style="green")
+                table.add_column("First Seen", style="yellow")
+                table.add_column("Last Seen", style="yellow")
+
+                for pattern in pattern_list[:20]:  # Show top 20
+                    pattern_text = pattern.get('pattern', '')[:80]
+                    count = pattern.get('occurrences', 0)
+                    first = pattern.get('first_seen', 'N/A')
+                    last = pattern.get('last_seen', 'N/A')
+                    table.add_row(pattern_text, str(count), first, last)
+
+                console.print(table)
+            else:
+                console.print("[yellow]No repeated patterns found.[/yellow]")
+
+        # Thread/correlation following mode
+        elif thread or correlation:
+            identifier = thread or correlation
+            id_type = "thread" if thread else "correlation"
+            console.print(f"[bold cyan]🧵 Following {id_type}: {identifier}...[/bold cyan]\n")
+
+            result = follow_thread(
+                files=file_list,
+                thread_id=thread,
+                correlation_id=correlation
+            )
+
+            if output_json:
+                console.print_json(data=result)
+                return
+
+            entries = result.get('entries', [])
+            total = result.get('total_entries', len(entries))
+            duration = result.get('duration_ms', 0)
+
+            console.print(f"[bold]Found {total} entries[/bold]")
+            if duration:
+                console.print(f"[bold]Duration:[/bold] {duration}ms\n")
+
+            # Display entries
+            for entry in entries[:50]:  # Limit display to 50
+                timestamp = entry.get('timestamp', 'N/A')
+                level = entry.get('level', 'INFO')
+                message = entry.get('message', '')[:100]
+
+                level_color = {
+                    'ERROR': 'red',
+                    'FATAL': 'red',
+                    'WARN': 'yellow',
+                    'WARNING': 'yellow',
+                    'INFO': 'cyan',
+                    'DEBUG': 'dim',
+                    'TRACE': 'dim'
+                }.get(level, 'white')
+
+                console.print(f"[dim]{timestamp}[/dim] [{level_color}]{level:8s}[/{level_color}] {message}")
+
+            if len(entries) > 50:
+                console.print(f"\n[dim]... and {len(entries) - 50} more entries[/dim]")
+
+        # Error analysis mode
+        elif errors:
+            console.print("[bold cyan]❌ Analyzing errors...[/bold cyan]\n")
+            result = search(
+                files=file_list,
+                level="ERROR",
+                context_lines=context,
+                output_format=output
+            )
+
+            if output_json:
+                console.print_json(data=result)
+                return
+
+            if output == "summary":
+                total = result.get('total_matches', 0)
+                unique = result.get('unique_messages', 0)
+                console.print(f"[bold]Total Errors:[/bold] {total}")
+                console.print(f"[bold]Unique Messages:[/bold] {unique}\n")
+
+                top_messages = result.get('top_messages', [])
+                if top_messages:
+                    table = Table(title="Top Error Messages")
+                    table.add_column("Message", style="red", no_wrap=False)
+                    table.add_column("Count", justify="right", style="green")
+                    table.add_column("First Seen", style="yellow")
+
+                    for msg in top_messages[:10]:
+                        message = msg.get('message', '')[:80]
+                        count = msg.get('count', 0)
+                        first = msg.get('first_seen', 'N/A')
+                        table.add_row(message, str(count), first)
+
+                    console.print(table)
+
+            elif output == "count":
+                console.print_json(data=result)
+
+            elif output == "compact":
+                matches = result.get('matches', [])
+                for match in matches[:50]:
+                    time = match.get('time', 'N/A')
+                    msg = match.get('msg', '')
+                    console.print(f"[dim]{time}[/dim] [red]ERROR[/red] {msg}")
+
+            else:  # full
+                results = result.get('results', [])
+                for item in results[:50]:
+                    entry = item.get('entry', {})
+                    timestamp = entry.get('timestamp', 'N/A')
+                    message = entry.get('message', '')
+                    console.print(f"[dim]{timestamp}[/dim] [red]ERROR[/red] {message}")
+
+        # Default search mode
+        else:
+            console.print("[bold cyan]🔍 Searching logs...[/bold cyan]\n")
+            result = search(
+                files=file_list,
+                context_lines=context,
+                output_format=output
+            )
+
+            if output_json:
+                console.print_json(data=result)
+                return
+
+            total = result.get('total_matches', 0)
+            console.print(f"[bold]Total matches:[/bold] {total}\n")
+
+            if output == "summary":
+                console.print_json(data=result)
+            elif output == "count":
+                console.print_json(data=result)
+            else:
+                results = result.get('results', [])
+                for item in results[:50]:
+                    entry = item.get('entry', {})
+                    timestamp = entry.get('timestamp', 'N/A')
+                    level = entry.get('level', 'INFO')
+                    message = entry.get('message', '')[:100]
+                    console.print(f"[dim]{timestamp}[/dim] {level:8s} {message}")
+
+    except Exception as e:
+        console.print(f"[red]❌ Error:[/red] {e}", err=True)
+        if "--debug" in sys.argv:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+
+@main.command()
 @click.argument("pattern", required=True)
 @click.option("--directory", "-d", default=".", help="Directory to watch")
 @click.option("--recursive", "-r", is_flag=True, help="Watch recursively")
