@@ -1,0 +1,24 @@
+{"timestamp":"2024-01-15T14:00:00.000Z","level":"INFO","message":"Worker started processing job","thread_id":"worker-1","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.100Z","level":"INFO","message":"Starting subtask: data validation","thread_id":"worker-1.validation","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.200Z","level":"DEBUG","message":"Validating field: username","thread_id":"worker-1.validation.field-check","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.250Z","level":"DEBUG","message":"Field validation passed","thread_id":"worker-1.validation.field-check","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.300Z","level":"DEBUG","message":"Validating field: email","thread_id":"worker-1.validation.field-check","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.350Z","level":"ERROR","message":"Invalid email format","thread_id":"worker-1.validation.field-check","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.400Z","level":"WARN","message":"Validation failed for email field","thread_id":"worker-1.validation","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.500Z","level":"INFO","message":"Attempting auto-correction","thread_id":"worker-1.validation.auto-correct","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.600Z","level":"INFO","message":"Email auto-corrected successfully","thread_id":"worker-1.validation.auto-correct","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.700Z","level":"INFO","message":"Validation completed (with corrections)","thread_id":"worker-1.validation","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:00.800Z","level":"INFO","message":"Starting subtask: data transformation","thread_id":"worker-1.transform","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:01.000Z","level":"DEBUG","message":"Transforming data format","thread_id":"worker-1.transform.format","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:01.200Z","level":"DEBUG","message":"Format transformation complete","thread_id":"worker-1.transform.format","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:01.300Z","level":"DEBUG","message":"Enriching data with metadata","thread_id":"worker-1.transform.enrich","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:01.500Z","level":"DEBUG","message":"Metadata enrichment complete","thread_id":"worker-1.transform.enrich","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:01.600Z","level":"INFO","message":"Transformation completed","thread_id":"worker-1.transform","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:01.700Z","level":"INFO","message":"Starting subtask: data persistence","thread_id":"worker-1.persist","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:02.000Z","level":"DEBUG","message":"Writing to database","thread_id":"worker-1.persist.db-write","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:02.500Z","level":"INFO","message":"Database write successful","thread_id":"worker-1.persist.db-write","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:02.600Z","level":"DEBUG","message":"Updating cache","thread_id":"worker-1.persist.cache-update","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:02.700Z","level":"INFO","message":"Cache updated successfully","thread_id":"worker-1.persist.cache-update","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:02.800Z","level":"INFO","message":"Persistence completed","thread_id":"worker-1.persist","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:03.000Z","level":"INFO","message":"Job completed successfully","thread_id":"worker-1","correlation_id":"job-456"}
+{"timestamp":"2024-01-15T14:00:03.100Z","level":"INFO","message":"Worker finished processing","thread_id":"worker-1","correlation_id":"job-456"}
