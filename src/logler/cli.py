@@ -180,6 +180,8 @@ def stats(files: tuple, output_json: bool):
 @click.option("--correlation", type=str, help="Follow specific correlation ID")
 @click.option("--hierarchy", is_flag=True, help="Show thread hierarchy tree (with --thread or --correlation)")
 @click.option("--waterfall", is_flag=True, help="Show waterfall timeline (with --hierarchy)")
+@click.option("--flamegraph", is_flag=True, help="Show flamegraph visualization (with --hierarchy)")
+@click.option("--show-error-flow", is_flag=True, help="Analyze error propagation through hierarchy (with --hierarchy)")
 @click.option("--max-depth", type=int, help="Maximum hierarchy depth to display")
 @click.option("--min-confidence", type=float, default=0.0, help="Minimum confidence for hierarchy detection (0.0-1.0)")
 @click.option("--context", type=int, default=3, help="Number of context lines (default: 3)")
@@ -189,7 +191,7 @@ def stats(files: tuple, output_json: bool):
 @click.option("--min-occurrences", type=int, default=3, help="Minimum pattern occurrences (default: 3)")
 def investigate(files: tuple, auto_insights: bool, errors: bool, patterns: bool,
                 thread: Optional[str], correlation: Optional[str], hierarchy: bool,
-                waterfall: bool, max_depth: Optional[int], min_confidence: float,
+                waterfall: bool, flamegraph: bool, show_error_flow: bool, max_depth: Optional[int], min_confidence: float,
                 context: int, output: str, output_json: bool, min_occurrences: int):
     """
     Investigate log files with smart analysis and insights.
@@ -202,11 +204,14 @@ def investigate(files: tuple, auto_insights: bool, errors: bool, patterns: bool,
         logler investigate app.log --correlation req-123  # Follow request
         logler investigate app.log --thread req-123 --hierarchy   # Show hierarchy tree
         logler investigate app.log --thread req-123 --hierarchy --waterfall  # Show waterfall timeline
+        logler investigate app.log --thread req-123 --hierarchy --flamegraph  # Show flamegraph
+        logler investigate app.log --hierarchy --show-error-flow  # Analyze error propagation
         logler investigate app.log --output summary    # Token-efficient output
     """
     from .investigate import (
         analyze_with_insights, search, find_patterns, follow_thread,
-        follow_thread_hierarchy, get_hierarchy_summary
+        follow_thread_hierarchy, get_hierarchy_summary,
+        analyze_error_flow, format_error_flow
     )
     from rich.console import Console
     from rich.table import Table
@@ -320,11 +325,7 @@ def investigate(files: tuple, auto_insights: bool, errors: bool, patterns: bool,
                         return
 
                     # Import tree formatter
-                    import sys
-                    import os
-                    # Add parent directory to path to import tree_formatter
-                    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-                    from tree_formatter import format_tree, format_waterfall
+                    from .tree_formatter import format_tree, format_waterfall, format_flamegraph
 
                     # Show summary first
                     summary = get_hierarchy_summary(hier_result)
@@ -336,6 +337,10 @@ def investigate(files: tuple, auto_insights: bool, errors: bool, patterns: bool,
                         console.print("[bold cyan]📊 Waterfall Timeline[/bold cyan]\n")
                         waterfall_str = format_waterfall(hier_result, width=100)
                         console.print(waterfall_str)
+                    elif flamegraph:
+                        console.print("[bold cyan]🔥 Flamegraph Visualization[/bold cyan]\n")
+                        flamegraph_str = format_flamegraph(hier_result, width=100)
+                        console.print(flamegraph_str)
                     else:
                         console.print("[bold cyan]🌲 Hierarchy Tree[/bold cyan]\n")
                         tree_str = format_tree(
@@ -347,6 +352,17 @@ def investigate(files: tuple, auto_insights: bool, errors: bool, patterns: bool,
                             use_colors=True
                         )
                         console.print(tree_str)
+
+                    # Show error flow analysis if requested
+                    if show_error_flow:
+                        console.print()
+                        console.print("[bold cyan]🔍 Error Flow Analysis[/bold cyan]\n")
+                        error_analysis = analyze_error_flow(hier_result)
+                        if output_json:
+                            console.print_json(data=error_analysis)
+                        else:
+                            error_flow_str = format_error_flow(error_analysis)
+                            console.print(error_flow_str)
 
                 except Exception as e:
                     console.print(f"[red]❌ Error building hierarchy: {e}[/red]")
