@@ -28,6 +28,7 @@ A modern, feature-rich log viewer that makes debugging a pleasure. View logs in 
 - ⚡ **Blazing Fast** - Search 1GB files in <50ms with parallel processing
 - 🔍 **Semantic Search** - Find errors by description, not just exact matches
 - 🧵 **Thread Following** - Reconstruct request flows across distributed systems
+- 🌳 **Hierarchy Visualization** - Tree and waterfall views of nested operations, bottleneck detection
 - 📊 **Pattern Detection** - Automatically find repeated errors and cascading failures
 - 💾 **SQL Queries** - DuckDB-powered custom analysis for deep investigation
 - 📈 **Statistical Analysis** - Z-scores, percentiles, correlations, anomaly detection
@@ -90,6 +91,26 @@ sample = investigate.smart_sample(
 # 🤔 Explain cryptic errors in plain English
 explanation = investigate.explain(error_message="Connection pool exhausted", context="production")
 print(explanation)  # Common causes, next steps, production-specific advice
+
+# 🌳 Hierarchical thread visualization (NEW!)
+hierarchy = investigate.follow_thread_hierarchy(
+    files=["app.log"],
+    root_identifier="req-123",
+    min_confidence=0.8  # Only show high-confidence relationships
+)
+
+# Automatic bottleneck detection
+if hierarchy['bottleneck']:
+    print(f"Bottleneck: {hierarchy['bottleneck']['node_id']} took {hierarchy['bottleneck']['duration_ms']}ms")
+
+# Get summary
+summary = investigate.get_hierarchy_summary(hierarchy)
+print(summary)  # Shows tree structure, errors, bottlenecks
+
+# Visualize in CLI
+from tree_formatter import print_tree, print_waterfall
+print_tree(hierarchy, mode="detailed", show_duration=True)
+print_waterfall(hierarchy, width=100)  # Waterfall timeline showing parallel operations
 ```
 
 **📚 Complete LLM documentation:**
@@ -141,6 +162,21 @@ logler view app.log --thread worker-1    # Filter by thread
 ```bash
 logler stats app.log             # Show statistics
 logler stats app.log --json      # JSON output
+```
+
+**Investigate logs with smart analysis:**
+```bash
+logler investigate app.log --auto-insights        # Auto-detect issues
+logler investigate app.log --errors               # Analyze errors
+logler investigate app.log --patterns             # Find repeated patterns
+logler investigate app.log --thread worker-1      # Follow specific thread
+logler investigate app.log --correlation req-123  # Follow correlation ID
+logler investigate app.log --output summary       # Token-efficient output
+
+# 🌳 NEW: Hierarchical Thread Visualization
+logler investigate app.log --correlation req-123 --hierarchy         # Show thread hierarchy tree
+logler investigate app.log --trace trace-abc123 --hierarchy --waterfall  # Show waterfall timeline
+logler investigate app.log --thread worker-1 --hierarchy --max-depth 3   # Limit hierarchy depth
 ```
 
 **Watch for new files:**
@@ -211,6 +247,33 @@ logler stats app.log
 
 # JSON for scripting
 logler stats app.log --json | jq '.by_level'
+```
+
+### Investigation & Analysis
+
+```bash
+# Auto-detect issues with insights
+logler investigate app.log --auto-insights
+# Output: Automatic error analysis, pattern detection, actionable suggestions
+
+# Analyze errors with context
+logler investigate app.log --errors
+# Shows error frequency, top error messages, time ranges
+
+# Find repeated patterns
+logler investigate app.log --patterns --min-occurrences 5
+# Identifies logs that repeat 5+ times
+
+# Follow a specific thread or request
+logler investigate app.log --thread worker-1
+logler investigate app.log --correlation req-abc123
+
+# Token-efficient output for LLMs
+logler investigate app.log --auto-insights --output summary
+# Returns aggregated statistics instead of full logs
+
+# JSON output for automation
+logler investigate app.log --errors --json
 ```
 
 ## 🎨 Log Format Support

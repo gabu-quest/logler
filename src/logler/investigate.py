@@ -59,7 +59,8 @@ def _normalize_entry(entry: Dict[str, Any]) -> None:
     if isinstance(level, str):
         entry["level"] = level.upper()
     raw = entry.get("raw") or ""
-    if entry.get("format") is None and isinstance(raw, str):
+    # Always detect and set format based on raw content
+    if isinstance(raw, str):
         stripped = raw.lstrip()
         if stripped.startswith("{"):
             entry["format"] = "Json"
@@ -67,7 +68,7 @@ def _normalize_entry(entry: Dict[str, Any]) -> None:
             entry["format"] = "Syslog"
         elif "level=" in raw or " msg=" in raw or raw.startswith("level="):
             entry["format"] = "Logfmt"
-        else:
+        elif entry.get("format") is None:
             entry["format"] = "PlainText"
     if entry.get("level") is None and isinstance(raw, str):
         inferred = _infer_syslog_level(raw)
@@ -377,6 +378,219 @@ def get_context(
     return result
 
 
+def follow_thread_hierarchy(
+    files: List[str],
+    root_identifier: str,
+    max_depth: Optional[int] = None,
+    use_naming_patterns: bool = True,
+    use_temporal_inference: bool = True,
+    min_confidence: float = 0.0,
+    parser_format: Optional[str] = None,
+    custom_regex: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build hierarchical tree of threads/spans showing parent-child relationships.
+
+    This detects sub-threads and nested operations using:
+    - Explicit parent_span_id fields (OpenTelemetry)
+    - Naming patterns (worker-1.task-a, main:subtask-1)
+    - Temporal inference (time-based proximity)
+
+    Args:
+        files: List of log file paths
+        root_identifier: Root thread ID, correlation ID, or span ID
+        max_depth: Maximum depth of hierarchy tree (default: unlimited)
+        use_naming_patterns: Enable naming pattern detection (default: True)
+        use_temporal_inference: Enable time-based inference (default: True)
+        min_confidence: Minimum confidence score (0.0-1.0, default: 0.0)
+        parser_format: Optional log format hint
+        custom_regex: Optional custom parsing regex
+
+    Returns:
+        Dictionary with hierarchical structure:
+        {
+            "roots": [
+                {
+                    "id": "main-thread",
+                    "node_type": "Thread" | "Span" | "CorrelationGroup",
+                    "name": "Main Request Handler",
+                    "parent_id": null,
+                    "children": [
+                        {
+                            "id": "worker-1.db-query",
+                            "node_type": "Span",
+                            "name": "Database Query",
+                            "parent_id": "main-thread",
+                            "children": [],
+                            "entry_ids": [...],
+                            "start_time": "2024-01-15T10:00:00Z",
+                            "end_time": "2024-01-15T10:00:02Z",
+                            "duration_ms": 2000,
+                            "entry_count": 15,
+                            "error_count": 0,
+                            "level_counts": {"INFO": 12, "DEBUG": 3},
+                            "depth": 1,
+                            "confidence": 0.8,
+                            "relationship_evidence": ["Naming pattern: worker-1.db-query"]
+                        }
+                    ],
+                    "entry_ids": [...],
+                    "start_time": "2024-01-15T10:00:00Z",
+                    "end_time": "2024-01-15T10:00:05Z",
+                    "duration_ms": 5000,
+                    "entry_count": 42,
+                    "error_count": 2,
+                    "level_counts": {"INFO": 35, "ERROR": 2, "DEBUG": 5},
+                    "depth": 0,
+                    "confidence": 1.0,
+                    "relationship_evidence": []
+                }
+            ],
+            "total_nodes": 8,
+            "max_depth": 3,
+            "total_duration_ms": 5000,
+            "concurrent_count": 2,
+            "bottleneck": {
+                "node_id": "worker-1.db-query",
+                "duration_ms": 2000,
+                "percentage": 40.0,
+                "depth": 1
+            },
+            "error_nodes": ["worker-2.api-call"],
+            "detection_method": "ExplicitParentId" | "NamingPattern" | "TemporalInference" | "Mixed"
+        }
+
+    Example:
+        # Detect OpenTelemetry trace hierarchy
+        hierarchy = follow_thread_hierarchy(
+            files=["app.log"],
+            root_identifier="trace-abc123",
+            min_confidence=0.8
+        )
+
+        # Print tree structure
+        for root in hierarchy['roots']:
+            print_tree(root, indent=0)
+
+        # Find bottleneck
+        if hierarchy['bottleneck']:
+            print(f"Bottleneck: {hierarchy['bottleneck']['node_id']} ({hierarchy['bottleneck']['duration_ms']}ms)")
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    # Use Investigator when custom parsing is requested
+    if parser_format or custom_regex:
+        inv = Investigator()
+        inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
+        return inv.build_hierarchy(
+            root_identifier=root_identifier,
+            max_depth=max_depth,
+            use_naming_patterns=use_naming_patterns,
+            use_temporal_inference=use_temporal_inference,
+            min_confidence=min_confidence
+        )
+
+    # Call Rust directly for better performance
+    result_json = logler_rs.build_hierarchy(
+        files,
+        root_identifier,
+        max_depth,
+        use_naming_patterns,
+        use_temporal_inference,
+        min_confidence
+    )
+    return json.loads(result_json)
+
+
+def get_hierarchy_summary(hierarchy: Dict[str, Any]) -> str:
+    """
+    Generate a human-readable summary of a thread hierarchy.
+
+    Args:
+        hierarchy: Hierarchy dictionary from follow_thread_hierarchy()
+
+    Returns:
+        Formatted text summary
+
+    Example:
+        hierarchy = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
+        summary = get_hierarchy_summary(hierarchy)
+        print(summary)
+    """
+    lines = []
+
+    # Overview
+    lines.append("=== Thread Hierarchy Summary ===")
+    lines.append(f"Total nodes: {hierarchy.get('total_nodes', 0)}")
+    lines.append(f"Max depth: {hierarchy.get('max_depth', 0)}")
+    lines.append(f"Detection method: {hierarchy.get('detection_method', 'Unknown')}")
+
+    # Duration
+    total_duration = hierarchy.get('total_duration_ms')
+    if total_duration:
+        lines.append(f"Total duration: {total_duration}ms ({total_duration/1000:.2f}s)")
+
+    # Concurrent operations
+    concurrent = hierarchy.get('concurrent_count', 0)
+    if concurrent > 1:
+        lines.append(f"Concurrent operations: {concurrent}")
+
+    # Bottleneck
+    bottleneck = hierarchy.get('bottleneck')
+    if bottleneck:
+        lines.append("")
+        lines.append("⚠️  BOTTLENECK DETECTED:")
+        lines.append(f"  Node: {bottleneck.get('node_id')}")
+        lines.append(f"  Duration: {bottleneck.get('duration_ms')}ms ({bottleneck.get('percentage', 0):.1f}% of total)")
+        lines.append(f"  Depth: {bottleneck.get('depth')}")
+
+    # Errors
+    error_nodes = hierarchy.get('error_nodes', [])
+    if error_nodes:
+        lines.append("")
+        lines.append(f"❌ Errors in {len(error_nodes)} node(s):")
+        for node_id in error_nodes[:5]:  # Show first 5
+            lines.append(f"  - {node_id}")
+        if len(error_nodes) > 5:
+            lines.append(f"  ... and {len(error_nodes) - 5} more")
+
+    # Tree structure preview
+    roots = hierarchy.get('roots', [])
+    if roots:
+        lines.append("")
+        lines.append("Tree Structure:")
+        for root in roots[:3]:  # Show first 3 roots
+            lines.append(f"  📁 {root.get('id')} ({root.get('entry_count', 0)} entries, {len(root.get('children', []))} children)")
+            _append_tree_preview(root, lines, depth=1, max_depth=2)
+        if len(roots) > 3:
+            lines.append(f"  ... and {len(roots) - 3} more root(s)")
+
+    return "\n".join(lines)
+
+
+def _append_tree_preview(node: Dict[str, Any], lines: List[str], depth: int, max_depth: int):
+    """Helper to append tree preview to lines"""
+    if depth >= max_depth:
+        return
+
+    children = node.get('children', [])
+    for i, child in enumerate(children[:3]):  # Show first 3 children
+        is_last = i == len(children) - 1
+        prefix = "  " * depth + ("└─ " if is_last else "├─ ")
+
+        error_marker = "❌ " if child.get('error_count', 0) > 0 else ""
+        duration = child.get('duration_ms', 0)
+        duration_str = f" ({duration}ms)" if duration > 0 else ""
+
+        lines.append(f"{prefix}{error_marker}{child.get('id')} ({child.get('entry_count', 0)} entries){duration_str}")
+        _append_tree_preview(child, lines, depth + 1, max_depth)
+
+    if len(children) > 3:
+        prefix = "  " * depth + "└─ "
+        lines.append(f"{prefix}... and {len(children) - 3} more")
+
+
 def find_patterns(
     files: List[str],
     min_occurrences: int = 3,
@@ -584,6 +798,44 @@ class Investigator:
         if not hasattr(self._investigator, 'sql_schema'):
             raise RuntimeError("SQL feature not available. Build with --features sql")
         result_json = self._investigator.sql_schema(table)
+        return json.loads(result_json)
+
+    def build_hierarchy(
+        self,
+        root_identifier: str,
+        max_depth: Optional[int] = None,
+        use_naming_patterns: bool = True,
+        use_temporal_inference: bool = True,
+        min_confidence: float = 0.0,
+    ) -> Dict[str, Any]:
+        """
+        Build hierarchical tree of threads/spans from loaded files.
+
+        Args:
+            root_identifier: Root thread ID, correlation ID, or span ID
+            max_depth: Maximum depth of hierarchy tree
+            use_naming_patterns: Enable naming pattern detection
+            use_temporal_inference: Enable time-based inference
+            min_confidence: Minimum confidence score (0.0-1.0)
+
+        Returns:
+            Hierarchy dictionary (see follow_thread_hierarchy for structure)
+
+        Example:
+            inv = Investigator()
+            inv.load_files(["app.log"])
+            hierarchy = inv.build_hierarchy(root_identifier="req-123")
+            summary = get_hierarchy_summary(hierarchy)
+            print(summary)
+        """
+        result_json = self._investigator.build_hierarchy(
+            self._files,
+            root_identifier,
+            max_depth,
+            use_naming_patterns,
+            use_temporal_inference,
+            min_confidence
+        )
         return json.loads(result_json)
 
 
