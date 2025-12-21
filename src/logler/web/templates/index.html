@@ -292,8 +292,37 @@
             </div>
             </div>
 
+            <!-- View Mode Tabs -->
+            <div class="glass-card text-white px-3 py-2 flex items-center gap-2 border-t border-white/10">
+                <span class="text-xs text-gray-400">View:</span>
+                <button @click="viewMode = 'logs'"
+                        :class="viewMode === 'logs' ? 'bg-indigo-600' : 'bg-white bg-opacity-10'"
+                        class="px-3 py-1 rounded text-xs hover:bg-opacity-30 transition">
+                    📜 Logs
+                </button>
+                <button @click="viewMode = 'hierarchy'; loadHierarchy()"
+                        :class="viewMode === 'hierarchy' ? 'bg-indigo-600' : 'bg-white bg-opacity-10'"
+                        class="px-3 py-1 rounded text-xs hover:bg-opacity-30 transition">
+                    🌳 Hierarchy
+                </button>
+                <button @click="viewMode = 'waterfall'; loadHierarchy()"
+                        :class="viewMode === 'waterfall' ? 'bg-indigo-600' : 'bg-white bg-opacity-10'"
+                        class="px-3 py-1 rounded text-xs hover:bg-opacity-30 transition">
+                    📊 Waterfall
+                </button>
+                <div x-show="viewMode !== 'logs'" class="flex-1"></div>
+                <div x-show="viewMode !== 'logs'" class="flex items-center gap-2">
+                    <input type="text" x-model="hierarchyRootId" @keyup.enter="loadHierarchy()"
+                           placeholder="Root ID (thread, correlation, trace)..."
+                           class="px-2 py-1 text-xs bg-white bg-opacity-10 border border-white/20 rounded w-48">
+                    <button @click="loadHierarchy()" class="px-2 py-1 bg-white bg-opacity-20 rounded text-xs hover:bg-opacity-30">
+                        🔍 Load
+                    </button>
+                </div>
+            </div>
+
             <!-- Log Viewer -->
-            <div class="flex-1 log-viewer overflow-auto" id="log-container" @scroll="handleScroll()">
+            <div x-show="viewMode === 'logs'" class="flex-1 log-viewer overflow-auto" id="log-container" @scroll="handleScroll()">
                 <div x-show="!currentFile" class="flex items-center justify-center h-full">
                     <div class="text-center text-gray-500">
                         <img src="{{ url_for('static', path='logler-logo.png') }}" alt="Logler logo" class="h-8 w-8 mx-auto mb-4 opacity-90" style="height:2rem;width:2rem;">
@@ -328,6 +357,187 @@
                     </div>
                 </template>
                 <div :style="`height:${logBottomSpacer}px`"></div>
+            </div>
+
+            <!-- Hierarchy Tree View -->
+            <div x-show="viewMode === 'hierarchy'" class="flex-1 log-viewer overflow-auto p-4">
+                <div x-show="hierarchyLoading" class="flex items-center justify-center h-full">
+                    <div class="flex flex-col items-center gap-3">
+                        <div class="h-10 w-10 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <div class="text-sm text-gray-200">Loading hierarchy...</div>
+                    </div>
+                </div>
+
+                <div x-show="!hierarchyLoading && hierarchyError" class="flex items-center justify-center h-full">
+                    <div class="text-center text-red-400">
+                        <div class="text-4xl mb-4">❌</div>
+                        <div class="text-lg" x-text="hierarchyError"></div>
+                    </div>
+                </div>
+
+                <div x-show="!hierarchyLoading && !hierarchyError && !hierarchy" class="flex items-center justify-center h-full">
+                    <div class="text-center text-gray-500">
+                        <div class="text-4xl mb-4">🌳</div>
+                        <div class="text-lg mb-2">No hierarchy loaded</div>
+                        <div class="text-sm">Enter a root ID (thread, correlation, or trace) and click Load</div>
+                    </div>
+                </div>
+
+                <div x-show="!hierarchyLoading && !hierarchyError && hierarchy">
+                    <!-- Summary Stats -->
+                    <div class="grid grid-cols-4 gap-3 mb-4">
+                        <div class="stat-card p-3 rounded-lg">
+                            <div class="text-xs text-gray-300">Total Nodes</div>
+                            <div class="text-xl font-bold" x-text="hierarchy?.total_nodes || 0"></div>
+                        </div>
+                        <div class="stat-card p-3 rounded-lg">
+                            <div class="text-xs text-gray-300">Max Depth</div>
+                            <div class="text-xl font-bold" x-text="hierarchy?.max_depth || 0"></div>
+                        </div>
+                        <div class="stat-card p-3 rounded-lg">
+                            <div class="text-xs text-gray-300">Duration</div>
+                            <div class="text-xl font-bold" x-text="formatDuration(hierarchy?.total_duration_ms)"></div>
+                        </div>
+                        <div class="stat-card p-3 rounded-lg" :class="(hierarchy?.error_nodes?.length > 0) ? 'border-red-500 border' : ''">
+                            <div class="text-xs text-gray-300">Errors</div>
+                            <div class="text-xl font-bold text-red-400" x-text="hierarchy?.error_nodes?.length || 0"></div>
+                        </div>
+                    </div>
+
+                    <!-- Bottleneck Alert -->
+                    <div x-show="hierarchy?.bottleneck" class="mb-4 p-3 bg-amber-900/30 border border-amber-500/50 rounded-lg">
+                        <div class="flex items-center gap-2">
+                            <span class="text-amber-400">⚠️</span>
+                            <span class="font-bold text-amber-300">Bottleneck Detected:</span>
+                            <span x-text="hierarchy?.bottleneck?.node_id"></span>
+                            <span class="text-gray-400">-</span>
+                            <span x-text="formatDuration(hierarchy?.bottleneck?.duration_ms)"></span>
+                            <span class="text-gray-400">(<span x-text="hierarchy?.bottleneck?.percentage?.toFixed(1)"></span>%)</span>
+                        </div>
+                    </div>
+
+                    <!-- Interactive Tree -->
+                    <div class="font-mono text-sm">
+                        <template x-for="root in hierarchy?.roots || []" :key="root.id">
+                            <div x-data="{ expanded: true }">
+                                <div class="flex items-center gap-2 p-2 hover:bg-white/5 rounded cursor-pointer"
+                                     @click="expanded = !expanded"
+                                     :class="root.error_count > 0 ? 'bg-red-900/20' : ''">
+                                    <span x-text="expanded ? '▼' : '▶'" class="text-gray-500 w-4"></span>
+                                    <span x-text="root.error_count > 0 ? '❌' : '📁'" class="w-5"></span>
+                                    <span class="font-bold text-green-400" x-text="root.id"></span>
+                                    <span class="text-gray-500">(<span x-text="root.entry_count"></span> entries)</span>
+                                    <span x-show="root.duration_ms" class="text-yellow-400" x-text="formatDuration(root.duration_ms)"></span>
+                                    <span class="text-gray-600 text-xs" x-text="root.node_type"></span>
+                                </div>
+                                <div x-show="expanded" class="ml-6 border-l border-gray-700">
+                                    <template x-for="child in root.children || []" :key="child.id">
+                                        <div x-html="renderHierarchyNode(child, 1)"></div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Error Flow Analysis -->
+                    <div x-show="errorAnalysis?.has_errors" class="mt-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg">
+                        <h3 class="text-lg font-bold text-red-400 mb-3">🔍 Error Flow Analysis</h3>
+
+                        <div x-show="errorAnalysis?.root_causes?.length > 0" class="mb-4">
+                            <div class="text-sm font-bold text-red-300 mb-2">Root Cause(s):</div>
+                            <template x-for="cause in errorAnalysis?.root_causes || []" :key="cause.node_id">
+                                <div class="ml-4 p-2 bg-red-900/30 rounded mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-red-400">🔴</span>
+                                        <span class="font-bold" x-text="cause.node_id"></span>
+                                        <span x-show="cause.is_leaf" class="text-xs text-gray-400">(leaf node)</span>
+                                    </div>
+                                    <div class="text-xs text-gray-400 mt-1">
+                                        Path: <span x-text="cause.path?.join(' → ')"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <div x-show="errorAnalysis?.recommendations?.length > 0">
+                            <div class="text-sm font-bold text-amber-300 mb-2">💡 Recommendations:</div>
+                            <ul class="ml-4 text-sm text-gray-300 space-y-1">
+                                <template x-for="rec in errorAnalysis?.recommendations || []" :key="rec">
+                                    <li class="flex items-start gap-2">
+                                        <span>•</span>
+                                        <span x-text="rec"></span>
+                                    </li>
+                                </template>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Waterfall Timeline View -->
+            <div x-show="viewMode === 'waterfall'" class="flex-1 log-viewer overflow-auto p-4">
+                <div x-show="hierarchyLoading" class="flex items-center justify-center h-full">
+                    <div class="flex flex-col items-center gap-3">
+                        <div class="h-10 w-10 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <div class="text-sm text-gray-200">Loading waterfall...</div>
+                    </div>
+                </div>
+
+                <div x-show="!hierarchyLoading && !hierarchy" class="flex items-center justify-center h-full">
+                    <div class="text-center text-gray-500">
+                        <div class="text-4xl mb-4">📊</div>
+                        <div class="text-lg mb-2">No waterfall data</div>
+                        <div class="text-sm">Enter a root ID and click Load</div>
+                    </div>
+                </div>
+
+                <div x-show="!hierarchyLoading && hierarchy">
+                    <!-- Waterfall Header -->
+                    <div class="mb-4 flex items-center justify-between">
+                        <div>
+                            <span class="text-lg font-bold">Timeline:</span>
+                            <span x-text="hierarchyRootId" class="text-green-400 ml-2"></span>
+                            <span class="text-gray-400 ml-2">(<span x-text="formatDuration(hierarchy?.total_duration_ms)"></span>)</span>
+                        </div>
+                        <div class="text-xs text-gray-400">
+                            Detection: <span x-text="hierarchy?.detection_method"></span>
+                        </div>
+                    </div>
+
+                    <!-- Waterfall Bars -->
+                    <div class="font-mono text-xs space-y-1">
+                        <template x-for="node in flattenHierarchy()" :key="node.id">
+                            <div class="flex items-center gap-2 py-1">
+                                <div class="w-40 truncate text-right pr-2" :style="`padding-left: ${node.depth * 12}px`">
+                                    <span :class="node.error_count > 0 ? 'text-red-400' : 'text-gray-300'" x-text="node.id"></span>
+                                </div>
+                                <div class="flex-1 h-5 bg-gray-800 rounded relative overflow-hidden">
+                                    <div class="absolute h-full rounded"
+                                         :class="node.error_count > 0 ? 'bg-red-600' : (node.id === hierarchy?.bottleneck?.node_id ? 'bg-amber-600' : 'bg-indigo-600')"
+                                         :style="`left: ${getWaterfallBarLeft(node)}%; width: ${getWaterfallBarWidth(node)}%`">
+                                    </div>
+                                </div>
+                                <div class="w-16 text-right text-gray-400" x-text="formatDuration(node.duration_ms)"></div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Legend -->
+                    <div class="mt-4 flex items-center gap-4 text-xs text-gray-400">
+                        <div class="flex items-center gap-1">
+                            <div class="w-3 h-3 bg-indigo-600 rounded"></div>
+                            <span>Normal</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <div class="w-3 h-3 bg-amber-600 rounded"></div>
+                            <span>Bottleneck</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <div class="w-3 h-3 bg-red-600 rounded"></div>
+                            <span>Error</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
@@ -517,6 +727,15 @@
                 entries: [],
                 filteredEntries: [],
                 visibleEntries: [],
+                // Hierarchy view state
+                viewMode: 'logs',  // 'logs', 'hierarchy', 'waterfall'
+                hierarchyRootId: '',
+                hierarchy: null,
+                errorAnalysis: null,
+                hierarchyLoading: false,
+                hierarchyError: '',
+                hierarchyMinTime: null,
+                hierarchyMaxTime: null,
                 logTopSpacer: 0,
                 logBottomSpacer: 0,
                 logViewportHeight: 600,
@@ -1079,6 +1298,154 @@
                         }
                         this.logScrollScheduled = false;
                     });
+                },
+
+                // ===== Hierarchy Functions =====
+
+                async loadHierarchy() {
+                    if (!this.hierarchyRootId || this.currentFiles.length === 0) {
+                        if (this.hierarchyRootId && this.activeFiles.length > 0) {
+                            // Use active files if no current files
+                            this.currentFiles = this.activeFiles;
+                        } else {
+                            this.hierarchyError = 'No files loaded. Open a log file first.';
+                            return;
+                        }
+                    }
+
+                    this.hierarchyLoading = true;
+                    this.hierarchyError = '';
+                    this.hierarchy = null;
+                    this.errorAnalysis = null;
+
+                    try {
+                        const response = await fetch('/api/hierarchy', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                paths: this.currentFiles.length > 0 ? this.currentFiles : this.activeFiles,
+                                root_identifier: this.hierarchyRootId,
+                                min_confidence: 0.0,
+                                use_naming_patterns: true,
+                                use_temporal_inference: true,
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (data.error) {
+                            this.hierarchyError = data.error;
+                        } else {
+                            this.hierarchy = data.hierarchy;
+                            this.errorAnalysis = data.error_analysis;
+                            this.calculateTimeRange();
+                        }
+                    } catch (e) {
+                        this.hierarchyError = 'Failed to load hierarchy: ' + e.message;
+                    } finally {
+                        this.hierarchyLoading = false;
+                    }
+                },
+
+                calculateTimeRange() {
+                    if (!this.hierarchy?.roots) return;
+
+                    let minTime = null;
+                    let maxTime = null;
+
+                    const processNode = (node) => {
+                        if (node.start_time) {
+                            const t = new Date(node.start_time).getTime();
+                            if (minTime === null || t < minTime) minTime = t;
+                        }
+                        if (node.end_time) {
+                            const t = new Date(node.end_time).getTime();
+                            if (maxTime === null || t > maxTime) maxTime = t;
+                        }
+                        (node.children || []).forEach(processNode);
+                    };
+
+                    this.hierarchy.roots.forEach(processNode);
+                    this.hierarchyMinTime = minTime;
+                    this.hierarchyMaxTime = maxTime;
+                },
+
+                formatDuration(ms) {
+                    if (ms === null || ms === undefined) return 'N/A';
+                    if (ms < 1) return '<1ms';
+                    if (ms < 1000) return ms.toFixed(0) + 'ms';
+                    if (ms < 60000) return (ms / 1000).toFixed(2) + 's';
+                    return (ms / 60000).toFixed(2) + 'm';
+                },
+
+                renderHierarchyNode(node, depth) {
+                    const hasChildren = node.children && node.children.length > 0;
+                    const icon = node.error_count > 0 ? '❌' : (hasChildren ? '📁' : '📄');
+                    const bgClass = node.error_count > 0 ? 'bg-red-900/20' : '';
+                    const indent = depth * 16;
+
+                    let html = `
+                        <div x-data="{ expanded: ${depth < 3} }" style="margin-left: ${indent}px">
+                            <div class="flex items-center gap-2 p-1 hover:bg-white/5 rounded cursor-pointer ${bgClass}"
+                                 @click="expanded = !expanded">
+                                <span x-text="expanded ? '▼' : '▶'" class="text-gray-500 w-4 ${hasChildren ? '' : 'invisible'}"></span>
+                                <span>${icon}</span>
+                                <span class="text-blue-300">${this.escapeHtml(node.id)}</span>
+                                <span class="text-gray-500">(${node.entry_count || 0} entries)</span>
+                                ${node.duration_ms ? `<span class="text-yellow-400">${this.formatDuration(node.duration_ms)}</span>` : ''}
+                                <span class="text-gray-600 text-xs">${node.node_type || ''}</span>
+                            </div>
+                    `;
+
+                    if (hasChildren) {
+                        html += `<div x-show="expanded" class="border-l border-gray-700">`;
+                        for (const child of node.children) {
+                            html += this.renderHierarchyNode(child, depth + 1);
+                        }
+                        html += `</div>`;
+                    }
+
+                    html += `</div>`;
+                    return html;
+                },
+
+                escapeHtml(str) {
+                    if (!str) return '';
+                    return str.replace(/&/g, '&amp;')
+                              .replace(/</g, '&lt;')
+                              .replace(/>/g, '&gt;')
+                              .replace(/"/g, '&quot;');
+                },
+
+                flattenHierarchy() {
+                    if (!this.hierarchy?.roots) return [];
+
+                    const result = [];
+                    const flatten = (node, depth) => {
+                        result.push({ ...node, depth });
+                        (node.children || []).forEach(child => flatten(child, depth + 1));
+                    };
+
+                    this.hierarchy.roots.forEach(root => flatten(root, 0));
+                    return result;
+                },
+
+                getWaterfallBarLeft(node) {
+                    if (!node.start_time || !this.hierarchyMinTime || !this.hierarchyMaxTime) return 0;
+                    const start = new Date(node.start_time).getTime();
+                    const range = this.hierarchyMaxTime - this.hierarchyMinTime;
+                    if (range <= 0) return 0;
+                    return ((start - this.hierarchyMinTime) / range) * 100;
+                },
+
+                getWaterfallBarWidth(node) {
+                    if (!node.duration_ms || !this.hierarchyMaxTime || !this.hierarchyMinTime) {
+                        return 5; // Minimum width for visibility
+                    }
+                    const range = this.hierarchyMaxTime - this.hierarchyMinTime;
+                    if (range <= 0) return 5;
+                    const width = (node.duration_ms / range) * 100;
+                    return Math.max(2, Math.min(100, width)); // Min 2%, max 100%
                 }
             };
         }
