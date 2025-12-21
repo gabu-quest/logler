@@ -591,6 +591,907 @@ def _append_tree_preview(node: Dict[str, Any], lines: List[str], depth: int, max
         lines.append(f"{prefix}... and {len(children) - 3} more")
 
 
+def analyze_error_flow(
+    hierarchy: Dict[str, Any],
+    include_context: bool = True,
+) -> Dict[str, Any]:
+    """
+    Analyze error propagation through a hierarchy to identify root causes and cascading failures.
+
+    This function traces errors through parent-child relationships to find:
+    - Root cause: The first/originating error in the chain
+    - Propagation chain: How errors cascaded through the system
+    - Affected nodes: All nodes impacted by the error
+    - Impact assessment: Severity and scope of the failure
+
+    Args:
+        hierarchy: Hierarchy dictionary from follow_thread_hierarchy()
+        include_context: Include sample error messages (default: True)
+
+    Returns:
+        Dictionary with error flow analysis:
+        {
+            "has_errors": bool,
+            "total_error_nodes": int,
+            "root_causes": [
+                {
+                    "node_id": "redis-write",
+                    "node_type": "Span",
+                    "error_count": 1,
+                    "depth": 3,
+                    "timestamp": "2024-01-15T10:00:01.020Z",
+                    "path": ["api-gateway", "product-service", "cache-update", "redis-write"],
+                    "is_leaf": True,
+                    "confidence": 0.95
+                }
+            ],
+            "propagation_chains": [
+                {
+                    "root_cause": "redis-write",
+                    "chain": [
+                        {"node_id": "redis-write", "error_count": 1, "depth": 3},
+                        {"node_id": "cache-update", "error_count": 1, "depth": 2},
+                        {"node_id": "product-service", "error_count": 1, "depth": 1}
+                    ],
+                    "total_affected": 3,
+                    "propagation_type": "upward"  # errors bubbled up to parent
+                }
+            ],
+            "impact_summary": {
+                "total_affected_nodes": 5,
+                "affected_percentage": 35.7,
+                "max_propagation_depth": 3,
+                "concurrent_failures": 2
+            },
+            "recommendations": [
+                "Investigate redis-write first - it appears to be the root cause",
+                "Consider adding retry logic for cache operations",
+                "3 nodes show cascading failures from a single source"
+            ]
+        }
+
+    Example:
+        hierarchy = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
+        error_analysis = analyze_error_flow(hierarchy)
+
+        if error_analysis['has_errors']:
+            print(f"Root cause: {error_analysis['root_causes'][0]['node_id']}")
+            for rec in error_analysis['recommendations']:
+                print(f"  - {rec}")
+    """
+    result = {
+        "has_errors": False,
+        "total_error_nodes": 0,
+        "root_causes": [],
+        "propagation_chains": [],
+        "impact_summary": {
+            "total_affected_nodes": 0,
+            "affected_percentage": 0.0,
+            "max_propagation_depth": 0,
+            "concurrent_failures": 0
+        },
+        "recommendations": []
+    }
+
+    error_nodes = hierarchy.get('error_nodes', [])
+    if not error_nodes:
+        return result
+
+    result["has_errors"] = True
+    result["total_error_nodes"] = len(error_nodes)
+
+    # Build node lookup and parent mapping
+    all_nodes = {}
+    parent_map = {}  # child_id -> parent_id
+
+    def collect_nodes(node: Dict[str, Any], parent_id: Optional[str] = None):
+        node_id = node.get('id')
+        if node_id:
+            all_nodes[node_id] = node
+            if parent_id:
+                parent_map[node_id] = parent_id
+        for child in node.get('children', []):
+            collect_nodes(child, node_id)
+
+    for root in hierarchy.get('roots', []):
+        collect_nodes(root)
+
+    # Find root causes (errors at leaf nodes or deepest error in each chain)
+    error_node_data = []
+    for node_id in error_nodes:
+        node = all_nodes.get(node_id)
+        if node:
+            error_node_data.append({
+                "node_id": node_id,
+                "node_type": node.get('node_type', 'Unknown'),
+                "error_count": node.get('error_count', 0),
+                "depth": node.get('depth', 0),
+                "timestamp": node.get('start_time'),
+                "is_leaf": len(node.get('children', [])) == 0,
+                "children_with_errors": sum(
+                    1 for c in node.get('children', [])
+                    if c.get('error_count', 0) > 0
+                )
+            })
+
+    # Sort by depth (deepest first) and timestamp (earliest first)
+    error_node_data.sort(key=lambda x: (-x['depth'], x['timestamp'] or ''))
+
+    # Identify root causes - errors that didn't come from children
+    root_causes = []
+
+    for error_node in error_node_data:
+        node_id = error_node['node_id']
+
+        # Build path from root to this node
+        path = []
+        current = node_id
+        while current:
+            path.insert(0, current)
+            current = parent_map.get(current)
+
+        # Check if this is a root cause (no child errors, or leaf node)
+        if error_node['children_with_errors'] == 0:
+            # Calculate confidence based on evidence
+            confidence = 1.0 if error_node['is_leaf'] else 0.85
+
+            root_causes.append({
+                "node_id": node_id,
+                "node_type": error_node['node_type'],
+                "error_count": error_node['error_count'],
+                "depth": error_node['depth'],
+                "timestamp": error_node['timestamp'],
+                "path": path,
+                "is_leaf": error_node['is_leaf'],
+                "confidence": confidence
+            })
+
+    result["root_causes"] = root_causes
+
+    # Build propagation chains (trace errors upward from root causes)
+    propagation_chains = []
+
+    for root_cause in root_causes:
+        chain = []
+        current_id = root_cause['node_id']
+
+        # Walk up the tree
+        while current_id:
+            node = all_nodes.get(current_id)
+            if node:
+                chain.append({
+                    "node_id": current_id,
+                    "error_count": node.get('error_count', 0),
+                    "depth": node.get('depth', 0)
+                })
+            current_id = parent_map.get(current_id)
+
+        # Only include chains where errors actually propagated
+        if len(chain) > 1:
+            # Check if parent nodes also have errors
+            propagated_chain = [c for c in chain if c['error_count'] > 0]
+            if len(propagated_chain) > 1:
+                propagation_chains.append({
+                    "root_cause": root_cause['node_id'],
+                    "chain": propagated_chain,
+                    "total_affected": len(propagated_chain),
+                    "propagation_type": "upward"
+                })
+
+    result["propagation_chains"] = propagation_chains
+
+    # Calculate impact summary
+    total_nodes = hierarchy.get('total_nodes', 1)
+    affected_nodes = len(set(error_nodes))
+    max_depth = max((rc['depth'] for rc in root_causes), default=0)
+
+    # Count concurrent failures (root causes at same depth)
+    depth_counts = defaultdict(int)
+    for rc in root_causes:
+        depth_counts[rc['depth']] += 1
+    concurrent = max(depth_counts.values(), default=0)
+
+    result["impact_summary"] = {
+        "total_affected_nodes": affected_nodes,
+        "affected_percentage": (affected_nodes / total_nodes * 100) if total_nodes > 0 else 0,
+        "max_propagation_depth": max_depth,
+        "concurrent_failures": concurrent if concurrent > 1 else 0
+    }
+
+    # Generate recommendations
+    recommendations = []
+
+    if root_causes:
+        primary_cause = root_causes[0]
+        recommendations.append(
+            f"Investigate {primary_cause['node_id']} first - it appears to be the root cause"
+        )
+
+        if primary_cause['is_leaf']:
+            recommendations.append(
+                f"Error originated at leaf node (depth {primary_cause['depth']}) - check external dependencies"
+            )
+
+    if len(propagation_chains) > 0:
+        total_propagated = sum(c['total_affected'] for c in propagation_chains)
+        recommendations.append(
+            f"{total_propagated} nodes show cascading failures - consider adding circuit breakers"
+        )
+
+    if concurrent > 1:
+        recommendations.append(
+            f"{concurrent} concurrent failures detected - possible systemic issue"
+        )
+
+    if result["impact_summary"]["affected_percentage"] > 50:
+        recommendations.append(
+            "High impact failure (>50% of nodes affected) - prioritize investigation"
+        )
+
+    result["recommendations"] = recommendations
+
+    return result
+
+
+def format_error_flow(
+    error_analysis: Dict[str, Any],
+    show_chains: bool = True,
+    show_recommendations: bool = True,
+) -> str:
+    """
+    Format error flow analysis as human-readable text.
+
+    Args:
+        error_analysis: Error analysis from analyze_error_flow()
+        show_chains: Show propagation chains (default: True)
+        show_recommendations: Show recommendations (default: True)
+
+    Returns:
+        Formatted error flow string
+
+    Example:
+        hierarchy = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
+        error_analysis = analyze_error_flow(hierarchy)
+        print(format_error_flow(error_analysis))
+    """
+    lines = []
+
+    if not error_analysis.get('has_errors'):
+        return "✅ No errors detected in hierarchy"
+
+    # Header
+    lines.append("=" * 70)
+    lines.append("🔍 ERROR FLOW ANALYSIS")
+    lines.append("=" * 70)
+    lines.append("")
+
+    # Summary
+    total = error_analysis.get('total_error_nodes', 0)
+    impact = error_analysis.get('impact_summary', {})
+    lines.append(f"Total error nodes: {total}")
+    lines.append(f"Affected: {impact.get('affected_percentage', 0):.1f}% of hierarchy")
+
+    if impact.get('concurrent_failures', 0) > 1:
+        lines.append(f"Concurrent failures: {impact['concurrent_failures']}")
+
+    lines.append("")
+
+    # Root Causes
+    root_causes = error_analysis.get('root_causes', [])
+    if root_causes:
+        lines.append("-" * 70)
+        lines.append("🔴 ROOT CAUSE(S)")
+        lines.append("-" * 70)
+
+        for i, cause in enumerate(root_causes, 1):
+            confidence_pct = int(cause.get('confidence', 0) * 100)
+            leaf_marker = " (leaf node)" if cause.get('is_leaf') else ""
+
+            lines.append(f"\n  {i}. {cause['node_id']}{leaf_marker}")
+            lines.append(f"     Type: {cause.get('node_type', 'Unknown')}")
+            lines.append(f"     Errors: {cause.get('error_count', 0)}")
+            lines.append(f"     Depth: {cause.get('depth', 0)}")
+            lines.append(f"     Confidence: {confidence_pct}%")
+
+            if cause.get('timestamp'):
+                lines.append(f"     Time: {cause['timestamp']}")
+
+            if cause.get('path'):
+                path_str = " → ".join(cause['path'])
+                lines.append(f"     Path: {path_str}")
+
+    # Propagation Chains
+    if show_chains:
+        chains = error_analysis.get('propagation_chains', [])
+        if chains:
+            lines.append("")
+            lines.append("-" * 70)
+            lines.append("📈 ERROR PROPAGATION")
+            lines.append("-" * 70)
+
+            for chain_data in chains:
+                lines.append(f"\n  From: {chain_data['root_cause']}")
+                lines.append(f"  Affected nodes: {chain_data['total_affected']}")
+                lines.append("  Chain:")
+
+                chain = chain_data.get('chain', [])
+                for j, node in enumerate(chain):
+                    is_last = j == len(chain) - 1
+                    prefix = "     └─" if is_last else "     ├─"
+                    arrow = " ← ROOT CAUSE" if j == 0 else ""
+                    lines.append(f"{prefix} {node['node_id']} ({node['error_count']} errors){arrow}")
+
+    # Recommendations
+    if show_recommendations:
+        recommendations = error_analysis.get('recommendations', [])
+        if recommendations:
+            lines.append("")
+            lines.append("-" * 70)
+            lines.append("💡 RECOMMENDATIONS")
+            lines.append("-" * 70)
+
+            for rec in recommendations:
+                lines.append(f"  • {rec}")
+
+    lines.append("")
+    lines.append("=" * 70)
+
+    return "\n".join(lines)
+
+
+def analyze_bottlenecks(
+    hierarchy: Dict[str, Any],
+    threshold_percentage: float = 20.0,
+) -> Dict[str, Any]:
+    """
+    AI-powered bottleneck detection with optimization suggestions.
+
+    Analyzes hierarchy to identify:
+    - Primary bottleneck (longest duration)
+    - Secondary bottlenecks
+    - Potential parallelization opportunities
+    - Caching opportunities
+    - Circuit breaker recommendations
+
+    Args:
+        hierarchy: Hierarchy from follow_thread_hierarchy()
+        threshold_percentage: Minimum % of total time to be considered significant
+
+    Returns:
+        Dictionary with bottleneck analysis:
+        {
+            "primary_bottleneck": {...},
+            "secondary_bottlenecks": [...],
+            "optimization_suggestions": [...],
+            "parallelization_opportunities": [...],
+            "estimated_improvement_ms": float
+        }
+
+    Example:
+        hierarchy = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
+        analysis = analyze_bottlenecks(hierarchy)
+        for suggestion in analysis['optimization_suggestions']:
+            print(f"  - {suggestion}")
+    """
+    result = {
+        "primary_bottleneck": None,
+        "secondary_bottlenecks": [],
+        "optimization_suggestions": [],
+        "parallelization_opportunities": [],
+        "caching_opportunities": [],
+        "estimated_improvement_ms": 0,
+    }
+
+    total_duration = hierarchy.get('total_duration_ms', 0)
+    if total_duration <= 0:
+        return result
+
+    bottleneck = hierarchy.get('bottleneck')
+    if bottleneck:
+        result["primary_bottleneck"] = bottleneck
+
+    # Collect all nodes with timing
+    all_nodes = []
+
+    def collect_nodes(node: Dict[str, Any]):
+        duration = node.get('duration_ms', 0)
+        if duration and duration > 0:
+            percentage = (duration / total_duration) * 100
+            all_nodes.append({
+                "id": node.get('id'),
+                "duration_ms": duration,
+                "percentage": percentage,
+                "depth": node.get('depth', 0),
+                "children_count": len(node.get('children', [])),
+                "is_leaf": len(node.get('children', [])) == 0,
+                "error_count": node.get('error_count', 0),
+            })
+        for child in node.get('children', []):
+            collect_nodes(child)
+
+    for root in hierarchy.get('roots', []):
+        collect_nodes(root)
+
+    # Sort by duration
+    all_nodes.sort(key=lambda x: -x['duration_ms'])
+
+    # Find secondary bottlenecks
+    for node in all_nodes[1:5]:  # Top 5 excluding primary
+        if node['percentage'] >= threshold_percentage:
+            result["secondary_bottlenecks"].append(node)
+
+    # Generate optimization suggestions
+    suggestions = []
+
+    # Check for parallelization opportunities
+    # Look for siblings at same depth with no dependencies
+    depth_groups = defaultdict(list)
+    for node in all_nodes:
+        depth_groups[node['depth']].append(node)
+
+    for depth, nodes in depth_groups.items():
+        if len(nodes) >= 2:
+            total_sibling_time = sum(n['duration_ms'] for n in nodes)
+            max_sibling_time = max(n['duration_ms'] for n in nodes)
+            savings = total_sibling_time - max_sibling_time
+
+            if savings > total_duration * 0.1:  # >10% potential savings
+                sibling_names = [n['id'] for n in nodes[:3]]
+                result["parallelization_opportunities"].append({
+                    "depth": depth,
+                    "nodes": sibling_names,
+                    "potential_savings_ms": savings,
+                })
+                suggestions.append(
+                    f"Parallelize operations at depth {depth} ({', '.join(sibling_names[:2])}) - "
+                    f"potential savings: {savings:.0f}ms"
+                )
+
+    # Check for caching opportunities (repeated patterns)
+    leaf_nodes = [n for n in all_nodes if n['is_leaf']]
+    if len(leaf_nodes) > 3:
+        avg_leaf_time = sum(n['duration_ms'] for n in leaf_nodes) / len(leaf_nodes)
+        slow_leaves = [n for n in leaf_nodes if n['duration_ms'] > avg_leaf_time * 2]
+        if slow_leaves:
+            suggestions.append(
+                f"Consider caching for slow leaf operations: {', '.join(n['id'] for n in slow_leaves[:3])}"
+            )
+            result["caching_opportunities"] = [n['id'] for n in slow_leaves[:3]]
+
+    # Primary bottleneck specific suggestions
+    if bottleneck:
+        percentage = bottleneck.get('percentage', 0)
+        if percentage > 50:
+            suggestions.append(
+                f"CRITICAL: {bottleneck['node_id']} takes {percentage:.0f}% of total time - prioritize optimization"
+            )
+        elif percentage > 30:
+            suggestions.append(
+                f"IMPORTANT: Consider optimizing {bottleneck['node_id']} ({percentage:.0f}% of time)"
+            )
+
+        if bottleneck.get('depth', 0) > 2:
+            suggestions.append(
+                f"Bottleneck is deep in call stack (depth {bottleneck['depth']}) - consider moving to async"
+            )
+
+    # Check for error-prone bottlenecks
+    error_nodes = [n for n in all_nodes if n['error_count'] > 0 and n['percentage'] > 10]
+    for node in error_nodes:
+        suggestions.append(
+            f"Add circuit breaker for {node['id']} - errors detected and {node['percentage']:.0f}% of time"
+        )
+
+    result["optimization_suggestions"] = suggestions
+
+    # Estimate potential improvement
+    if result["parallelization_opportunities"]:
+        result["estimated_improvement_ms"] = sum(
+            p['potential_savings_ms'] for p in result["parallelization_opportunities"]
+        )
+
+    return result
+
+
+def diff_hierarchies(
+    hierarchy_a: Dict[str, Any],
+    hierarchy_b: Dict[str, Any],
+    label_a: str = "Before",
+    label_b: str = "After",
+) -> Dict[str, Any]:
+    """
+    Compare two hierarchies to identify performance changes.
+
+    Useful for before/after deployment comparisons, A/B testing,
+    or debugging performance regressions.
+
+    Args:
+        hierarchy_a: First hierarchy (baseline)
+        hierarchy_b: Second hierarchy (comparison)
+        label_a: Label for first hierarchy
+        label_b: Label for second hierarchy
+
+    Returns:
+        Dictionary with comparison results:
+        {
+            "summary": {
+                "total_duration_change_ms": float,
+                "total_duration_change_pct": float,
+                "node_count_change": int,
+                "new_errors": int,
+                "resolved_errors": int
+            },
+            "improved_nodes": [...],
+            "degraded_nodes": [...],
+            "new_nodes": [...],
+            "removed_nodes": [...],
+            "error_changes": {...}
+        }
+
+    Example:
+        before = follow_thread_hierarchy(files=["before.log"], root_identifier="req-123")
+        after = follow_thread_hierarchy(files=["after.log"], root_identifier="req-123")
+        diff = diff_hierarchies(before, after)
+        print(f"Performance change: {diff['summary']['total_duration_change_pct']:.1f}%")
+    """
+    result = {
+        "label_a": label_a,
+        "label_b": label_b,
+        "summary": {
+            "total_duration_change_ms": 0,
+            "total_duration_change_pct": 0,
+            "node_count_change": 0,
+            "new_errors": 0,
+            "resolved_errors": 0,
+        },
+        "improved_nodes": [],
+        "degraded_nodes": [],
+        "new_nodes": [],
+        "removed_nodes": [],
+        "error_changes": {
+            "new_errors": [],
+            "resolved_errors": [],
+        }
+    }
+
+    # Collect nodes from both hierarchies
+    def collect_nodes(hierarchy: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        nodes = {}
+
+        def walk(node: Dict[str, Any]):
+            node_id = node.get('id')
+            if node_id:
+                nodes[node_id] = {
+                    "duration_ms": node.get('duration_ms', 0),
+                    "error_count": node.get('error_count', 0),
+                    "entry_count": node.get('entry_count', 0),
+                }
+            for child in node.get('children', []):
+                walk(child)
+
+        for root in hierarchy.get('roots', []):
+            walk(root)
+
+        return nodes
+
+    nodes_a = collect_nodes(hierarchy_a)
+    nodes_b = collect_nodes(hierarchy_b)
+
+    # Duration changes
+    duration_a = hierarchy_a.get('total_duration_ms', 0)
+    duration_b = hierarchy_b.get('total_duration_ms', 0)
+
+    result["summary"]["total_duration_change_ms"] = duration_b - duration_a
+    if duration_a > 0:
+        result["summary"]["total_duration_change_pct"] = (
+            (duration_b - duration_a) / duration_a * 100
+        )
+
+    # Node count changes
+    result["summary"]["node_count_change"] = len(nodes_b) - len(nodes_a)
+
+    # Compare individual nodes
+    all_node_ids = set(nodes_a.keys()) | set(nodes_b.keys())
+
+    for node_id in all_node_ids:
+        in_a = node_id in nodes_a
+        in_b = node_id in nodes_b
+
+        if in_a and not in_b:
+            result["removed_nodes"].append({
+                "id": node_id,
+                "duration_ms": nodes_a[node_id]["duration_ms"],
+            })
+        elif in_b and not in_a:
+            result["new_nodes"].append({
+                "id": node_id,
+                "duration_ms": nodes_b[node_id]["duration_ms"],
+            })
+        else:
+            # Both exist - compare
+            dur_a = nodes_a[node_id]["duration_ms"]
+            dur_b = nodes_b[node_id]["duration_ms"]
+            change_ms = dur_b - dur_a
+            change_pct = ((dur_b - dur_a) / dur_a * 100) if dur_a > 0 else 0
+
+            if change_ms < -10:  # >10ms improvement
+                result["improved_nodes"].append({
+                    "id": node_id,
+                    "before_ms": dur_a,
+                    "after_ms": dur_b,
+                    "change_ms": change_ms,
+                    "change_pct": change_pct,
+                })
+            elif change_ms > 10:  # >10ms degradation
+                result["degraded_nodes"].append({
+                    "id": node_id,
+                    "before_ms": dur_a,
+                    "after_ms": dur_b,
+                    "change_ms": change_ms,
+                    "change_pct": change_pct,
+                })
+
+            # Error changes
+            err_a = nodes_a[node_id]["error_count"]
+            err_b = nodes_b[node_id]["error_count"]
+
+            if err_a == 0 and err_b > 0:
+                result["error_changes"]["new_errors"].append(node_id)
+                result["summary"]["new_errors"] += 1
+            elif err_a > 0 and err_b == 0:
+                result["error_changes"]["resolved_errors"].append(node_id)
+                result["summary"]["resolved_errors"] += 1
+
+    # Sort by impact
+    result["improved_nodes"].sort(key=lambda x: x["change_ms"])
+    result["degraded_nodes"].sort(key=lambda x: -x["change_ms"])
+
+    return result
+
+
+def format_hierarchy_diff(diff: Dict[str, Any]) -> str:
+    """
+    Format hierarchy diff as human-readable text.
+
+    Args:
+        diff: Diff from diff_hierarchies()
+
+    Returns:
+        Formatted diff string
+    """
+    lines = []
+
+    lines.append("=" * 70)
+    lines.append("📊 HIERARCHY COMPARISON")
+    lines.append(f"   {diff['label_a']} vs {diff['label_b']}")
+    lines.append("=" * 70)
+
+    summary = diff["summary"]
+    change_ms = summary["total_duration_change_ms"]
+    change_pct = summary["total_duration_change_pct"]
+
+    direction = "⬇️ IMPROVED" if change_ms < 0 else "⬆️ DEGRADED" if change_ms > 0 else "➡️ UNCHANGED"
+    lines.append(f"\n{direction}: {abs(change_ms):.0f}ms ({abs(change_pct):.1f}%)")
+
+    if summary["new_errors"] > 0:
+        lines.append(f"❌ New errors: {summary['new_errors']}")
+    if summary["resolved_errors"] > 0:
+        lines.append(f"✅ Resolved errors: {summary['resolved_errors']}")
+
+    if diff["improved_nodes"]:
+        lines.append("\n" + "-" * 70)
+        lines.append("✅ IMPROVED NODES")
+        for node in diff["improved_nodes"][:5]:
+            lines.append(
+                f"  • {node['id']}: {node['before_ms']:.0f}ms → {node['after_ms']:.0f}ms "
+                f"({node['change_pct']:.1f}%)"
+            )
+
+    if diff["degraded_nodes"]:
+        lines.append("\n" + "-" * 70)
+        lines.append("⚠️ DEGRADED NODES")
+        for node in diff["degraded_nodes"][:5]:
+            lines.append(
+                f"  • {node['id']}: {node['before_ms']:.0f}ms → {node['after_ms']:.0f}ms "
+                f"(+{node['change_pct']:.1f}%)"
+            )
+
+    if diff["new_nodes"]:
+        lines.append("\n" + "-" * 70)
+        lines.append("🆕 NEW NODES")
+        for node in diff["new_nodes"][:5]:
+            lines.append(f"  • {node['id']}: {node['duration_ms']:.0f}ms")
+
+    if diff["removed_nodes"]:
+        lines.append("\n" + "-" * 70)
+        lines.append("🗑️ REMOVED NODES")
+        for node in diff["removed_nodes"][:5]:
+            lines.append(f"  • {node['id']}: was {node['duration_ms']:.0f}ms")
+
+    lines.append("\n" + "=" * 70)
+
+    return "\n".join(lines)
+
+
+def export_to_jaeger(
+    hierarchy: Dict[str, Any],
+    service_name: str = "logler-export",
+) -> Dict[str, Any]:
+    """
+    Export hierarchy to Jaeger-compatible format.
+
+    The output follows the Jaeger JSON format and can be imported
+    into Jaeger UI for visualization.
+
+    Args:
+        hierarchy: Hierarchy from follow_thread_hierarchy()
+        service_name: Name of the service for Jaeger
+
+    Returns:
+        Dictionary in Jaeger trace format
+
+    Example:
+        hierarchy = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
+        jaeger_trace = export_to_jaeger(hierarchy, service_name="my-service")
+
+        with open("trace.json", "w") as f:
+            json.dump(jaeger_trace, f)
+
+        # Import with: jaeger-query --grpc.host-port=localhost:16685
+    """
+    import uuid
+    from datetime import datetime
+
+    trace_id = uuid.uuid4().hex[:32]
+    spans = []
+
+    def convert_node(node: Dict[str, Any], parent_span_id: Optional[str] = None):
+        span_id = uuid.uuid4().hex[:16]
+
+        # Parse timestamps
+        start_time = node.get('start_time')
+        if start_time:
+            if isinstance(start_time, str):
+                try:
+                    dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    start_us = int(dt.timestamp() * 1_000_000)
+                except Exception:
+                    start_us = 0
+            else:
+                start_us = 0
+        else:
+            start_us = 0
+
+        duration_us = int((node.get('duration_ms', 0) or 0) * 1000)
+
+        span = {
+            "traceID": trace_id,
+            "spanID": span_id,
+            "operationName": node.get('id', 'unknown'),
+            "references": [],
+            "startTime": start_us,
+            "duration": duration_us,
+            "tags": [
+                {"key": "node_type", "type": "string", "value": node.get('node_type', 'unknown')},
+                {"key": "entry_count", "type": "int64", "value": node.get('entry_count', 0)},
+                {"key": "error_count", "type": "int64", "value": node.get('error_count', 0)},
+            ],
+            "logs": [],
+            "processID": "p1",
+            "warnings": [],
+        }
+
+        if parent_span_id:
+            span["references"].append({
+                "refType": "CHILD_OF",
+                "traceID": trace_id,
+                "spanID": parent_span_id,
+            })
+
+        if node.get('error_count', 0) > 0:
+            span["tags"].append({"key": "error", "type": "bool", "value": True})
+
+        spans.append(span)
+
+        # Process children
+        for child in node.get('children', []):
+            convert_node(child, span_id)
+
+    # Convert all roots
+    for root in hierarchy.get('roots', []):
+        convert_node(root)
+
+    return {
+        "data": [{
+            "traceID": trace_id,
+            "spans": spans,
+            "processes": {
+                "p1": {
+                    "serviceName": service_name,
+                    "tags": [
+                        {"key": "exported_by", "type": "string", "value": "logler"},
+                    ]
+                }
+            },
+            "warnings": [],
+        }]
+    }
+
+
+def export_to_zipkin(
+    hierarchy: Dict[str, Any],
+    service_name: str = "logler-export",
+) -> List[Dict[str, Any]]:
+    """
+    Export hierarchy to Zipkin-compatible format.
+
+    Args:
+        hierarchy: Hierarchy from follow_thread_hierarchy()
+        service_name: Name of the service
+
+    Returns:
+        List of spans in Zipkin V2 format
+
+    Example:
+        hierarchy = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
+        zipkin_spans = export_to_zipkin(hierarchy)
+
+        # POST to Zipkin: curl -X POST http://localhost:9411/api/v2/spans -H 'Content-Type: application/json' -d '@spans.json'
+    """
+    import uuid
+    from datetime import datetime
+
+    trace_id = uuid.uuid4().hex[:32]
+    spans = []
+
+    def convert_node(node: Dict[str, Any], parent_id: Optional[str] = None):
+        span_id = uuid.uuid4().hex[:16]
+
+        # Parse timestamp
+        start_time = node.get('start_time')
+        timestamp_us = 0
+        if start_time:
+            if isinstance(start_time, str):
+                try:
+                    dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    timestamp_us = int(dt.timestamp() * 1_000_000)
+                except Exception:
+                    pass
+
+        duration_us = int((node.get('duration_ms', 0) or 0) * 1000)
+
+        span = {
+            "traceId": trace_id,
+            "id": span_id,
+            "name": node.get('id', 'unknown'),
+            "timestamp": timestamp_us,
+            "duration": duration_us,
+            "localEndpoint": {
+                "serviceName": service_name,
+            },
+            "tags": {
+                "node_type": node.get('node_type', 'unknown'),
+                "entry_count": str(node.get('entry_count', 0)),
+            },
+        }
+
+        if parent_id:
+            span["parentId"] = parent_id
+
+        if node.get('error_count', 0) > 0:
+            span["tags"]["error"] = "true"
+
+        spans.append(span)
+
+        for child in node.get('children', []):
+            convert_node(child, span_id)
+
+    for root in hierarchy.get('roots', []):
+        convert_node(root)
+
+    return spans
+
+
 def find_patterns(
     files: List[str],
     min_occurrences: int = 3,

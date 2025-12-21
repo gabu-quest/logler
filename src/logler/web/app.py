@@ -19,6 +19,7 @@ import aiofiles
 from ..parser import LogEntry, LogParser
 from ..log_reader import LogReader
 from ..tracker import ThreadTracker
+from ..investigate import follow_thread_hierarchy, analyze_error_flow
 
 # Get package directory
 PACKAGE_DIR = Path(__file__).parent
@@ -697,6 +698,57 @@ async def follow_file(websocket: WebSocket, file_path: str, filters: Dict[str, A
 
     except Exception as e:
         await websocket.send_json({"error": str(e)})
+
+
+class HierarchyRequest(BaseModel):
+    paths: List[str]
+    root_identifier: str
+    max_depth: Optional[int] = None
+    min_confidence: float = 0.0
+    use_naming_patterns: bool = True
+    use_temporal_inference: bool = True
+
+
+@app.post("/api/hierarchy")
+async def get_hierarchy(request: HierarchyRequest):
+    """
+    Build and return thread/span hierarchy for visualization.
+
+    Returns a hierarchical tree structure with:
+    - Parent-child relationships
+    - Duration and timing information
+    - Error counts and propagation
+    - Bottleneck detection
+    """
+    files = []
+    for raw in request.paths:
+        try:
+            files.append(str(_ensure_within_root(Path(raw))))
+        except HTTPException:
+            continue
+
+    if not files:
+        return {"error": "No valid files provided", "hierarchy": None}
+
+    try:
+        hierarchy = follow_thread_hierarchy(
+            files=files,
+            root_identifier=request.root_identifier,
+            max_depth=request.max_depth,
+            use_naming_patterns=request.use_naming_patterns,
+            use_temporal_inference=request.use_temporal_inference,
+            min_confidence=request.min_confidence,
+        )
+
+        # Also analyze error flow
+        error_analysis = analyze_error_flow(hierarchy)
+
+        return {
+            "hierarchy": hierarchy,
+            "error_analysis": error_analysis,
+        }
+    except Exception as e:
+        return {"error": str(e), "hierarchy": None}
 
 
 async def run_server(host: str, port: int, initial_files: List[str]):

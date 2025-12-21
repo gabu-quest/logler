@@ -142,10 +142,11 @@ mock_hierarchy = {
 
 # Test tree formatter
 import sys
-sys.path.insert(0, '/home/user/logler')
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from tree_formatter import format_tree, format_waterfall, print_tree, print_waterfall
-from src.logler.investigate import get_hierarchy_summary
+from logler.tree_formatter import format_tree, format_waterfall, print_tree, print_waterfall
+from logler.investigate import get_hierarchy_summary
 
 print("=" * 80)
 print("TESTING HIERARCHY VISUALIZATION")
