@@ -31,6 +31,7 @@
 //! ```
 
 pub mod filter;
+pub mod hierarchy;
 pub mod index;
 pub mod investigate;
 pub mod parser;
