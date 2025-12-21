@@ -574,3 +574,189 @@ def print_waterfall(
     """
     waterfall_str = format_waterfall(hierarchy, width, show_labels, show_errors)
     print(waterfall_str)
+
+
+def format_flamegraph(
+    hierarchy: Dict[str, Any],
+    width: int = 100,
+    use_colors: bool = True,
+    min_width: int = 3,
+) -> str:
+    """
+    Format hierarchy as a flamegraph-style visualization.
+
+    Flamegraphs show call stacks where:
+    - Width represents time spent in that span
+    - Each layer shows a different depth level
+    - You can see which operations take the most time
+
+    Args:
+        hierarchy: Hierarchy dictionary from follow_thread_hierarchy()
+        width: Width of the flamegraph in characters
+        use_colors: Use ANSI colors
+        min_width: Minimum width for a span to be shown
+
+    Returns:
+        Formatted flamegraph string
+
+    Example:
+        hierarchy = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
+        print(format_flamegraph(hierarchy, width=100))
+
+        # Output:
+        # ┌─────────────────────────────────────────────────────────────────────────────────────┐
+        # │ api-gateway (500ms)                                                                  │
+        # ├─────────────────────────────┬─────────────────────────────────────────────────────────┤
+        # │ auth-service (50ms)         │ product-service (400ms)                                 │
+        # │                             ├──────────────────┬──────────────────────────────────────┤
+        # │                             │ db-query (100ms) │ cache-update (250ms)                 │
+        # └─────────────────────────────┴──────────────────┴──────────────────────────────────────┘
+    """
+    if not hierarchy or not hierarchy.get('roots'):
+        return "No hierarchy data"
+
+    total_duration = hierarchy.get('total_duration_ms', 0)
+    if total_duration <= 0:
+        # Calculate from roots
+        total_duration = sum(
+            root.get('duration_ms', 0) or 0
+            for root in hierarchy.get('roots', [])
+        )
+    if total_duration <= 0:
+        total_duration = 1  # Avoid division by zero
+
+    lines = []
+    colors = [
+        '\033[44m',   # Blue
+        '\033[42m',   # Green
+        '\033[43m',   # Yellow
+        '\033[45m',   # Magenta
+        '\033[46m',   # Cyan
+        '\033[41m',   # Red (for errors)
+    ]
+    reset = '\033[0m'
+
+    def get_color(depth: int, has_error: bool) -> str:
+        if not use_colors:
+            return ''
+        if has_error:
+            return colors[5]  # Red for errors
+        return colors[depth % 5]
+
+    def format_duration(ms: Optional[float]) -> str:
+        if ms is None or ms <= 0:
+            return ''
+        if ms < 1000:
+            return f'{ms:.0f}ms'
+        return f'{ms/1000:.2f}s'
+
+    # Build layers by depth
+    max_depth = hierarchy.get('max_depth', 0)
+    layers: List[List[Dict[str, Any]]] = [[] for _ in range(max_depth + 1)]
+
+    def collect_by_depth(node: Dict[str, Any], offset: float = 0):
+        depth = node.get('depth', 0)
+        duration = node.get('duration_ms', 0) or 0
+        node_info = {
+            'id': node.get('id', 'unknown'),
+            'duration': duration,
+            'offset': offset,
+            'has_error': node.get('error_count', 0) > 0,
+            'is_bottleneck': node.get('id') == hierarchy.get('bottleneck', {}).get('node_id'),
+        }
+        layers[depth].append(node_info)
+
+        child_offset = offset
+        for child in node.get('children', []):
+            collect_by_depth(child, child_offset)
+            child_offset += child.get('duration_ms', 0) or 0
+
+    # Collect all nodes
+    for root in hierarchy.get('roots', []):
+        collect_by_depth(root)
+
+    # Header
+    lines.append("=" * width)
+    lines.append("🔥 FLAMEGRAPH VISUALIZATION")
+    lines.append("=" * width)
+    lines.append(f"Total Duration: {format_duration(total_duration)}")
+    lines.append("")
+
+    # Draw each layer
+    for depth, layer in enumerate(layers):
+        if not layer:
+            continue
+
+        layer_line = []
+
+        for node in layer:
+            # Calculate width proportional to duration
+            proportion = node['duration'] / total_duration if total_duration > 0 else 0
+            span_width = max(min_width, int(proportion * (width - 2)))
+
+            # Truncate label if needed
+            label = node['id']
+            duration_str = format_duration(node['duration'])
+            full_label = f"{label} ({duration_str})" if duration_str else label
+
+            if len(full_label) > span_width - 2:
+                full_label = full_label[:span_width - 4] + '..'
+
+            # Create the span block
+            color = get_color(depth, node['has_error'])
+            end_color = reset if use_colors else ''
+
+            # Bottleneck indicator
+            if node['is_bottleneck']:
+                full_label = f"⚠ {full_label}"
+
+            # Center the label
+            padding = span_width - len(full_label) - 2
+            left_pad = padding // 2
+            right_pad = padding - left_pad
+
+            block = f"{color}│{' ' * left_pad}{full_label}{' ' * right_pad}│{end_color}"
+            layer_line.append(block)
+
+        if layer_line:
+            # Top border for first layer
+            if depth == 0:
+                lines.append("┌" + "─" * (width - 2) + "┐")
+
+            lines.append(''.join(layer_line))
+
+            # Add separator if there's a next layer
+            if depth < len(layers) - 1 and layers[depth + 1]:
+                sep_line = "├" + "─" * (width - 2) + "┤"
+                lines.append(sep_line)
+
+    # Bottom border
+    lines.append("└" + "─" * (width - 2) + "┘")
+
+    # Legend
+    lines.append("")
+    lines.append("Legend:")
+    lines.append("  ⚠ = Bottleneck   Red = Error")
+    lines.append("  Width proportional to duration")
+
+    return '\n'.join(lines)
+
+
+def print_flamegraph(
+    hierarchy: Dict[str, Any],
+    width: int = 100,
+    use_colors: bool = True,
+):
+    """
+    Print flamegraph to console.
+
+    Args:
+        hierarchy: Hierarchy dictionary
+        width: Width in characters
+        use_colors: Use ANSI colors
+
+    Example:
+        hierarchy = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
+        print_flamegraph(hierarchy)
+    """
+    print(format_flamegraph(hierarchy, width, use_colors))
