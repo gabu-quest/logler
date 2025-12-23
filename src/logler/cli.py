@@ -12,6 +12,7 @@ from contextlib import closing
 
 from .terminal import TerminalViewer
 from .web.app import run_server
+from .llm_cli import llm as llm_group
 
 
 @click.group(invoke_without_command=True)
@@ -528,6 +529,10 @@ def watch(pattern: str, directory: str, recursive: bool):
         asyncio.run(watcher.watch())
     except KeyboardInterrupt:
         console.print("\n👋 Stopped watching")
+
+
+# Register the LLM command group
+main.add_command(llm_group)
 
 
 if __name__ == "__main__":
