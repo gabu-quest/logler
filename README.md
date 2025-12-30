@@ -307,6 +307,52 @@ Logler automatically detects and parses:
 ```
 Logler groups these together and shows the complete thread timeline!
 
+### 🎯 Perfect Log Format for Maximum Features
+
+To unlock **all** of logler's capabilities (especially multi-level thread hierarchy), use this format:
+
+**JSON (Recommended):**
+```json
+{
+  "timestamp": "2024-01-15T10:00:00.123Z",
+  "level": "INFO",
+  "message": "Processing user request",
+  "thread_id": "worker-1",
+  "correlation_id": "req-abc123",
+  "trace_id": "trace-xyz789",
+  "span_id": "span-001",
+  "parent_span_id": "span-000"
+}
+```
+
+**Field Guide:**
+
+| Field | Purpose | Enables |
+|-------|---------|---------|
+| `timestamp` | When the event occurred (ISO 8601) | Timeline, duration analysis |
+| `level` | Log level (DEBUG/INFO/WARN/ERROR/FATAL) | Filtering, error detection |
+| `message` | Human-readable description | Search, pattern detection |
+| `thread_id` | Thread/worker identifier | Thread grouping, timeline |
+| `correlation_id` | Request ID across services | Cross-service tracing |
+| `trace_id` | Distributed trace identifier | OpenTelemetry integration |
+| `span_id` | Unique operation identifier | Hierarchy building |
+| `parent_span_id` | Parent operation's span_id | **Multi-level hierarchy trees** |
+
+**Why `parent_span_id` matters:**
+
+Without it, logler infers hierarchy from naming patterns (`worker-1.task-a`) or temporal proximity. With explicit `parent_span_id`, you get:
+- 100% accurate parent-child relationships
+- Deep hierarchy trees (not just 1-2 levels)
+- Precise bottleneck detection
+- Accurate error propagation tracing
+
+**Plain Text Alternative:**
+```
+2024-01-15T10:00:00.123Z INFO [worker-1] [req-abc123] [trace:xyz789] [span:001] [parent:000] Processing user request
+```
+
+Logler will parse bracketed fields automatically. Use consistent formatting across your application.
+
 ## 🧵 Thread Tracking
 
 Logler automatically tracks threads and shows:
