@@ -176,7 +176,62 @@ logler investigate app.log --output summary       # Token-efficient output
 # 🌳 NEW: Hierarchical Thread Visualization
 logler investigate app.log --correlation req-123 --hierarchy         # Show thread hierarchy tree
 logler investigate app.log --trace trace-abc123 --hierarchy --waterfall  # Show waterfall timeline
+logler investigate app.log --correlation req-123 --hierarchy --flamegraph # Show flamegraph view
+logler investigate app.log --hierarchy --show-error-flow             # Analyze error propagation
 logler investigate app.log --thread worker-1 --hierarchy --max-depth 3   # Limit hierarchy depth
+```
+
+### Visualization Modes
+
+**Tree View** - Shows parent-child relationships:
+```
+🧵 api-gateway (req-001, 520ms)
+├─ 🔹 auth-service (45ms)
+│  ├─ 🔸 jwt-validate (5ms)
+│  └─ 🔸 user-lookup (25ms)
+├─ 🔹 product-service (450ms) ⚠️ SLOW
+│  ├─ 🔸 inventory-check (340ms)
+│  │  └─ 🔸 db-query (300ms) ⚠️
+│  └─ 🔸 cache-update (45ms) ❌ ERROR
+└─ 🔹 response-assembly (10ms)
+```
+
+**Waterfall View** (`--waterfall`) - Shows temporal overlap:
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Timeline: req-001 (520ms)                                            │
+├──────────────────────────────────────────────────────────────────────┤
+│ api-gateway          ████████████████████████████████████████  520ms │
+│   ├─ auth-service    ████                                      45ms │
+│   ├─ product-service      ████████████████████████████████    450ms │
+│   │  ├─ inventory              ██████████████████████         340ms │
+│   │  └─ cache-update                              ████❌        45ms │
+│   └─ response                                          ██      10ms │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**Flamegraph View** (`--flamegraph`) - Shows time distribution:
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ api-gateway (520ms)                                                │
+├───────────┬────────────────────────────────────────────────────────┤
+│ auth (45) │ product-service (450ms)                         ⚠     │
+│           ├─────────────────────────────┬──────────────────────────┤
+│           │ inventory-check (340ms)     │ cache-update (45ms) ❌   │
+└───────────┴─────────────────────────────┴──────────────────────────┘
+```
+
+**Error Flow** (`--show-error-flow`) - Traces error propagation:
+```
+🔍 Error Flow Analysis
+
+Root Cause:
+  ❌ cache-update failed at 10:00:00.450Z
+  Error: Redis connection refused
+  Path: api-gateway → product-service → cache-update
+
+Impact: 3 nodes affected, request degraded
+Recommendation: Check Redis connectivity
 ```
 
 **Watch for new files:**

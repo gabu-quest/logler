@@ -939,6 +939,290 @@ def format_error_flow(
     return "\n".join(lines)
 
 
+def detect_correlation_chains(
+    files: List[str],
+    root_correlation_id: Optional[str] = None,
+    chain_patterns: Optional[List[str]] = None,
+    parser_format: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Detect correlation ID chaining where one request spawns sub-requests.
+
+    This function identifies parent-child relationships between correlation IDs
+    by analyzing log messages for patterns like:
+    - "spawning request {child_id}"
+    - "child_correlation_id": "xxx"
+    - "parent_request_id": "xxx"
+
+    Args:
+        files: List of log file paths to analyze
+        root_correlation_id: Optional root correlation ID to start from
+        chain_patterns: Optional custom regex patterns for detecting chains
+        parser_format: Optional log format hint
+
+    Returns:
+        Dictionary with correlation chain information:
+        {
+            "chains": [
+                {
+                    "parent_correlation_id": "req-123",
+                    "child_correlation_id": "subreq-456",
+                    "evidence": "Spawning sub-request subreq-456",
+                    "timestamp": "2024-01-15T10:00:00Z",
+                    "confidence": 0.9
+                }
+            ],
+            "root_ids": ["req-123"],
+            "hierarchy": {
+                "req-123": ["subreq-456", "subreq-789"],
+                "subreq-456": ["subreq-456-a"]
+            },
+            "total_chains": 3
+        }
+
+    Example:
+        chains = detect_correlation_chains(
+            files=["app.log", "service.log"],
+            root_correlation_id="req-main-001"
+        )
+        for chain in chains['chains']:
+            print(f"{chain['parent_correlation_id']} -> {chain['child_correlation_id']}")
+    """
+    # Default patterns to detect correlation chaining
+    default_patterns = [
+        # Explicit field patterns
+        r'child_correlation_id["\s:=]+([a-zA-Z0-9_-]+)',
+        r'parent_correlation_id["\s:=]+([a-zA-Z0-9_-]+)',
+        r'parent_request_id["\s:=]+([a-zA-Z0-9_-]+)',
+        r'spawned_request["\s:=]+([a-zA-Z0-9_-]+)',
+        # Message patterns
+        r'[Ss]pawning (?:sub-?)?request[:\s]+([a-zA-Z0-9_-]+)',
+        r'[Cc]reating child request[:\s]+([a-zA-Z0-9_-]+)',
+        r'[Ff]orked to[:\s]+([a-zA-Z0-9_-]+)',
+        r'[Dd]elegating to[:\s]+([a-zA-Z0-9_-]+)',
+        r'[Ss]ub-?request[:\s]+([a-zA-Z0-9_-]+)',
+    ]
+
+    patterns = chain_patterns or default_patterns
+    compiled_patterns = [re.compile(p) for p in patterns]
+
+    # Read and parse logs
+    entries = []
+    if RUST_AVAILABLE:
+        for file_path in files:
+            result_json = logler_rs.search(
+                [file_path],
+                "",  # No query filter
+                None,  # level
+                None,  # thread_id
+                None,  # correlation_id
+                None,  # trace_id
+                None,  # start_time
+                None,  # end_time
+                10000,  # limit - get many entries
+                0,      # offset
+            )
+            result = json.loads(result_json)
+            entries.extend(result.get("entries", []))
+    else:
+        # Fallback to Python parsing
+        from .parser import LogParser
+        parser = LogParser()
+        for file_path in files:
+            with open(file_path, 'r') as f:
+                for line in f:
+                    entry = parser.parse_line(line)
+                    if entry:
+                        entries.append(entry.__dict__ if hasattr(entry, '__dict__') else entry)
+
+    # Detect chains
+    chains = []
+    hierarchy = defaultdict(list)
+    all_correlation_ids = set()
+
+    for entry in entries:
+        correlation_id = entry.get('correlation_id')
+        message = entry.get('message', '')
+        timestamp = entry.get('timestamp')
+        fields = entry.get('fields', {})
+
+        if correlation_id:
+            all_correlation_ids.add(correlation_id)
+
+        # Check explicit fields first
+        child_id = fields.get('child_correlation_id') or fields.get('spawned_request')
+        parent_id = fields.get('parent_correlation_id') or fields.get('parent_request_id')
+
+        if child_id and correlation_id:
+            chains.append({
+                "parent_correlation_id": correlation_id,
+                "child_correlation_id": child_id,
+                "evidence": f"Explicit field: child_correlation_id={child_id}",
+                "timestamp": timestamp,
+                "confidence": 1.0
+            })
+            hierarchy[correlation_id].append(child_id)
+            all_correlation_ids.add(child_id)
+
+        if parent_id and correlation_id:
+            chains.append({
+                "parent_correlation_id": parent_id,
+                "child_correlation_id": correlation_id,
+                "evidence": f"Explicit field: parent_correlation_id={parent_id}",
+                "timestamp": timestamp,
+                "confidence": 1.0
+            })
+            hierarchy[parent_id].append(correlation_id)
+            all_correlation_ids.add(parent_id)
+
+        # Check message patterns
+        for pattern in compiled_patterns:
+            match = pattern.search(message)
+            if match and correlation_id:
+                detected_id = match.group(1)
+                if detected_id != correlation_id:
+                    # Determine if it's a parent or child reference
+                    if 'parent' in pattern.pattern.lower():
+                        chains.append({
+                            "parent_correlation_id": detected_id,
+                            "child_correlation_id": correlation_id,
+                            "evidence": f"Pattern match in message: {match.group(0)}",
+                            "timestamp": timestamp,
+                            "confidence": 0.85
+                        })
+                        hierarchy[detected_id].append(correlation_id)
+                    else:
+                        chains.append({
+                            "parent_correlation_id": correlation_id,
+                            "child_correlation_id": detected_id,
+                            "evidence": f"Pattern match in message: {match.group(0)}",
+                            "timestamp": timestamp,
+                            "confidence": 0.85
+                        })
+                        hierarchy[correlation_id].append(detected_id)
+                    all_correlation_ids.add(detected_id)
+
+    # Deduplicate chains
+    seen = set()
+    unique_chains = []
+    for chain in chains:
+        key = (chain['parent_correlation_id'], chain['child_correlation_id'])
+        if key not in seen:
+            seen.add(key)
+            unique_chains.append(chain)
+
+    # Find root IDs (correlation IDs that are never a child)
+    all_children = set()
+    for children in hierarchy.values():
+        all_children.update(children)
+
+    root_ids = [cid for cid in all_correlation_ids if cid not in all_children]
+
+    # Filter by root_correlation_id if specified
+    if root_correlation_id:
+        # Build the tree from root
+        def get_descendants(cid: str, seen: set) -> set:
+            if cid in seen:
+                return set()
+            seen.add(cid)
+            result = {cid}
+            for child in hierarchy.get(cid, []):
+                result.update(get_descendants(child, seen))
+            return result
+
+        relevant_ids = get_descendants(root_correlation_id, set())
+        unique_chains = [
+            c for c in unique_chains
+            if c['parent_correlation_id'] in relevant_ids or c['child_correlation_id'] in relevant_ids
+        ]
+        root_ids = [root_correlation_id] if root_correlation_id in root_ids else []
+
+    # Convert hierarchy to regular dict
+    hierarchy_dict = {k: list(set(v)) for k, v in hierarchy.items()}
+
+    return {
+        "chains": unique_chains,
+        "root_ids": sorted(root_ids),
+        "hierarchy": hierarchy_dict,
+        "total_chains": len(unique_chains),
+        "total_correlation_ids": len(all_correlation_ids)
+    }
+
+
+def build_hierarchy_with_correlation_chains(
+    files: List[str],
+    root_identifier: str,
+    include_correlation_chains: bool = True,
+    max_depth: Optional[int] = None,
+    use_naming_patterns: bool = True,
+    use_temporal_inference: bool = True,
+    min_confidence: float = 0.0,
+) -> Dict[str, Any]:
+    """
+    Build hierarchy that includes correlation ID chaining relationships.
+
+    This extends follow_thread_hierarchy by also detecting when one correlation ID
+    spawns sub-requests with different correlation IDs.
+
+    Args:
+        files: List of log file paths
+        root_identifier: Root correlation ID, thread ID, or span ID
+        include_correlation_chains: Whether to detect correlation chaining (default: True)
+        max_depth: Maximum hierarchy depth
+        use_naming_patterns: Enable naming pattern detection
+        use_temporal_inference: Enable temporal inference
+        min_confidence: Minimum confidence score
+
+    Returns:
+        Hierarchy dictionary with additional correlation chain information
+
+    Example:
+        hierarchy = build_hierarchy_with_correlation_chains(
+            files=["api.log", "worker.log"],
+            root_identifier="req-main-001",
+            include_correlation_chains=True
+        )
+        # hierarchy now includes sub-requests spawned by req-main-001
+    """
+    # First build the regular hierarchy
+    hierarchy = follow_thread_hierarchy(
+        files=files,
+        root_identifier=root_identifier,
+        max_depth=max_depth,
+        use_naming_patterns=use_naming_patterns,
+        use_temporal_inference=use_temporal_inference,
+        min_confidence=min_confidence
+    )
+
+    if not include_correlation_chains:
+        return hierarchy
+
+    # Detect correlation chains
+    chains = detect_correlation_chains(
+        files=files,
+        root_correlation_id=root_identifier
+    )
+
+    # Add chain information to hierarchy
+    hierarchy['correlation_chains'] = chains['chains']
+    hierarchy['chained_correlation_ids'] = list(chains['hierarchy'].keys())
+
+    # If there are chained correlation IDs, we could optionally merge their hierarchies
+    # For now, just add metadata about them
+    if chains['total_chains'] > 0:
+        hierarchy['has_correlation_chains'] = True
+        hierarchy['correlation_chain_count'] = chains['total_chains']
+
+        # Add note about additional correlation IDs that could be explored
+        child_ids = set()
+        for chain in chains['chains']:
+            child_ids.add(chain['child_correlation_id'])
+
+        hierarchy['related_correlation_ids'] = sorted(child_ids)
+
+    return hierarchy
+
+
 def analyze_bottlenecks(
     hierarchy: Dict[str, Any],
     threshold_percentage: float = 20.0,
