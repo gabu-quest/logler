@@ -131,8 +131,8 @@ def _append_node_ascii(
     # Node connector
     connector = "└── " if is_last else "├── "
 
-    # Node ID and type
-    node_id = node.get('id', 'unknown')
+    # Node ID and type - prefer 'name' over 'id' for display
+    node_id = node.get('name') or node.get('id', 'unknown')
     node_type = node.get('node_type', 'Unknown')
 
     # Error marker
@@ -371,8 +371,10 @@ def _add_rich_children(
         _add_rich_children(child_tree, child, mode, show_duration, show_errors, show_confidence, max_depth, current_depth + 1)
 
 
-def _format_duration(ms: int) -> str:
+def _format_duration(ms: Optional[int]) -> str:
     """Format duration in human-readable form"""
+    if ms is None:
+        return "N/A"
     if ms < 1000:
         return f"{ms}ms"
     elif ms < 60000:
@@ -453,11 +455,17 @@ def format_waterfall(
     if total_duration == 0:
         return "No timing information available"
 
+    # Ensure minimum width for rendering
+    min_width = 40  # Minimum useful width
+    effective_width = max(width, min_width)
+
     # Header
-    lines.append("┌" + "─" * (width - 2) + "┐")
+    lines.append("┌" + "─" * (effective_width - 2) + "┐")
     header = f"Timeline: {hierarchy.get('detection_method', 'Hierarchy')} ({_format_duration(total_duration)})"
-    lines.append(f"│ {header:<{width-3}}│")
-    lines.append("├" + "─" * (width - 2) + "┤")
+    if len(header) > effective_width - 4:
+        header = header[:effective_width - 7] + "..."
+    lines.append(f"│ {header:<{effective_width-4}} │")
+    lines.append("├" + "─" * (effective_width - 2) + "┤")
 
     # Collect all nodes in order
     nodes_flat = []
@@ -475,15 +483,15 @@ def format_waterfall(
                 start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
                 if earliest is None or start_time < earliest:
                     earliest = start_time
-            except:
-                pass
+            except (ValueError, TypeError):
+                pass  # Skip invalid timestamps
 
     if earliest is None:
         return "No timing information available"
 
-    # Render each node
-    label_width = 20  # Width for node labels
-    bar_width = width - label_width - 10  # Width for bars
+    # Render each node (effective_width already set in header section)
+    label_width = min(20, effective_width // 3)  # Adaptive label width
+    bar_width = max(1, effective_width - label_width - 12)  # Ensure positive bar width
 
     for node_info in nodes_flat:
         node = node_info['node']
@@ -499,8 +507,8 @@ def format_waterfall(
         try:
             start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
             offset_ms = int((start_time - earliest).total_seconds() * 1000)
-        except:
-            continue
+        except (ValueError, TypeError):
+            continue  # Skip nodes with invalid timestamps
 
         # Calculate bar position and length
         bar_start = int((offset_ms / total_duration) * bar_width)
@@ -530,16 +538,24 @@ def format_waterfall(
         duration_label = _format_duration(duration_ms)
 
         line = f"│ {label} {bar:<{bar_width}} {duration_label:>7}│"
-        lines.append(line[:width-1] + "│")
+        # Ensure line fits within effective_width
+        if len(line) > effective_width:
+            line = line[:effective_width-1] + "│"
+        elif len(line) < effective_width:
+            line = line[:-1] + " " * (effective_width - len(line)) + "│"
+        lines.append(line)
 
     # Footer
-    lines.append("└" + "─" * (width - 2) + "┘")
+    lines.append("└" + "─" * (effective_width - 2) + "┘")
 
-    # Add bottleneck info
+    # Add bottleneck info (constrained to effective_width)
     bottleneck = hierarchy.get('bottleneck')
     if bottleneck:
         lines.append("")
-        lines.append(f"⚠️  Bottleneck: {bottleneck.get('node_id')} ({_format_duration(bottleneck.get('duration_ms', 0))}, {bottleneck.get('percentage', 0):.1f}% of total)")
+        bn_text = f"Bottleneck: {bottleneck.get('node_id')} ({_format_duration(bottleneck.get('duration_ms', 0))}, {bottleneck.get('percentage', 0):.1f}%)"
+        if len(bn_text) > effective_width - 4:  # Leave room for emoji
+            bn_text = bn_text[:effective_width - 7] + "..."
+        lines.append(f"⚠️  {bn_text}")
 
     return "\n".join(lines)
 

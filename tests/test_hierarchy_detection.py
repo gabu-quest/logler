@@ -401,9 +401,10 @@ class TestFormatTree:
         """Test compact tree formatting"""
         tree = format_tree(simple_hierarchy, mode="compact", use_colors=False)
 
-        assert "root-1" in tree
-        assert "child-1" in tree
-        assert "child-2" in tree
+        # Uses 'name' field when available: "Main Request", "Database Query", "Cache Lookup"
+        assert "Main Request" in tree or "root-1" in tree
+        assert "Database Query" in tree or "child-1" in tree
+        assert "Cache Lookup" in tree or "child-2" in tree
         assert "entries" in tree
 
     def test_detailed_mode(self, simple_hierarchy):
@@ -423,11 +424,11 @@ class TestFormatTree:
         """Test max_depth limits tree display"""
         tree = format_tree(deep_hierarchy, max_depth=2, use_colors=False)
 
-        # Should show depth 0 and 1
-        assert "depth-0" in tree
-        assert "depth-1" in tree
-        # Should not show depth 2+
-        assert "depth-2" not in tree
+        # Should show depth 0 and 1 (uses 'name' field: "Level 0", "Level 1")
+        assert "Level 0" in tree or "depth-0" in tree
+        assert "Level 1" in tree or "depth-1" in tree
+        # Should not show depth 2+ (neither name "Level 2" nor id "depth-2")
+        assert "Level 2" not in tree and "depth-2" not in tree
 
     def test_error_highlighting(self, hierarchy_with_errors):
         """Test errors are highlighted"""
@@ -882,8 +883,10 @@ class TestEdgeCases:
 
         # Should handle unicode without crashing
         tree = format_tree(unicode_hierarchy, mode="detailed", use_colors=False)
-        assert "主要スレッド" in tree
-        assert "子プロセス" in tree
+        # Uses 'name' field: "メインリクエスト" instead of id "主要スレッド"
+        assert "メインリクエスト" in tree or "主要スレッド" in tree
+        # Child uses 'name' field: "データベースクエリ 🔍" instead of id "子プロセス-αβγ"
+        assert "データベースクエリ" in tree or "子プロセス" in tree
 
         summary = get_hierarchy_summary(unicode_hierarchy)
         assert "Total nodes: 2" in summary

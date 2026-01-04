@@ -280,6 +280,9 @@ fn build_hierarchy(
     files: Vec<String>,
     root_identifier: String,
     max_depth: Option<usize>,
+    use_naming_patterns: Option<bool>,
+    use_temporal_inference: Option<bool>,
+    min_confidence: Option<f64>,
 ) -> PyResult<String> {
     let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
     let mut investigator = Investigator::new();
@@ -287,10 +290,19 @@ fn build_hierarchy(
         .load_files(&paths)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-    let config = logler_core::hierarchy::HierarchyConfig {
-        max_depth: max_depth.unwrap_or(50),
-        ..Default::default()
-    };
+    let mut config = logler_core::hierarchy::HierarchyConfig::default();
+    if let Some(depth) = max_depth {
+        config.max_depth = depth;
+    }
+    if let Some(use_patterns) = use_naming_patterns {
+        config.use_naming_patterns = use_patterns;
+    }
+    if let Some(use_temporal) = use_temporal_inference {
+        config.use_temporal_inference = use_temporal;
+    }
+    if let Some(confidence) = min_confidence {
+        config.min_confidence = confidence;
+    }
 
     let hierarchy = investigator
         .build_hierarchy(&paths, &root_identifier, Some(config))
