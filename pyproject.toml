@@ -47,6 +47,7 @@ dev = [
     "httpx>=0.28.0",
     "maturin>=1.10.0",
     "patchelf>=0.17.0",
+    "marimo>=0.10.0",
 ]
 
 [project.scripts]
