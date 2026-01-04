@@ -514,9 +514,19 @@ impl Investigator {
         }
 
         // Build the hierarchy
-        builder
-            .build(root_identifier)
-            .ok_or_else(|| anyhow::anyhow!("No hierarchy found for identifier: {}", root_identifier))
+        // Return empty hierarchy if no match found (instead of error)
+        Ok(builder.build(root_identifier).unwrap_or_else(|| {
+            crate::hierarchy::ThreadHierarchy {
+                roots: vec![],
+                total_nodes: 0,
+                max_depth: 0,
+                total_duration_ms: None,
+                concurrent_count: 0,
+                bottleneck: None,
+                error_nodes: vec![],
+                detection_method: crate::hierarchy::DetectionMethod::Explicit,
+            }
+        }))
     }
 }
 

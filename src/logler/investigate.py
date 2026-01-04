@@ -2120,7 +2120,7 @@ def cross_service_timeline(
             if timestamp_str:
                 try:
                     timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                except:
+                except (ValueError, TypeError):
                     timestamp = None
             else:
                 timestamp = None
@@ -2407,8 +2407,8 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
             start = datetime.fromisoformat(entries[0].get('timestamp', '').replace('Z', '+00:00'))
             end = datetime.fromisoformat(entries[-1].get('timestamp', '').replace('Z', '+00:00'))
             duration_ms = int((end - start).total_seconds() * 1000)
-        except:
-            pass
+        except (ValueError, TypeError, AttributeError):
+            pass  # Skip if timestamps are missing or invalid
 
     return {
         'id': thread_id,
@@ -2588,7 +2588,7 @@ def _in_time_range(entry: Dict, start: str, end: str) -> bool:
         start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
         end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
         return start_dt <= timestamp <= end_dt
-    except:
+    except (ValueError, TypeError, AttributeError):
         return False
 
 
@@ -3462,8 +3462,8 @@ def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str,
 
             if pop_duration > 0:
                 time_coverage = min(1.0, sample_duration / pop_duration)
-        except:
-            pass
+        except (ValueError, TypeError, AttributeError):
+            pass  # Skip if timestamps are invalid
 
     # Level coverage
     level_coverage = defaultdict(int)
