@@ -149,13 +149,13 @@ def _(find_patterns, log_file):
     print(f"=== Patterns Found ===\n")
     print(f"Total patterns: {len(patterns.get('patterns', []))}\n")
 
-    for p in patterns.get('patterns', []):
-        print(f"Pattern: {p['pattern'][:60]}...")
-        print(f"  Occurrences: {p['occurrences']}")
-        print(f"  Type: {p['pattern_type']}")
-        print(f"  First seen: {p['first_seen']}")
-        print(f"  Last seen: {p['last_seen']}")
-        print(f"  Affected threads: {p['affected_threads']}")
+    for _p in patterns.get('patterns', []):
+        print(f"Pattern: {_p['pattern'][:60]}...")
+        print(f"  Occurrences: {_p['occurrences']}")
+        print(f"  Type: {_p['pattern_type']}")
+        print(f"  First seen: {_p['first_seen']}")
+        print(f"  Last seen: {_p['last_seen']}")
+        print(f"  Affected threads: {_p['affected_threads']}")
         print()
     return (patterns,)
 
@@ -181,25 +181,25 @@ def _(patterns):
 
     print("=== Top 3 Most Frequent Issues ===\n")
 
-    for i, p in enumerate(sorted_patterns[:3], 1):
-        print(f"{i}. {p['pattern']}")
-        print(f"   Count: {p['occurrences']} occurrences")
+    for _i, _p in enumerate(sorted_patterns[:3], 1):
+        print(f"{_i}. {_p['pattern']}")
+        print(f"   Count: {_p['occurrences']} occurrences")
 
         # Calculate time span
-        from datetime import datetime
-        first = datetime.fromisoformat(p['first_seen'].replace('Z', '+00:00'))
-        last = datetime.fromisoformat(p['last_seen'].replace('Z', '+00:00'))
-        duration = (last - first).total_seconds()
-        print(f"   Duration: {duration:.0f} seconds")
+        from datetime import datetime as _dt
+        _first = _dt.fromisoformat(_p['first_seen'].replace('Z', '+00:00'))
+        _last = _dt.fromisoformat(_p['last_seen'].replace('Z', '+00:00'))
+        _duration = (_last - _first).total_seconds()
+        print(f"   Duration: {_duration:.0f} seconds")
 
         # Frequency
-        if duration > 0:
-            freq = p['occurrences'] / (duration / 60)
-            print(f"   Frequency: {freq:.2f} per minute")
+        if _duration > 0:
+            _freq = _p['occurrences'] / (_duration / 60)
+            print(f"   Frequency: {_freq:.2f} per minute")
 
-        print(f"   Threads affected: {len(p['affected_threads'])}")
+        print(f"   Threads affected: {len(_p['affected_threads'])}")
         print()
-    return first, last, sorted_patterns
+    return (sorted_patterns,)
 
 
 @app.cell
@@ -217,26 +217,26 @@ def _(patterns):
     # Analyze patterns by looking at examples
     component_issues = {}
 
-    for p in patterns.get('patterns', []):
+    for _p in patterns.get('patterns', []):
         # Look at the first example to get component
-        for example in p.get('examples', []):
-            component = example.get('component', 'unknown')
-            if component not in component_issues:
-                component_issues[component] = {
+        for _example in _p.get('examples', []):
+            _component = _example.get('component', 'unknown')
+            if _component not in component_issues:
+                component_issues[_component] = {
                     'patterns': [],
                     'total_occurrences': 0
                 }
-            component_issues[component]['patterns'].append(p['pattern'][:50])
-            component_issues[component]['total_occurrences'] += p['occurrences']
+            component_issues[_component]['patterns'].append(_p['pattern'][:50])
+            component_issues[_component]['total_occurrences'] += _p['occurrences']
             break  # One component per pattern
 
     print("=== Issues by Component ===\n")
-    for component, data in sorted(component_issues.items(), key=lambda x: x[1]['total_occurrences'], reverse=True):
-        print(f"{component}:")
-        print(f"  Total error occurrences: {data['total_occurrences']}")
+    for _component, _data in sorted(component_issues.items(), key=lambda x: x[1]['total_occurrences'], reverse=True):
+        print(f"{_component}:")
+        print(f"  Total error occurrences: {_data['total_occurrences']}")
         print(f"  Patterns:")
-        for pattern in data['patterns']:
-            print(f"    - {pattern}...")
+        for _pattern in _data['patterns']:
+            print(f"    - {_pattern}...")
         print()
     return (component_issues,)
 
@@ -259,12 +259,12 @@ def _(patterns):
     print(f"=== Examples for Top Pattern ===")
     print(f"Pattern: {top_pattern.get('pattern', 'N/A')}\n")
 
-    for i, example in enumerate(top_pattern.get('examples', [])[:3], 1):
-        print(f"Example {i}:")
-        print(f"  Timestamp: {example.get('timestamp')}")
-        print(f"  Thread: {example.get('thread_id')}")
-        print(f"  Correlation: {example.get('correlation_id')}")
-        print(f"  Message: {example.get('message')}")
+    for _i, _example in enumerate(top_pattern.get('examples', [])[:3], 1):
+        print(f"Example {_i}:")
+        print(f"  Timestamp: {_example.get('timestamp')}")
+        print(f"  Thread: {_example.get('thread_id')}")
+        print(f"  Correlation: {_example.get('correlation_id')}")
+        print(f"  Message: {_example.get('message')}")
         print()
     return (top_pattern,)
 
@@ -284,16 +284,16 @@ def _(patterns):
     # Count thread occurrences across all patterns
     thread_impact = {}
 
-    for p in patterns.get('patterns', []):
-        for thread in p.get('affected_threads', []):
-            if thread not in thread_impact:
-                thread_impact[thread] = 0
-            thread_impact[thread] += 1
+    for _p in patterns.get('patterns', []):
+        for _thread in _p.get('affected_threads', []):
+            if _thread not in thread_impact:
+                thread_impact[_thread] = 0
+            thread_impact[_thread] += 1
 
     print("=== Thread Impact Analysis ===\n")
-    for thread, count in sorted(thread_impact.items(), key=lambda x: x[1], reverse=True):
-        bar = "#" * count
-        print(f"{thread}: {bar} ({count} patterns)")
+    for _thread, _count in sorted(thread_impact.items(), key=lambda x: x[1], reverse=True):
+        _bar = "#" * _count
+        print(f"{_thread}: {_bar} ({_count} patterns)")
     return (thread_impact,)
 
 
@@ -309,34 +309,34 @@ def _(mo):
 
 @app.cell
 def _(patterns):
-    from datetime import datetime
+    from datetime import datetime as _dt
 
     print("=== Root Cause Analysis ===\n")
 
     # Find the earliest error pattern
-    all_patterns = patterns.get('patterns', [])
-    if all_patterns:
-        earliest = min(all_patterns, key=lambda p: p['first_seen'])
+    _all_patterns = patterns.get('patterns', [])
+    if _all_patterns:
+        _earliest = min(_all_patterns, key=lambda x: x['first_seen'])
 
         print("FIRST ERROR DETECTED:")
-        print(f"  Pattern: {earliest['pattern']}")
-        print(f"  Time: {earliest['first_seen']}")
-        print(f"  Threads: {earliest['affected_threads']}")
+        print(f"  Pattern: {_earliest['pattern']}")
+        print(f"  Time: {_earliest['first_seen']}")
+        print(f"  Threads: {_earliest['affected_threads']}")
 
         # Find related errors (happening in same timeframe)
-        earliest_time = datetime.fromisoformat(earliest['first_seen'].replace('Z', '+00:00'))
+        _earliest_time = _dt.fromisoformat(_earliest['first_seen'].replace('Z', '+00:00'))
 
         print("\nRELATED ERRORS (within 1 minute):")
-        for p in all_patterns:
-            p_time = datetime.fromisoformat(p['first_seen'].replace('Z', '+00:00'))
-            delta = abs((p_time - earliest_time).total_seconds())
-            if delta <= 60 and p['pattern'] != earliest['pattern']:
-                print(f"  - {p['pattern'][:50]}... (after {delta:.0f}s)")
+        for _p in _all_patterns:
+            _p_time = _dt.fromisoformat(_p['first_seen'].replace('Z', '+00:00'))
+            _delta = abs((_p_time - _earliest_time).total_seconds())
+            if _delta <= 60 and _p['pattern'] != _earliest['pattern']:
+                print(f"  - {_p['pattern'][:50]}... (after {_delta:.0f}s)")
 
         print("\nHYPOTHESIS:")
-        print(f"  The {earliest['pattern'][:30]}... errors started first")
+        print(f"  The {_earliest['pattern'][:30]}... errors started first")
         print(f"  and may have caused cascading failures.")
-    return (earliest,)
+    return
 
 
 @app.cell
@@ -351,32 +351,30 @@ def _(mo):
 
 @app.cell
 def _(patterns):
-    from datetime import datetime
-
     print("=== Pattern Severity Assessment ===\n")
     print(f"{'Priority':<10} {'Pattern':<45} {'Score':<8} {'Reason':<20}")
     print("-" * 85)
 
-    for i, p in enumerate(patterns.get('patterns', [])[:5], 1):
+    for _i, _p in enumerate(patterns.get('patterns', [])[:5], 1):
         # Calculate severity score
-        occurrences = p['occurrences']
-        threads = len(p['affected_threads'])
+        _occurrences = _p['occurrences']
+        _threads = len(_p['affected_threads'])
 
         # More occurrences = more severe
         # More threads affected = more severe
-        score = occurrences * 2 + threads * 3
+        _score = _occurrences * 2 + _threads * 3
 
-        if occurrences >= 4:
-            reason = "High frequency"
-        elif threads >= 3:
-            reason = "Wide impact"
+        if _occurrences >= 4:
+            _reason = "High frequency"
+        elif _threads >= 3:
+            _reason = "Wide impact"
         else:
-            reason = "Notable issue"
+            _reason = "Notable issue"
 
-        priority = f"P{min(i, 4)}"
-        pattern_short = p['pattern'][:43] + ".." if len(p['pattern']) > 45 else p['pattern']
+        _priority = f"P{min(_i, 4)}"
+        _pattern_short = _p['pattern'][:43] + ".." if len(_p['pattern']) > 45 else _p['pattern']
 
-        print(f"{priority:<10} {pattern_short:<45} {score:<8} {reason:<20}")
+        print(f"{_priority:<10} {_pattern_short:<45} {_score:<8} {_reason:<20}")
     return
 
 

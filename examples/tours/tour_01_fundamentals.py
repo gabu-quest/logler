@@ -99,14 +99,14 @@ def _():
         ("INFO", "Application shutting down gracefully", "main"),
     ]
 
-    for i, (level, message, component) in enumerate(messages):
+    for _i, (_level, _message, _component) in enumerate(messages):
         sample_logs.append({
-            "timestamp": (base_time + timedelta(seconds=i * 10)).isoformat(),
-            "level": level,
-            "message": message,
-            "component": component,
-            "thread_id": f"worker-{i % 3}",
-            "correlation_id": f"req-{i // 5:03d}",
+            "timestamp": (base_time + timedelta(seconds=_i * 10)).isoformat(),
+            "level": _level,
+            "message": _message,
+            "component": _component,
+            "thread_id": f"worker-{_i % 3}",
+            "correlation_id": f"req-{_i // 5:03d}",
         })
 
     # Write to temp file
@@ -144,8 +144,8 @@ def _(get_metadata, log_file):
         print(f"Format: {meta['format']}")
         print(f"Size: {meta['size_bytes']} bytes")
         print(f"\nLog Levels:")
-        for level, count in meta.get('log_levels', {}).items():
-            print(f"  {level}: {count}")
+        for _level, _count in meta.get('log_levels', {}).items():
+            print(f"  {_level}: {_count}")
         print(f"\nUnique Threads: {meta.get('unique_threads', 0)}")
         print(f"Unique Correlations: {meta.get('unique_correlation_ids', 0)}")
     return (metadata,)
@@ -173,9 +173,9 @@ def _(log_file, search):
     print(f"Found {results['total_matches']} matches for 'redis'")
     print(f"Search time: {results['search_time_ms']}ms\n")
 
-    for r in results['results']:
-        entry = r['entry']
-        print(f"[{entry['level']}] {entry['message']}")
+    for _r in results['results']:
+        _entry = _r['entry']
+        print(f"[{_entry['level']}] {_entry['message']}")
     return (results,)
 
 
@@ -196,10 +196,10 @@ def _(log_file, search):
     errors = search(files=[str(log_file)], level="ERROR", limit=10)
 
     print(f"Found {errors['total_matches']} ERROR entries:\n")
-    for r in errors['results']:
-        entry = r['entry']
-        print(f"[{entry['timestamp']}] {entry['message']}")
-        print(f"  Component: {entry.get('component', 'unknown')}")
+    for _r in errors['results']:
+        _entry = _r['entry']
+        print(f"[{_entry['timestamp']}] {_entry['message']}")
+        print(f"  Component: {_entry.get('component', 'unknown')}")
         print()
     return (errors,)
 
@@ -210,9 +210,9 @@ def _(log_file, search):
     warnings = search(files=[str(log_file)], level="WARN", limit=10)
 
     print(f"Found {warnings['total_matches']} WARN entries:\n")
-    for r in warnings['results']:
-        entry = r['entry']
-        print(f"[{entry['level']}] {entry['message']}")
+    for _r in warnings['results']:
+        _entry = _r['entry']
+        print(f"[{_entry['level']}] {_entry['message']}")
     return (warnings,)
 
 
@@ -248,8 +248,8 @@ def _(inv):
     inv_results = inv.search(query="database")
 
     print(f"Found {inv_results['total_matches']} matches for 'database'")
-    for r in inv_results['results']:
-        print(f"  {r['entry']['message']}")
+    for _r in inv_results['results']:
+        print(f"  {_r['entry']['message']}")
     return (inv_results,)
 
 
@@ -278,12 +278,12 @@ def _(inv, log_file):
     print(f"[{context['target']['level']}] {context['target']['message']}")
 
     print("\n=== Context Before ===")
-    for entry in context['context_before']:
-        print(f"  [{entry['level']}] {entry['message']}")
+    for _entry in context['context_before']:
+        print(f"  [{_entry['level']}] {_entry['message']}")
 
     print("\n=== Context After ===")
-    for entry in context['context_after']:
-        print(f"  [{entry['level']}] {entry['message']}")
+    for _entry in context['context_after']:
+        print(f"  [{_entry['level']}] {_entry['message']}")
     return (context,)
 
 

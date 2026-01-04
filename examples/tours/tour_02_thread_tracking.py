@@ -174,9 +174,9 @@ def _(follow_thread, log_file):
     print(f"Total entries: {timeline['total_entries']}")
     print(f"Duration: {timeline.get('duration_ms', 'N/A')}ms\n")
 
-    for entry in timeline['entries']:
-        ts = entry['timestamp'].split('T')[1][:12]
-        print(f"[{ts}] [{entry['level']}] {entry['message']}")
+    for _entry in timeline['entries']:
+        _ts = _entry['timestamp'].split('T')[1][:12]
+        print(f"[{_ts}] [{_entry['level']}] {_entry['message']}")
     return (timeline,)
 
 
@@ -204,10 +204,10 @@ def _(follow_thread, log_file):
     print(f"Duration: {request_timeline.get('duration_ms', 'N/A')}ms")
     print(f"Unique spans: {len(request_timeline.get('unique_spans', []))}\n")
 
-    for entry in request_timeline['entries']:
-        ts = entry['timestamp'].split('T')[1][:12]
-        svc = entry.get('service', 'unknown')
-        print(f"[{ts}] [{svc:20}] [{entry['level']:5}] {entry['message']}")
+    for _entry in request_timeline['entries']:
+        _ts = _entry['timestamp'].split('T')[1][:12]
+        _svc = _entry.get('service', 'unknown')
+        print(f"[{_ts}] [{_svc:20}] [{_entry['level']:5}] {_entry['message']}")
     return (request_timeline,)
 
 
@@ -223,13 +223,13 @@ def _(follow_thread, log_file):
     print(f"Total entries: {failed_timeline['total_entries']}")
     print(f"Duration: {failed_timeline.get('duration_ms', 'N/A')}ms\n")
 
-    for entry in failed_timeline['entries']:
-        ts = entry['timestamp'].split('T')[1][:12]
-        svc = entry.get('service', 'unknown')
-        level = entry['level']
+    for _entry in failed_timeline['entries']:
+        _ts = _entry['timestamp'].split('T')[1][:12]
+        _svc = _entry.get('service', 'unknown')
+        _level = _entry['level']
         # Highlight errors
-        marker = ">>>" if level == "ERROR" else "   "
-        print(f"{marker} [{ts}] [{svc:20}] [{level:5}] {entry['message']}")
+        _marker = ">>>" if _level == "ERROR" else "   "
+        print(f"{_marker} [{_ts}] [{_svc:20}] [{_level:5}] {_entry['message']}")
     return (failed_timeline,)
 
 
@@ -257,15 +257,15 @@ def _(follow_thread, log_file):
 
     # Group by service
     by_service = {}
-    for entry in trace_timeline['entries']:
-        svc = entry.get('service', 'unknown')
-        if svc not in by_service:
-            by_service[svc] = []
-        by_service[svc].append(entry)
+    for _entry in trace_timeline['entries']:
+        _svc = _entry.get('service', 'unknown')
+        if _svc not in by_service:
+            by_service[_svc] = []
+        by_service[_svc].append(_entry)
 
     print(f"\nServices involved: {list(by_service.keys())}")
-    for svc, entries in by_service.items():
-        print(f"  {svc}: {len(entries)} entries")
+    for _svc, _entries in by_service.items():
+        print(f"  {_svc}: {len(_entries)} entries")
     return by_service, trace_timeline
 
 
@@ -295,9 +295,9 @@ def _(failed_timeline, request_timeline):
     # Count by level
     def count_levels(timeline):
         counts = {}
-        for entry in timeline['entries']:
-            level = entry['level']
-            counts[level] = counts.get(level, 0) + 1
+        for _e in timeline['entries']:
+            _lvl = _e['level']
+            counts[_lvl] = counts.get(_lvl, 0) + 1
         return counts
 
     success_levels = count_levels(success)
@@ -328,10 +328,10 @@ def _(failed_timeline, request_timeline):
     # Get services visited in order
     def get_service_sequence(timeline):
         seen = []
-        for entry in timeline['entries']:
-            svc = entry.get('service', 'unknown')
-            if not seen or seen[-1] != svc:
-                seen.append(svc)
+        for _e in timeline['entries']:
+            _s = _e.get('service', 'unknown')
+            if not seen or seen[-1] != _s:
+                seen.append(_s)
         return seen
 
     success_path = get_service_sequence(request_timeline)
@@ -342,12 +342,12 @@ def _(failed_timeline, request_timeline):
 
     # Find first ERROR
     print("\n=== First Error ===")
-    for entry in failed_timeline['entries']:
-        if entry['level'] == 'ERROR':
-            print(f"Service: {entry.get('service')}")
-            print(f"Thread: {entry.get('thread_id')}")
-            print(f"Message: {entry['message']}")
-            print(f"Time: {entry['timestamp']}")
+    for _entry in failed_timeline['entries']:
+        if _entry['level'] == 'ERROR':
+            print(f"Service: {_entry.get('service')}")
+            print(f"Thread: {_entry.get('thread_id')}")
+            print(f"Message: {_entry['message']}")
+            print(f"Time: {_entry['timestamp']}")
             break
     return failure_path, get_service_sequence, success_path
 
