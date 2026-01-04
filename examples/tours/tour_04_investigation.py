@@ -104,9 +104,9 @@ def _():
     # Write to temp file
     temp_dir = tempfile.mkdtemp()
     log_file = Path(temp_dir) / "investigation.log"
-    with open(log_file, "w") as f:
-        for log in logs:
-            f.write(json.dumps(log) + "\n")
+    with open(log_file, "w") as _f:
+        for _log in logs:
+            _f.write(json.dumps(_log) + "\n")
 
     print(f"Created {len(logs)} log entries")
     print(f"Including 2 errors and 1 warning to investigate")
@@ -195,15 +195,15 @@ def _(session):
     history = session.get_history()
 
     print("=== Investigation History ===\n")
-    for i, entry in enumerate(history):
-        op = entry['operation']
-        desc = entry['description']
-        summary = entry.get('result_summary', {})
+    for _i, _entry in enumerate(history):
+        _op = _entry['operation']
+        _desc = _entry['description']
+        _summary = _entry.get('result_summary', {})
 
-        print(f"{i+1}. [{op}] {desc}")
-        if summary:
-            for key, value in summary.items():
-                print(f"      {key}: {value}")
+        print(f"{_i+1}. [{_op}] {_desc}")
+        if _summary:
+            for _key, _value in _summary.items():
+                print(f"      {_key}: {_value}")
         print()
     return (history,)
 
@@ -261,8 +261,8 @@ def _(session):
 
     # View updated history
     print("\n=== Updated History (last 3) ===")
-    for entry in session.get_history()[-3:]:
-        print(f"[{entry['operation']}] {entry['description']}")
+    for _entry in session.get_history()[-3:]:
+        print(f"[{_entry['operation']}] {_entry['description']}")
     return
 
 
@@ -286,9 +286,9 @@ def _(session, temp_dir):
     print(f"Session saved to: {save_path}")
 
     # Show what was saved
-    import json
-    with open(save_path) as f:
-        saved = json.load(f)
+    import json as _json
+    with open(save_path) as _f:
+        saved = _json.load(_f)
     print(f"\nSaved session contains:")
     print(f"  Name: {saved['name']}")
     print(f"  Files: {saved['files']}")
@@ -329,20 +329,20 @@ def _(session):
     print()
 
     print("STEPS TAKEN:")
-    for i, entry in enumerate(session.get_history(), 1):
-        if entry['operation'] == 'note':
-            print(f"  {i}. NOTE: {entry['description']}")
+    for _i, _entry in enumerate(session.get_history(), 1):
+        if _entry['operation'] == 'note':
+            print(f"  {_i}. NOTE: {_entry['description']}")
         else:
-            summary = entry.get('result_summary', {})
-            result_str = ", ".join(f"{k}={v}" for k, v in summary.items()) if summary else "completed"
-            print(f"  {i}. {entry['description']} ({result_str})")
+            _summary = _entry.get('result_summary', {})
+            _result_str = ", ".join(f"{_k}={_v}" for _k, _v in _summary.items()) if _summary else "completed"
+            print(f"  {_i}. {_entry['description']} ({_result_str})")
 
     print()
     print("FINDINGS:")
-    for entry in session.get_history():
-        if entry['operation'] == 'note':
-            note = entry.get('params', {}).get('note', '')
-            print(f"  - {note}")
+    for _entry in session.get_history():
+        if _entry['operation'] == 'note':
+            _note = _entry.get('params', {}).get('note', '')
+            print(f"  - {_note}")
     print("=" * 60)
     return
 
