@@ -6,22 +6,34 @@ Comprehensive examples demonstrating logler's LLM-optimized investigation capabi
 
 ```
 examples/
+├── tours/           # Interactive marimo notebook tours
+│   ├── tour_01_fundamentals.py       # Search, filter, output formats
+│   ├── tour_02_thread_tracking.py    # Thread/correlation tracking
+│   ├── tour_03_hierarchy.py          # Tree and waterfall visualization
+│   ├── tour_04_investigation.py      # Investigation sessions
+│   ├── tour_05_patterns.py           # Pattern detection
+│   ├── tour_06_flamegraph.py         # Flamegraph visualization
+│   ├── tour_07_error_flow.py         # Error flow analysis
+│   ├── tour_08_comparison.py         # Comparison and diffing
+│   ├── tour_09_tracing_exports.py    # Jaeger/Zipkin exports
+│   ├── tour_10_sampling.py           # Smart sampling strategies
+│   └── tour_11_ai_insights.py        # AI-powered insights
 ├── en/              # English examples
 │   ├── 01_production_incident_investigation.py
 │   ├── 02_advanced_sql_analysis.py
 │   ├── 03_distributed_tracing.py
 │   ├── 04_memory_leak_detection.py
 │   ├── 05_cross_service_investigation.py
-│   ├── 06_token_efficient_investigation.py      # NEW!
-│   ├── 07_auto_insights_analysis.py             # NEW!
-│   ├── 08_investigation_sessions.py             # NEW!
-│   ├── 09_smart_sampling.py                     # NEW!
-│   ├── 10_comparison_and_diff.py                # NEW!
-│   ├── 11_explain_errors.py                     # NEW!
-│   └── 12_complete_workflow.py                  # NEW!
-├── en/live_log_stream.py      # NEW! Live log generator for frontend tailing
-├── frontend_walkthrough.md    # NEW! Browser-based UI tour (no code to run)
-├── frontend_live_walkthrough.md # NEW! Live follow/tail UI tour (no code to run)
+│   ├── 06_token_efficient_investigation.py
+│   ├── 07_auto_insights_analysis.py
+│   ├── 08_investigation_sessions.py
+│   ├── 09_smart_sampling.py
+│   ├── 10_comparison_and_diff.py
+│   ├── 11_explain_errors.py
+│   └── 12_complete_workflow.py
+├── en/live_log_stream.py      # Live log generator for frontend tailing
+├── frontend_walkthrough.md    # Browser-based UI tour (no code to run)
+├── frontend_live_walkthrough.md # Live follow/tail UI tour (no code to run)
 ├── ja/              # Japanese examples (日本語)
 │   └── 01_本番環境インシデント調査.py
 └── logs/            # Sample log files
@@ -36,6 +48,36 @@ examples/
 # Complete workflow combining all features
 python examples/en/12_complete_workflow.py
 ```
+
+## 🎓 Interactive Marimo Tours
+
+**Best way to learn logler!** Interactive notebooks with live code execution.
+
+```bash
+# Install marimo (if not already installed)
+uv add --dev marimo
+
+# Run any tour in your browser
+uv run marimo edit examples/tours/tour_01_fundamentals.py
+```
+
+### Tour Overview
+
+| Tour | Topic | What You'll Learn |
+|------|-------|-------------------|
+| 01 | Fundamentals | Search, filter, output formats (full/summary/count) |
+| 02 | Thread Tracking | Thread grouping, correlation IDs, follow_thread |
+| 03 | Hierarchy | Tree visualization, waterfall views, bottleneck detection |
+| 04 | Investigation | Sessions, history tracking, report generation |
+| 05 | Patterns | Pattern detection, min_occurrences, anomaly finding |
+| 06 | Flamegraph | Performance visualization, time distribution |
+| 07 | Error Flow | Root cause analysis, error propagation chains |
+| 08 | Comparison | Diff hierarchies, compare threads/time periods |
+| 09 | Tracing Exports | Export to Jaeger and Zipkin formats |
+| 10 | Sampling | Smart sampling strategies (diverse, errors-focused, etc.) |
+| 11 | AI Insights | analyze_with_insights, explain, suggest_next_action |
+
+Each tour is self-contained with sample data - no external files needed.
 
 ## 🎯 Examples by Category
 
@@ -116,9 +158,9 @@ python examples/en/12_complete_workflow.py
 ## 📚 Learning Path
 
 ### For Beginners
-1. Start with `12_complete_workflow.py` to see all features
-2. Try `06_token_efficient_investigation.py` for optimization
-3. Explore `07_auto_insights_analysis.py` for automatic analysis
+1. **Start with the interactive tours** - `uv run marimo edit examples/tours/tour_01_fundamentals.py`
+2. Run `12_complete_workflow.py` to see all features in action
+3. Try `06_token_efficient_investigation.py` for optimization
 
 ### For Incident Investigation
 1. `01_production_incident_investigation.py` - Systematic approach
@@ -135,7 +177,10 @@ python examples/en/12_complete_workflow.py
 ## 🎮 Running Examples
 
 ```bash
-# All examples can be run directly
+# Interactive marimo tours (recommended!)
+uv run marimo edit examples/tours/tour_01_fundamentals.py
+
+# Python script examples
 python examples/en/06_token_efficient_investigation.py
 python examples/en/07_auto_insights_analysis.py
 python examples/en/08_investigation_sessions.py
