@@ -670,12 +670,14 @@ mod tests {
     #[test]
     fn test_common_log_detection_includes_status_field() {
         let parser = LogParser::new("test.log");
-        let line =
-            r#"10.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "POST /submit HTTP/1.1" 503 123"#;
+        let line = r#"10.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "POST /submit HTTP/1.1" 503 123"#;
         let entry = parser.parse_line(13, line).unwrap();
 
         assert_eq!(entry.format, LogFormat::CommonLog);
         assert_eq!(entry.level, Some(LogLevel::Error));
-        assert_eq!(entry.fields.get("status").and_then(|v| v.as_u64()), Some(503));
+        assert_eq!(
+            entry.fields.get("status").and_then(|v| v.as_u64()),
+            Some(503)
+        );
     }
 }
