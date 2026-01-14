@@ -87,7 +87,9 @@ run_sql(
 
 def render_signatures(rows):
     for r in rows:
-        print(f"  {r['signature']:<18} {r['occurrences']:2d} hits ({r['first_seen']} → {r['last_seen']})")
+        print(
+            f"  {r['signature']:<18} {r['occurrences']:2d} hits ({r['first_seen']} → {r['last_seen']})"
+        )
 
 
 run_sql(
@@ -115,7 +117,9 @@ run_sql(
 
 def render_requests(rows):
     for r in rows:
-        print(f"  {r['correlation_id']}: {r['errors']} errors over {r['duration_ms']}ms ({r['total']} log lines)")
+        print(
+            f"  {r['correlation_id']}: {r['errors']} errors over {r['duration_ms']}ms ({r['total']} log lines)"
+        )
 
 
 run_sql(
@@ -149,7 +153,9 @@ run_sql(
 
 def render_retries(rows):
     for r in rows:
-        print(f"  {r['thread_id']}: {r['retry_logs']} retries ({r['first_retry']} → {r['last_retry']})")
+        print(
+            f"  {r['thread_id']}: {r['retry_logs']} retries ({r['first_retry']} → {r['last_retry']})"
+        )
 
 
 run_sql(

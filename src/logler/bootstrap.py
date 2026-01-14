@@ -8,7 +8,6 @@ Attempts to import `logler_rs`; if missing, runs `maturin develop` against
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +16,7 @@ def ensure_rust_backend(auto_install: bool = True) -> bool:
     """Ensure logler_rs is importable. Optionally auto-installs via maturin."""
     try:
         import logler_rs  # noqa: F401
+
         return True
     except Exception:
         if not auto_install:
@@ -37,12 +37,15 @@ def ensure_rust_backend(auto_install: bool = True) -> bool:
         "sql",
     ]
     try:
-        subprocess.run(cmd, cwd=repo_root, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(
+            cmd, cwd=repo_root, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
     except Exception:
         return False
 
     try:
         import logler_rs  # noqa: F401
+
         return True
     except Exception:
         return False

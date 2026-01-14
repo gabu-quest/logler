@@ -13,7 +13,8 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: AI-Powered Insights
 
     Logler can automatically analyze logs and generate insights,
@@ -26,17 +27,20 @@ def _(mo):
     4. Using insights for investigation
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Problematic Logs
 
     We'll create logs with issues that need investigation.
-    """)
+    """
+    )
     return
 
 
@@ -52,55 +56,65 @@ def _():
 
     # Normal operations
     for _i in range(20):
-        logs.append({
-            "timestamp": (base_time + timedelta(seconds=_i * 5)).isoformat(),
-            "level": "INFO",
-            "message": f"Request processed: /api/users",
-            "thread_id": f"http-{_i % 3}",
-            "correlation_id": f"req-{_i:03d}"
-        })
+        logs.append(
+            {
+                "timestamp": (base_time + timedelta(seconds=_i * 5)).isoformat(),
+                "level": "INFO",
+                "message": "Request processed: /api/users",
+                "thread_id": f"http-{_i % 3}",
+                "correlation_id": f"req-{_i:03d}",
+            }
+        )
 
     # Error spike starts
     for _i in range(15):
-        logs.append({
-            "timestamp": (base_time + timedelta(seconds=100 + _i * 3)).isoformat(),
-            "level": "ERROR",
-            "message": "Database connection timeout after 30s",
-            "thread_id": f"http-{_i % 3}",
-            "correlation_id": f"req-{100 + _i:03d}",
-            "error_code": "DB_TIMEOUT"
-        })
+        logs.append(
+            {
+                "timestamp": (base_time + timedelta(seconds=100 + _i * 3)).isoformat(),
+                "level": "ERROR",
+                "message": "Database connection timeout after 30s",
+                "thread_id": f"http-{_i % 3}",
+                "correlation_id": f"req-{100 + _i:03d}",
+                "error_code": "DB_TIMEOUT",
+            }
+        )
 
     # Cascading failures
     for _i in range(10):
-        logs.append({
-            "timestamp": (base_time + timedelta(seconds=150 + _i * 2)).isoformat(),
-            "level": "ERROR",
-            "message": "Connection pool exhausted",
-            "thread_id": f"http-{_i % 3}",
-            "correlation_id": f"req-{150 + _i:03d}",
-            "error_code": "POOL_EXHAUSTED"
-        })
+        logs.append(
+            {
+                "timestamp": (base_time + timedelta(seconds=150 + _i * 2)).isoformat(),
+                "level": "ERROR",
+                "message": "Connection pool exhausted",
+                "thread_id": f"http-{_i % 3}",
+                "correlation_id": f"req-{150 + _i:03d}",
+                "error_code": "POOL_EXHAUSTED",
+            }
+        )
 
     # Some recovery
     for _i in range(5):
-        logs.append({
-            "timestamp": (base_time + timedelta(seconds=180 + _i * 5)).isoformat(),
-            "level": "WARN",
-            "message": "Retrying database connection",
-            "thread_id": "recovery-1",
-            "correlation_id": f"req-{180 + _i:03d}"
-        })
+        logs.append(
+            {
+                "timestamp": (base_time + timedelta(seconds=180 + _i * 5)).isoformat(),
+                "level": "WARN",
+                "message": "Retrying database connection",
+                "thread_id": "recovery-1",
+                "correlation_id": f"req-{180 + _i:03d}",
+            }
+        )
 
     # Normal again
     for _i in range(10):
-        logs.append({
-            "timestamp": (base_time + timedelta(seconds=210 + _i * 5)).isoformat(),
-            "level": "INFO",
-            "message": "Request processed: /api/users",
-            "thread_id": f"http-{_i % 3}",
-            "correlation_id": f"req-{210 + _i:03d}"
-        })
+        logs.append(
+            {
+                "timestamp": (base_time + timedelta(seconds=210 + _i * 5)).isoformat(),
+                "level": "INFO",
+                "message": "Request processed: /api/users",
+                "thread_id": f"http-{_i % 3}",
+                "correlation_id": f"req-{210 + _i:03d}",
+            }
+        )
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()
@@ -110,18 +124,20 @@ def _():
             _f.write(json.dumps(_log) + "\n")
 
     print(f"Created {len(logs)} log entries")
-    print(f"Scenario: Database timeout causing cascading failures")
+    print("Scenario: Database timeout causing cascading failures")
     return Path, base_time, log_file, logs, temp_dir
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Automatic Insights
 
     `analyze_with_insights()` does the thinking for you - it analyzes
     logs and generates actionable insights automatically.
-    """)
+    """
+    )
     return
 
 
@@ -135,13 +151,10 @@ def _():
 @app.cell
 def _(analyze_with_insights, log_file):
     # Get automatic insights
-    analysis = analyze_with_insights(
-        files=[str(log_file)],
-        auto_investigate=True
-    )
+    analysis = analyze_with_insights(files=[str(log_file)], auto_investigate=True)
 
     print("=== Automatic Analysis ===\n")
-    _overview = analysis['overview']
+    _overview = analysis["overview"]
     print(f"Total logs: {_overview['total_logs']}")
     print(f"Error count: {_overview['error_count']}")
     print(f"Error rate: {_overview['error_rate']:.1%}")
@@ -151,11 +164,13 @@ def _(analyze_with_insights, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Generated Insights
 
     Insights identify patterns and problems automatically.
-    """)
+    """
+    )
     return
 
 
@@ -163,9 +178,9 @@ def _(mo):
 def _(analysis):
     print("=== INSIGHTS ===\n")
 
-    for _insight in analysis['insights']:
-        _severity = _insight.get('severity', 'medium').upper()
-        _type = _insight.get('type', 'unknown')
+    for _insight in analysis["insights"]:
+        _severity = _insight.get("severity", "medium").upper()
+        _type = _insight.get("type", "unknown")
 
         print(f"[{_severity}] {_insight.get('description', 'No description')}")
         print(f"  Type: {_type}")
@@ -176,34 +191,38 @@ def _(analysis):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Suggestions and Next Steps
 
     The analysis provides actionable suggestions.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(analysis):
     print("=== SUGGESTIONS ===\n")
-    for _suggestion in analysis.get('suggestions', []):
+    for _suggestion in analysis.get("suggestions", []):
         print(f"• {_suggestion}")
 
     print("\n=== NEXT STEPS ===\n")
-    for _step in analysis.get('next_steps', []):
+    for _step in analysis.get("next_steps", []):
         print(f"→ {_step}")
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Explaining Errors
 
     `explain()` provides human-friendly explanations of errors
     with context-specific advice.
-    """)
+    """
+    )
     return
 
 
@@ -211,8 +230,7 @@ def _(mo):
 def _(explain):
     # Explain a timeout error
     timeout_explanation = explain(
-        error_message="Database connection timeout after 30s",
-        context="production"
+        error_message="Database connection timeout after 30s", context="production"
     )
 
     print("=== Error Explanation ===\n")
@@ -223,10 +241,7 @@ def _(explain):
 @app.cell
 def _(explain):
     # Explain pool exhaustion
-    pool_explanation = explain(
-        error_message="Connection pool exhausted",
-        context="production"
-    )
+    pool_explanation = explain(error_message="Connection pool exhausted", context="production")
 
     print("=== Pool Error Explanation ===\n")
     print(pool_explanation)
@@ -235,11 +250,13 @@ def _(explain):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Explaining with Full Entry Context
 
     You can also explain a full log entry for more context.
-    """)
+    """
+    )
     return
 
 
@@ -252,7 +269,7 @@ def _(explain):
         "message": "Database connection timeout after 30s",
         "thread_id": "http-1",
         "correlation_id": "req-123",
-        "error_code": "DB_TIMEOUT"
+        "error_code": "DB_TIMEOUT",
     }
 
     entry_explanation = explain(entry=_entry, context="production")
@@ -263,12 +280,14 @@ def _(explain):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. Suggesting Next Actions
 
     Based on current results, `suggest_next_action()` tells you
     what to investigate next.
-    """)
+    """
+    )
     return
 
 
@@ -281,8 +300,7 @@ def _(log_file, suggest_next_action):
 
     # Get suggestions based on results
     suggestions = suggest_next_action(
-        current_results=_results,
-        investigation_context={"looking_for": "root cause of errors"}
+        current_results=_results, investigation_context={"looking_for": "root cause of errors"}
     )
 
     print("=== Suggested Next Actions ===\n")
@@ -293,11 +311,13 @@ def _(log_file, suggest_next_action):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 8. Building an Investigation Workflow
 
     Combine these tools for effective investigation:
-    """)
+    """
+    )
     return
 
 
@@ -317,15 +337,15 @@ def _(analyze_with_insights, explain, log_file, suggest_next_action):
     print(f"Insights found: {len(_analysis['insights'])}")
 
     # Step 2: Understand the main error
-    if _analysis['insights']:
+    if _analysis["insights"]:
         print("\n🔍 Step 2: Explain Top Issue")
         print("-" * 40)
-        _top_insight = _analysis['insights'][0]
+        _top_insight = _analysis["insights"][0]
         print(f"Issue: {_top_insight['description']}")
 
         # Get explanation
         _explanation = explain(error_message="Database connection timeout")
-        _lines = _explanation.split('\n')[:5]
+        _lines = _explanation.split("\n")[:5]
         for _l in _lines:
             print(_l)
 
@@ -333,7 +353,7 @@ def _(analyze_with_insights, explain, log_file, suggest_next_action):
     print("\n📈 Step 3: Find Patterns")
     print("-" * 40)
     _patterns = _find_patterns(files=[str(log_file)], min_occurrences=3)
-    _pattern_list = _patterns.get('patterns', [])
+    _pattern_list = _patterns.get("patterns", [])
     print(f"Found {len(_pattern_list)} repeating patterns")
 
     # Step 4: Get next steps
@@ -349,7 +369,8 @@ def _(analyze_with_insights, explain, log_file, suggest_next_action):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned AI-powered analysis features:
@@ -387,13 +408,15 @@ def _(mo):
     11. AI-powered insights (Tour 11)
 
     Happy debugging!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(temp_dir):
     import shutil
+
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
     return (shutil,)

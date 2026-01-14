@@ -27,7 +27,7 @@ try:
         period_a_start="2024-01-10T10:30:00Z",
         period_a_end="2024-01-10T10:32:00Z",
         period_b_start="2024-01-10T10:32:00Z",
-        period_b_end="2024-01-10T10:34:00Z"
+        period_b_end="2024-01-10T10:34:00Z",
     )
 
     print("\n📊 Period A (before deployment):")
@@ -47,14 +47,14 @@ try:
     print(f"   Error rate multiplier: {comparison['changes']['error_rate_multiplier']:.1f}x")
     print(f"   Error count change: {comparison['changes']['error_count_change']:+d}")
 
-    if comparison['changes']['new_errors']:
-        print(f"\n   ⚠️  New errors appeared:")
-        for error in comparison['changes']['new_errors'][:3]:
+    if comparison["changes"]["new_errors"]:
+        print("\n   ⚠️  New errors appeared:")
+        for error in comparison["changes"]["new_errors"][:3]:
             print(f"      • {error}")
 
-    if comparison['changes']['resolved_errors']:
-        print(f"\n   ✅ Errors resolved:")
-        for error in comparison['changes']['resolved_errors'][:3]:
+    if comparison["changes"]["resolved_errors"]:
+        print("\n   ✅ Errors resolved:")
+        for error in comparison["changes"]["resolved_errors"][:3]:
             print(f"      • {error}")
 
     print(f"\n💡 Summary: {comparison['summary']}")
@@ -68,7 +68,8 @@ print("Use case: What's different between successful and failed requests?")
 
 # For demo purposes, we'll show the API even though we need actual different threads
 print("\nExample API usage:")
-print("""
+print(
+    """
     diff = investigate.compare_threads(
         files=["app.log"],
         correlation_a="req-success-12345",
@@ -94,7 +95,8 @@ print("""
         },
         "summary": "Thread B took 2341ms longer and had 5 more errors..."
     }
-""")
+"""
+)
 
 print("\n💡 Real-world comparison scenarios:")
 print("-" * 70)

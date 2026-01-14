@@ -14,7 +14,7 @@ import sys
 import os
 
 # Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from logler.investigate import (
     analyze_error_flow,
@@ -30,6 +30,7 @@ from logler.tree_formatter import (
 # =============================================================================
 # Test Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def simple_hierarchy():
@@ -57,7 +58,7 @@ def simple_hierarchy():
                         "level_counts": {"INFO": 3, "DEBUG": 2},
                         "depth": 1,
                         "confidence": 1.0,
-                        "relationship_evidence": ["Explicit parent_span_id"]
+                        "relationship_evidence": ["Explicit parent_span_id"],
                     },
                     {
                         "id": "child-2",
@@ -74,8 +75,8 @@ def simple_hierarchy():
                         "level_counts": {"INFO": 2, "DEBUG": 1},
                         "depth": 1,
                         "confidence": 1.0,
-                        "relationship_evidence": ["Explicit parent_span_id"]
-                    }
+                        "relationship_evidence": ["Explicit parent_span_id"],
+                    },
                 ],
                 "entry_ids": [],
                 "start_time": "2024-01-15T10:00:00.000Z",
@@ -86,21 +87,16 @@ def simple_hierarchy():
                 "level_counts": {"INFO": 8, "DEBUG": 2},
                 "depth": 0,
                 "confidence": 1.0,
-                "relationship_evidence": []
+                "relationship_evidence": [],
             }
         ],
         "total_nodes": 3,
         "max_depth": 1,
         "total_duration_ms": 500,
         "concurrent_count": 1,
-        "bottleneck": {
-            "node_id": "child-1",
-            "duration_ms": 100,
-            "percentage": 20.0,
-            "depth": 1
-        },
+        "bottleneck": {"node_id": "child-1", "duration_ms": 100, "percentage": 20.0, "depth": 1},
         "error_nodes": [],
-        "detection_method": "ExplicitParentId"
+        "detection_method": "ExplicitParentId",
     }
 
 
@@ -130,7 +126,7 @@ def hierarchy_with_errors():
                         "level_counts": {"INFO": 3},
                         "depth": 1,
                         "confidence": 1.0,
-                        "relationship_evidence": []
+                        "relationship_evidence": [],
                     },
                     {
                         "id": "product-service",
@@ -159,7 +155,7 @@ def hierarchy_with_errors():
                                         "level_counts": {"ERROR": 1, "INFO": 1},
                                         "depth": 3,
                                         "confidence": 1.0,
-                                        "relationship_evidence": []
+                                        "relationship_evidence": [],
                                     }
                                 ],
                                 "entry_ids": [],
@@ -171,7 +167,7 @@ def hierarchy_with_errors():
                                 "level_counts": {"ERROR": 1, "INFO": 3},
                                 "depth": 2,
                                 "confidence": 1.0,
-                                "relationship_evidence": []
+                                "relationship_evidence": [],
                             }
                         ],
                         "entry_ids": [],
@@ -183,8 +179,8 @@ def hierarchy_with_errors():
                         "level_counts": {"ERROR": 1, "INFO": 8, "WARN": 1},
                         "depth": 1,
                         "confidence": 1.0,
-                        "relationship_evidence": []
-                    }
+                        "relationship_evidence": [],
+                    },
                 ],
                 "entry_ids": [],
                 "start_time": "2024-01-15T10:00:00.000Z",
@@ -195,7 +191,7 @@ def hierarchy_with_errors():
                 "level_counts": {"ERROR": 1, "INFO": 17, "WARN": 1, "DEBUG": 1},
                 "depth": 0,
                 "confidence": 1.0,
-                "relationship_evidence": []
+                "relationship_evidence": [],
             }
         ],
         "total_nodes": 5,
@@ -206,16 +202,17 @@ def hierarchy_with_errors():
             "node_id": "product-service",
             "duration_ms": 1000,
             "percentage": 66.7,
-            "depth": 1
+            "depth": 1,
         },
         "error_nodes": ["api-gateway", "product-service", "cache-update", "redis-write"],
-        "detection_method": "ExplicitParentId"
+        "detection_method": "ExplicitParentId",
     }
 
 
 @pytest.fixture
 def deep_hierarchy():
     """Deep hierarchy for testing max_depth"""
+
     def make_child(id_prefix, depth, max_depth):
         node = {
             "id": f"{id_prefix}-depth-{depth}",
@@ -232,7 +229,7 @@ def deep_hierarchy():
             "level_counts": {"INFO": 1},
             "depth": depth,
             "confidence": 1.0,
-            "relationship_evidence": []
+            "relationship_evidence": [],
         }
         if depth < max_depth:
             node["children"] = [make_child(id_prefix, depth + 1, max_depth)]
@@ -247,13 +244,14 @@ def deep_hierarchy():
         "concurrent_count": 1,
         "bottleneck": None,
         "error_nodes": [],
-        "detection_method": "NamingPattern"
+        "detection_method": "NamingPattern",
     }
 
 
 # =============================================================================
 # Tests for Error Flow Analysis
 # =============================================================================
+
 
 class TestAnalyzeErrorFlow:
     """Tests for analyze_error_flow function"""
@@ -364,6 +362,7 @@ class TestFormatErrorFlow:
 # Tests for Hierarchy Summary
 # =============================================================================
 
+
 class TestGetHierarchySummary:
     """Tests for get_hierarchy_summary function"""
 
@@ -393,6 +392,7 @@ class TestGetHierarchySummary:
 # =============================================================================
 # Tests for Tree Formatting
 # =============================================================================
+
 
 class TestFormatTree:
     """Tests for format_tree function"""
@@ -433,10 +433,7 @@ class TestFormatTree:
     def test_error_highlighting(self, hierarchy_with_errors):
         """Test errors are highlighted"""
         tree = format_tree(
-            hierarchy_with_errors,
-            mode="compact",
-            show_errors=True,
-            use_colors=False
+            hierarchy_with_errors, mode="compact", show_errors=True, use_colors=False
         )
 
         # Error marker should appear
@@ -446,6 +443,7 @@ class TestFormatTree:
 # =============================================================================
 # Tests for Waterfall Formatting
 # =============================================================================
+
 
 class TestFormatWaterfall:
     """Tests for format_waterfall function"""
@@ -477,8 +475,8 @@ class TestFormatWaterfall:
         waterfall_wide = format_waterfall(simple_hierarchy, width=100)
 
         # Wider waterfall should have longer lines
-        narrow_max_len = max(len(line) for line in waterfall_narrow.split('\n'))
-        wide_max_len = max(len(line) for line in waterfall_wide.split('\n'))
+        narrow_max_len = max(len(line) for line in waterfall_narrow.split("\n"))
+        wide_max_len = max(len(line) for line in waterfall_wide.split("\n"))
 
         assert narrow_max_len <= 61  # Allow 1 char margin
         assert wide_max_len <= 101
@@ -487,6 +485,7 @@ class TestFormatWaterfall:
 # =============================================================================
 # Tests for Edge Cases
 # =============================================================================
+
 
 class TestEdgeCases:
     """Tests for edge cases and error handling"""
@@ -504,25 +503,27 @@ class TestEdgeCases:
     def test_single_node_hierarchy(self):
         """Test hierarchy with single node"""
         single = {
-            "roots": [{
-                "id": "single",
-                "node_type": "Span",
-                "children": [],
-                "entry_count": 1,
-                "error_count": 0,
-                "depth": 0,
-                "duration_ms": 100,
-                "start_time": "2024-01-15T10:00:00Z",
-                "end_time": "2024-01-15T10:00:00.100Z",
-                "level_counts": {"INFO": 1}
-            }],
+            "roots": [
+                {
+                    "id": "single",
+                    "node_type": "Span",
+                    "children": [],
+                    "entry_count": 1,
+                    "error_count": 0,
+                    "depth": 0,
+                    "duration_ms": 100,
+                    "start_time": "2024-01-15T10:00:00Z",
+                    "end_time": "2024-01-15T10:00:00.100Z",
+                    "level_counts": {"INFO": 1},
+                }
+            ],
             "total_nodes": 1,
             "max_depth": 0,
             "total_duration_ms": 100,
             "concurrent_count": 1,
             "bottleneck": None,
             "error_nodes": [],
-            "detection_method": "ExplicitParentId"
+            "detection_method": "ExplicitParentId",
         }
 
         tree = format_tree(single, use_colors=False)
@@ -540,7 +541,7 @@ class TestEdgeCases:
                     "error_count": 0,
                     "depth": 0,
                     "duration_ms": 100,
-                    "level_counts": {"INFO": 5}
+                    "level_counts": {"INFO": 5},
                 },
                 {
                     "id": "root-b",
@@ -550,8 +551,8 @@ class TestEdgeCases:
                     "error_count": 0,
                     "depth": 0,
                     "duration_ms": 50,
-                    "level_counts": {"INFO": 3}
-                }
+                    "level_counts": {"INFO": 3},
+                },
             ],
             "total_nodes": 2,
             "max_depth": 0,
@@ -559,7 +560,7 @@ class TestEdgeCases:
             "concurrent_count": 2,
             "bottleneck": None,
             "error_nodes": [],
-            "detection_method": "Mixed"
+            "detection_method": "Mixed",
         }
 
         tree = format_tree(multi_root, use_colors=False)
@@ -586,14 +587,14 @@ class TestEdgeCases:
                             "duration_ms": 50,
                             "level_counts": {"INFO": 2},
                             "confidence": 0.5,  # Low confidence due to missing parent
-                            "relationship_evidence": ["Temporal proximity (parent missing)"]
+                            "relationship_evidence": ["Temporal proximity (parent missing)"],
                         }
                     ],
                     "entry_count": 10,
                     "error_count": 0,
                     "depth": 0,
                     "duration_ms": 200,
-                    "level_counts": {"INFO": 10}
+                    "level_counts": {"INFO": 10},
                 }
             ],
             "total_nodes": 2,
@@ -602,7 +603,7 @@ class TestEdgeCases:
             "concurrent_count": 1,
             "bottleneck": None,
             "error_nodes": [],
-            "detection_method": "Temporal"
+            "detection_method": "Temporal",
         }
 
         # Should still render without crashing
@@ -614,6 +615,7 @@ class TestEdgeCases:
 
     def test_very_deep_hierarchy(self):
         """Test hierarchy with >50 levels of depth"""
+
         # Build a very deep hierarchy
         def build_deep_node(depth, max_depth):
             node = {
@@ -627,7 +629,7 @@ class TestEdgeCases:
                 "duration_ms": 10,
                 "level_counts": {"INFO": 1},
                 "confidence": 1.0,
-                "relationship_evidence": []
+                "relationship_evidence": [],
             }
             if depth < max_depth:
                 node["children"] = [build_deep_node(depth + 1, max_depth)]
@@ -641,7 +643,7 @@ class TestEdgeCases:
             "concurrent_count": 1,
             "bottleneck": None,
             "error_nodes": [],
-            "detection_method": "ExplicitParentId"
+            "detection_method": "ExplicitParentId",
         }
 
         # Should render without stack overflow
@@ -663,39 +665,48 @@ class TestEdgeCases:
         """Test hierarchy with >100 children at one level"""
         children = []
         for i in range(150):
-            children.append({
-                "id": f"child-{i:03d}",
-                "node_type": "Span",
-                "parent_id": "root",
-                "children": [],
-                "entry_count": 1,
-                "error_count": 1 if i % 10 == 0 else 0,  # Every 10th has error
-                "depth": 1,
-                "duration_ms": 10 + i,
-                "level_counts": {"INFO": 1} if i % 10 != 0 else {"ERROR": 1},
-                "confidence": 1.0,
-                "relationship_evidence": []
-            })
+            children.append(
+                {
+                    "id": f"child-{i:03d}",
+                    "node_type": "Span",
+                    "parent_id": "root",
+                    "children": [],
+                    "entry_count": 1,
+                    "error_count": 1 if i % 10 == 0 else 0,  # Every 10th has error
+                    "depth": 1,
+                    "duration_ms": 10 + i,
+                    "level_counts": {"INFO": 1} if i % 10 != 0 else {"ERROR": 1},
+                    "confidence": 1.0,
+                    "relationship_evidence": [],
+                }
+            )
 
         wide = {
-            "roots": [{
-                "id": "root",
-                "node_type": "Thread",
-                "parent_id": None,
-                "children": children,
-                "entry_count": 150,
-                "error_count": 15,
-                "depth": 0,
-                "duration_ms": 5000,
-                "level_counts": {"INFO": 135, "ERROR": 15}
-            }],
+            "roots": [
+                {
+                    "id": "root",
+                    "node_type": "Thread",
+                    "parent_id": None,
+                    "children": children,
+                    "entry_count": 150,
+                    "error_count": 15,
+                    "depth": 0,
+                    "duration_ms": 5000,
+                    "level_counts": {"INFO": 135, "ERROR": 15},
+                }
+            ],
             "total_nodes": 151,
             "max_depth": 1,
             "total_duration_ms": 5000,
             "concurrent_count": 150,
-            "bottleneck": {"node_id": "child-149", "duration_ms": 159, "percentage": 3.2, "depth": 1},
+            "bottleneck": {
+                "node_id": "child-149",
+                "duration_ms": 159,
+                "percentage": 3.2,
+                "depth": 1,
+            },
             "error_nodes": [f"child-{i*10:03d}" for i in range(15)],
-            "detection_method": "ExplicitParentId"
+            "detection_method": "ExplicitParentId",
         }
 
         # Should render without issues
@@ -716,40 +727,44 @@ class TestEdgeCases:
     def test_missing_timestamps(self):
         """Test hierarchy with missing timestamp data"""
         no_timestamps = {
-            "roots": [{
-                "id": "root",
-                "node_type": "Thread",
-                "parent_id": None,
-                "children": [{
-                    "id": "child",
-                    "node_type": "Span",
-                    "parent_id": "root",
-                    "children": [],
-                    "entry_count": 5,
+            "roots": [
+                {
+                    "id": "root",
+                    "node_type": "Thread",
+                    "parent_id": None,
+                    "children": [
+                        {
+                            "id": "child",
+                            "node_type": "Span",
+                            "parent_id": "root",
+                            "children": [],
+                            "entry_count": 5,
+                            "error_count": 0,
+                            "depth": 1,
+                            "duration_ms": None,  # No duration!
+                            "start_time": None,  # No start!
+                            "end_time": None,  # No end!
+                            "level_counts": {"INFO": 5},
+                            "confidence": 0.6,
+                            "relationship_evidence": ["Naming pattern"],
+                        }
+                    ],
+                    "entry_count": 10,
                     "error_count": 0,
-                    "depth": 1,
-                    "duration_ms": None,  # No duration!
-                    "start_time": None,   # No start!
-                    "end_time": None,     # No end!
-                    "level_counts": {"INFO": 5},
-                    "confidence": 0.6,
-                    "relationship_evidence": ["Naming pattern"]
-                }],
-                "entry_count": 10,
-                "error_count": 0,
-                "depth": 0,
-                "duration_ms": None,
-                "start_time": None,
-                "end_time": None,
-                "level_counts": {"INFO": 10}
-            }],
+                    "depth": 0,
+                    "duration_ms": None,
+                    "start_time": None,
+                    "end_time": None,
+                    "level_counts": {"INFO": 10},
+                }
+            ],
             "total_nodes": 2,
             "max_depth": 1,
             "total_duration_ms": None,
             "concurrent_count": 1,
             "bottleneck": None,
             "error_nodes": [],
-            "detection_method": "NamingPattern"
+            "detection_method": "NamingPattern",
         }
 
         # Tree should still work
@@ -765,67 +780,76 @@ class TestEdgeCases:
     def test_all_errors_hierarchy(self):
         """Test hierarchy where every node has errors"""
         all_errors = {
-            "roots": [{
-                "id": "error-root",
-                "node_type": "Thread",
-                "parent_id": None,
-                "children": [
-                    {
-                        "id": "error-child-1",
-                        "node_type": "Span",
-                        "parent_id": "error-root",
-                        "children": [{
-                            "id": "error-grandchild",
+            "roots": [
+                {
+                    "id": "error-root",
+                    "node_type": "Thread",
+                    "parent_id": None,
+                    "children": [
+                        {
+                            "id": "error-child-1",
                             "node_type": "Span",
-                            "parent_id": "error-child-1",
-                            "children": [],
-                            "entry_count": 3,
-                            "error_count": 3,
-                            "depth": 2,
-                            "duration_ms": 50,
-                            "start_time": "2024-01-15T10:00:00.100Z",
-                            "level_counts": {"ERROR": 3},
+                            "parent_id": "error-root",
+                            "children": [
+                                {
+                                    "id": "error-grandchild",
+                                    "node_type": "Span",
+                                    "parent_id": "error-child-1",
+                                    "children": [],
+                                    "entry_count": 3,
+                                    "error_count": 3,
+                                    "depth": 2,
+                                    "duration_ms": 50,
+                                    "start_time": "2024-01-15T10:00:00.100Z",
+                                    "level_counts": {"ERROR": 3},
+                                    "confidence": 1.0,
+                                    "relationship_evidence": [],
+                                }
+                            ],
+                            "entry_count": 5,
+                            "error_count": 5,
+                            "depth": 1,
+                            "duration_ms": 100,
+                            "start_time": "2024-01-15T10:00:00.050Z",
+                            "level_counts": {"ERROR": 5},
                             "confidence": 1.0,
-                            "relationship_evidence": []
-                        }],
-                        "entry_count": 5,
-                        "error_count": 5,
-                        "depth": 1,
-                        "duration_ms": 100,
-                        "start_time": "2024-01-15T10:00:00.050Z",
-                        "level_counts": {"ERROR": 5},
-                        "confidence": 1.0,
-                        "relationship_evidence": []
-                    },
-                    {
-                        "id": "error-child-2",
-                        "node_type": "Span",
-                        "parent_id": "error-root",
-                        "children": [],
-                        "entry_count": 2,
-                        "error_count": 2,
-                        "depth": 1,
-                        "duration_ms": 30,
-                        "start_time": "2024-01-15T10:00:00.200Z",
-                        "level_counts": {"ERROR": 2},
-                        "confidence": 1.0,
-                        "relationship_evidence": []
-                    }
-                ],
-                "entry_count": 10,
-                "error_count": 10,
-                "depth": 0,
-                "duration_ms": 300,
-                "start_time": "2024-01-15T10:00:00.000Z",
-                "level_counts": {"ERROR": 10}
-            }],
+                            "relationship_evidence": [],
+                        },
+                        {
+                            "id": "error-child-2",
+                            "node_type": "Span",
+                            "parent_id": "error-root",
+                            "children": [],
+                            "entry_count": 2,
+                            "error_count": 2,
+                            "depth": 1,
+                            "duration_ms": 30,
+                            "start_time": "2024-01-15T10:00:00.200Z",
+                            "level_counts": {"ERROR": 2},
+                            "confidence": 1.0,
+                            "relationship_evidence": [],
+                        },
+                    ],
+                    "entry_count": 10,
+                    "error_count": 10,
+                    "depth": 0,
+                    "duration_ms": 300,
+                    "start_time": "2024-01-15T10:00:00.000Z",
+                    "level_counts": {"ERROR": 10},
+                }
+            ],
             "total_nodes": 4,
             "max_depth": 2,
             "total_duration_ms": 300,
             "concurrent_count": 2,
-            "bottleneck": {"node_id": "error-child-1", "duration_ms": 100, "percentage": 33.3, "depth": 1},
+            "bottleneck": {
+                "node_id": "error-child-1",
+                "duration_ms": 100,
+                "percentage": 33.3,
+                "depth": 1,
+            },
             "error_nodes": ["error-root", "error-child-1", "error-child-2", "error-grandchild"],
-            "detection_method": "ExplicitParentId"
+            "detection_method": "ExplicitParentId",
         }
 
         # Error flow should identify root causes
@@ -847,38 +871,42 @@ class TestEdgeCases:
     def test_unicode_in_node_names(self):
         """Test hierarchy with unicode characters in names"""
         unicode_hierarchy = {
-            "roots": [{
-                "id": "主要スレッド",  # Japanese
-                "node_type": "Thread",
-                "parent_id": None,
-                "children": [{
-                    "id": "子プロセス-αβγ",  # Mixed
-                    "node_type": "Span",
-                    "parent_id": "主要スレッド",
-                    "children": [],
-                    "entry_count": 5,
+            "roots": [
+                {
+                    "id": "主要スレッド",  # Japanese
+                    "node_type": "Thread",
+                    "parent_id": None,
+                    "children": [
+                        {
+                            "id": "子プロセス-αβγ",  # Mixed
+                            "node_type": "Span",
+                            "parent_id": "主要スレッド",
+                            "children": [],
+                            "entry_count": 5,
+                            "error_count": 0,
+                            "depth": 1,
+                            "duration_ms": 100,
+                            "level_counts": {"INFO": 5},
+                            "name": "データベースクエリ 🔍",  # With emoji
+                            "confidence": 1.0,
+                            "relationship_evidence": [],
+                        }
+                    ],
+                    "entry_count": 10,
                     "error_count": 0,
-                    "depth": 1,
-                    "duration_ms": 100,
-                    "level_counts": {"INFO": 5},
-                    "name": "データベースクエリ 🔍",  # With emoji
-                    "confidence": 1.0,
-                    "relationship_evidence": []
-                }],
-                "entry_count": 10,
-                "error_count": 0,
-                "depth": 0,
-                "duration_ms": 200,
-                "level_counts": {"INFO": 10},
-                "name": "メインリクエスト"
-            }],
+                    "depth": 0,
+                    "duration_ms": 200,
+                    "level_counts": {"INFO": 10},
+                    "name": "メインリクエスト",
+                }
+            ],
             "total_nodes": 2,
             "max_depth": 1,
             "total_duration_ms": 200,
             "concurrent_count": 1,
             "bottleneck": None,
             "error_nodes": [],
-            "detection_method": "ExplicitParentId"
+            "detection_method": "ExplicitParentId",
         }
 
         # Should handle unicode without crashing
@@ -896,42 +924,47 @@ class TestEdgeCases:
 # Tests for Detection Methods
 # =============================================================================
 
+
 class TestDetectionMethods:
     """Tests for different hierarchy detection methods"""
 
     def test_explicit_parent_span_id_detection(self):
         """Test hierarchy built from explicit parent_span_id"""
         explicit = {
-            "roots": [{
-                "id": "span-000",
-                "node_type": "Span",
-                "parent_id": None,
-                "children": [{
-                    "id": "span-001",
+            "roots": [
+                {
+                    "id": "span-000",
                     "node_type": "Span",
-                    "parent_id": "span-000",
-                    "children": [],
-                    "entry_count": 5,
+                    "parent_id": None,
+                    "children": [
+                        {
+                            "id": "span-001",
+                            "node_type": "Span",
+                            "parent_id": "span-000",
+                            "children": [],
+                            "entry_count": 5,
+                            "error_count": 0,
+                            "depth": 1,
+                            "duration_ms": 50,
+                            "level_counts": {"INFO": 5},
+                            "confidence": 1.0,  # Should be 1.0 for explicit
+                            "relationship_evidence": ["Explicit parent_span_id"],
+                        }
+                    ],
+                    "entry_count": 10,
                     "error_count": 0,
-                    "depth": 1,
-                    "duration_ms": 50,
-                    "level_counts": {"INFO": 5},
-                    "confidence": 1.0,  # Should be 1.0 for explicit
-                    "relationship_evidence": ["Explicit parent_span_id"]
-                }],
-                "entry_count": 10,
-                "error_count": 0,
-                "depth": 0,
-                "duration_ms": 100,
-                "level_counts": {"INFO": 10}
-            }],
+                    "depth": 0,
+                    "duration_ms": 100,
+                    "level_counts": {"INFO": 10},
+                }
+            ],
             "total_nodes": 2,
             "max_depth": 1,
             "total_duration_ms": 100,
             "concurrent_count": 1,
             "bottleneck": None,
             "error_nodes": [],
-            "detection_method": "Explicit"
+            "detection_method": "Explicit",
         }
 
         tree = format_tree(explicit, mode="detailed", show_confidence=True, use_colors=False)
@@ -942,48 +975,54 @@ class TestDetectionMethods:
     def test_naming_pattern_detection(self):
         """Test hierarchy built from naming patterns (worker-1.task-a)"""
         naming = {
-            "roots": [{
-                "id": "worker-1",
-                "node_type": "Thread",
-                "parent_id": None,
-                "children": [{
-                    "id": "worker-1.task-a",
+            "roots": [
+                {
+                    "id": "worker-1",
                     "node_type": "Thread",
-                    "parent_id": "worker-1",
-                    "children": [{
-                        "id": "worker-1.task-a.subtask",
-                        "node_type": "Thread",
-                        "parent_id": "worker-1.task-a",
-                        "children": [],
-                        "entry_count": 2,
-                        "error_count": 0,
-                        "depth": 2,
-                        "duration_ms": 20,
-                        "level_counts": {"INFO": 2},
-                        "confidence": 0.8,  # Lower for naming pattern
-                        "relationship_evidence": ["Naming pattern: dot-separated"]
-                    }],
-                    "entry_count": 5,
+                    "parent_id": None,
+                    "children": [
+                        {
+                            "id": "worker-1.task-a",
+                            "node_type": "Thread",
+                            "parent_id": "worker-1",
+                            "children": [
+                                {
+                                    "id": "worker-1.task-a.subtask",
+                                    "node_type": "Thread",
+                                    "parent_id": "worker-1.task-a",
+                                    "children": [],
+                                    "entry_count": 2,
+                                    "error_count": 0,
+                                    "depth": 2,
+                                    "duration_ms": 20,
+                                    "level_counts": {"INFO": 2},
+                                    "confidence": 0.8,  # Lower for naming pattern
+                                    "relationship_evidence": ["Naming pattern: dot-separated"],
+                                }
+                            ],
+                            "entry_count": 5,
+                            "error_count": 0,
+                            "depth": 1,
+                            "duration_ms": 50,
+                            "level_counts": {"INFO": 5},
+                            "confidence": 0.8,
+                            "relationship_evidence": ["Naming pattern: dot-separated"],
+                        }
+                    ],
+                    "entry_count": 10,
                     "error_count": 0,
-                    "depth": 1,
-                    "duration_ms": 50,
-                    "level_counts": {"INFO": 5},
-                    "confidence": 0.8,
-                    "relationship_evidence": ["Naming pattern: dot-separated"]
-                }],
-                "entry_count": 10,
-                "error_count": 0,
-                "depth": 0,
-                "duration_ms": 100,
-                "level_counts": {"INFO": 10}
-            }],
+                    "depth": 0,
+                    "duration_ms": 100,
+                    "level_counts": {"INFO": 10},
+                }
+            ],
             "total_nodes": 3,
             "max_depth": 2,
             "total_duration_ms": 100,
             "concurrent_count": 1,
             "bottleneck": None,
             "error_nodes": [],
-            "detection_method": "NamingPattern"
+            "detection_method": "NamingPattern",
         }
 
         tree = format_tree(naming, mode="detailed", show_confidence=True, use_colors=False)
@@ -994,38 +1033,42 @@ class TestDetectionMethods:
     def test_temporal_inference_detection(self):
         """Test hierarchy built from temporal proximity"""
         temporal = {
-            "roots": [{
-                "id": "main",
-                "node_type": "Thread",
-                "parent_id": None,
-                "children": [{
-                    "id": "async-task-1",
+            "roots": [
+                {
+                    "id": "main",
                     "node_type": "Thread",
-                    "parent_id": "main",
-                    "children": [],
-                    "entry_count": 3,
+                    "parent_id": None,
+                    "children": [
+                        {
+                            "id": "async-task-1",
+                            "node_type": "Thread",
+                            "parent_id": "main",
+                            "children": [],
+                            "entry_count": 3,
+                            "error_count": 0,
+                            "depth": 1,
+                            "duration_ms": 30,
+                            "start_time": "2024-01-15T10:00:00.001Z",  # Started 1ms after parent
+                            "level_counts": {"INFO": 3},
+                            "confidence": 0.6,  # Lower for temporal
+                            "relationship_evidence": ["Temporal proximity: 1ms after parent"],
+                        }
+                    ],
+                    "entry_count": 10,
                     "error_count": 0,
-                    "depth": 1,
-                    "duration_ms": 30,
-                    "start_time": "2024-01-15T10:00:00.001Z",  # Started 1ms after parent
-                    "level_counts": {"INFO": 3},
-                    "confidence": 0.6,  # Lower for temporal
-                    "relationship_evidence": ["Temporal proximity: 1ms after parent"]
-                }],
-                "entry_count": 10,
-                "error_count": 0,
-                "depth": 0,
-                "duration_ms": 100,
-                "start_time": "2024-01-15T10:00:00.000Z",
-                "level_counts": {"INFO": 10}
-            }],
+                    "depth": 0,
+                    "duration_ms": 100,
+                    "start_time": "2024-01-15T10:00:00.000Z",
+                    "level_counts": {"INFO": 10},
+                }
+            ],
             "total_nodes": 2,
             "max_depth": 1,
             "total_duration_ms": 100,
             "concurrent_count": 1,
             "bottleneck": None,
             "error_nodes": [],
-            "detection_method": "Temporal"
+            "detection_method": "Temporal",
         }
 
         tree = format_tree(temporal, mode="detailed", show_confidence=True, use_colors=False)

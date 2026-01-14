@@ -20,8 +20,7 @@ print("-" * 70)
 
 # One function call does everything!
 result = investigate.analyze_with_insights(
-    files=[log_file],
-    auto_investigate=True  # Automatically runs pattern detection
+    files=[log_file], auto_investigate=True  # Automatically runs pattern detection
 )
 
 print("\n📊 OVERVIEW")
@@ -32,41 +31,37 @@ print(f"Log level distribution: {result['overview']['log_levels']}")
 
 print("\n💡 AUTOMATIC INSIGHTS")
 print("-" * 70)
-if result['insights']:
-    for i, insight in enumerate(result['insights'], 1):
-        severity_icon = {
-            'high': '🔴',
-            'medium': '🟡',
-            'low': '🟢'
-        }.get(insight['severity'], '⚪')
+if result["insights"]:
+    for i, insight in enumerate(result["insights"], 1):
+        severity_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(insight["severity"], "⚪")
 
         print(f"\n{severity_icon} Insight #{i}: {insight['type']}")
         print(f"   Severity: {insight['severity'].upper()}")
         print(f"   Description: {insight['description']}")
         print(f"   Suggestion: {insight['suggestion']}")
 
-        if insight.get('evidence') and isinstance(insight['evidence'], dict):
+        if insight.get("evidence") and isinstance(insight["evidence"], dict):
             print(f"   Evidence: {insight['evidence']}")
 else:
     print("No critical insights - logs look healthy!")
 
 print("\n📝 SUGGESTIONS")
 print("-" * 70)
-for i, suggestion in enumerate(result['suggestions'], 1):
+for i, suggestion in enumerate(result["suggestions"], 1):
     print(f"{i}. {suggestion}")
 
 print("\n🚀 NEXT STEPS")
 print("-" * 70)
-if result['next_steps']:
-    for i, step in enumerate(result['next_steps'], 1):
+if result["next_steps"]:
+    for i, step in enumerate(result["next_steps"], 1):
         print(f"{i}. {step}")
 else:
     print("Investigation complete!")
 
 print("\n" + "=" * 70)
 print("Summary of detected insights:")
-if result['insights']:
-    for i, insight in enumerate(result['insights'], 1):
+if result["insights"]:
+    for i, insight in enumerate(result["insights"], 1):
         print(f"{i}. {insight['type']} (severity: {insight['severity']})")
 else:
     print("No notable insights detected.")

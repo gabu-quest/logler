@@ -30,19 +30,19 @@ def quick_summary(files: List[str]) -> Dict[str, Any]:
         return {}
 
     meta = metadata[0]
-    total = meta['lines']
-    levels = meta.get('log_levels', {})
+    total = meta["lines"]
+    levels = meta.get("log_levels", {})
 
-    errors = levels.get('ERROR', 0) + levels.get('FATAL', 0) + levels.get('CRITICAL', 0)
+    errors = levels.get("ERROR", 0) + levels.get("FATAL", 0) + levels.get("CRITICAL", 0)
     error_rate = (errors / total * 100) if total > 0 else 0
 
     return {
-        'total_lines': total,
-        'time_range': meta.get('time_range'),
-        'log_levels': levels,
-        'error_rate': error_rate,
-        'unique_threads': meta.get('unique_threads', 0),
-        'unique_correlations': meta.get('unique_correlation_ids', 0),
+        "total_lines": total,
+        "time_range": meta.get("time_range"),
+        "log_levels": levels,
+        "error_rate": error_rate,
+        "unique_threads": meta.get("unique_threads", 0),
+        "unique_correlations": meta.get("unique_correlation_ids", 0),
     }
 
 
@@ -58,10 +58,12 @@ def find_top_errors(files: List[str], limit: int = 10) -> List[Dict[str, Any]]:
             print(f"{err['occurrences']}x: {err['pattern']}")
     """
     patterns = investigate.find_patterns(files, min_occurrences=2)
-    return sorted(patterns['patterns'], key=lambda x: x['occurrences'], reverse=True)[:limit]
+    return sorted(patterns["patterns"], key=lambda x: x["occurrences"], reverse=True)[:limit]
 
 
-def search_errors(files: List[str], query: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+def search_errors(
+    files: List[str], query: Optional[str] = None, limit: int = 100
+) -> List[Dict[str, Any]]:
     """
     Search for ERROR and FATAL level logs.
 
@@ -70,13 +72,8 @@ def search_errors(files: List[str], query: Optional[str] = None, limit: int = 10
         for err in errors:
             print(f"Line {err['line_number']}: {err['message']}")
     """
-    results = investigate.search(
-        files=files,
-        query=query,
-        level="ERROR",
-        limit=limit
-    )
-    return [r['entry'] for r in results['results']]
+    results = investigate.search(files=files, query=query, level="ERROR", limit=limit)
+    return [r["entry"] for r in results["results"]]
 
 
 def trace_request(files: List[str], correlation_id: str) -> Dict[str, Any]:
@@ -93,25 +90,24 @@ def trace_request(files: List[str], correlation_id: str) -> Dict[str, Any]:
         trace = trace_request(["app.log"], "req-abc123")
         print(f"Request took {trace['duration_ms']}ms with {trace['error_count']} errors")
     """
-    timeline = investigate.follow_thread(
-        files=files,
-        correlation_id=correlation_id
-    )
+    timeline = investigate.follow_thread(files=files, correlation_id=correlation_id)
 
-    error_count = sum(1 for e in timeline['entries'] if e.get('level') in ['ERROR', 'FATAL', 'CRITICAL'])
+    error_count = sum(
+        1 for e in timeline["entries"] if e.get("level") in ["ERROR", "FATAL", "CRITICAL"]
+    )
 
     # Extract unique services if available
     services = set()
-    for entry in timeline['entries']:
-        if 'service' in entry.get('fields', {}):
-            services.add(entry['fields']['service'])
+    for entry in timeline["entries"]:
+        if "service" in entry.get("fields", {}):
+            services.add(entry["fields"]["service"])
 
     return {
-        'entries': timeline['entries'],
-        'duration_ms': timeline.get('duration_ms'),
-        'error_count': error_count,
-        'services': list(services),
-        'total_entries': timeline['total_entries'],
+        "entries": timeline["entries"],
+        "duration_ms": timeline.get("duration_ms"),
+        "error_count": error_count,
+        "services": list(services),
+        "total_entries": timeline["total_entries"],
     }
 
 
@@ -133,14 +129,16 @@ def detect_spikes(files: List[str], window_minutes: int = 5) -> List[Dict[str, A
     patterns = investigate.find_patterns(files, min_occurrences=3)
 
     spikes = []
-    for pattern in patterns['patterns']:
-        if pattern['occurrences'] >= 5:  # Threshold for "spike"
-            spikes.append({
-                'pattern': pattern['pattern'],
-                'occurrences': pattern['occurrences'],
-                'first_seen': pattern['first_seen'],
-                'last_seen': pattern['last_seen'],
-            })
+    for pattern in patterns["patterns"]:
+        if pattern["occurrences"] >= 5:  # Threshold for "spike"
+            spikes.append(
+                {
+                    "pattern": pattern["pattern"],
+                    "occurrences": pattern["occurrences"],
+                    "first_seen": pattern["first_seen"],
+                    "last_seen": pattern["last_seen"],
+                }
+            )
 
     return spikes
 
@@ -161,9 +159,9 @@ def get_error_context(file: str, line_number: int, lines: int = 10) -> Dict[str,
     context = inv.get_context(file, line_number, lines, lines)
 
     return {
-        'error': context['target'],
-        'before': context['context_before'],
-        'after': context['context_after'],
+        "error": context["target"],
+        "before": context["context_before"],
+        "after": context["context_after"],
     }
 
 
@@ -187,8 +185,8 @@ def analyze_thread_health(files: List[str]) -> Dict[str, Dict[str, int]]:
     # This is a simplified version - full implementation would track by thread
     # For now, return basic info
     return {
-        'note': 'Thread health analysis requires SQL queries for full implementation',
-        'total_threads': metadata[0].get('unique_threads', 0)
+        "note": "Thread health analysis requires SQL queries for full implementation",
+        "total_threads": metadata[0].get("unique_threads", 0),
     }
 
 
@@ -209,16 +207,18 @@ def find_cascading_failures(files: List[str]) -> List[Dict[str, Any]]:
     patterns = investigate.find_patterns(files, min_occurrences=3)
 
     cascades = []
-    for pattern in patterns['patterns']:
+    for pattern in patterns["patterns"]:
         # Cascading failures typically affect multiple threads
-        if len(pattern['affected_threads']) >= 3:
-            cascades.append({
-                'pattern': pattern['pattern'],
-                'occurrences': pattern['occurrences'],
-                'threads': pattern['affected_threads'],
-                'first_seen': pattern['first_seen'],
-                'last_seen': pattern['last_seen'],
-            })
+        if len(pattern["affected_threads"]) >= 3:
+            cascades.append(
+                {
+                    "pattern": pattern["pattern"],
+                    "occurrences": pattern["occurrences"],
+                    "threads": pattern["affected_threads"],
+                    "first_seen": pattern["first_seen"],
+                    "last_seen": pattern["last_seen"],
+                }
+            )
 
     return cascades
 
@@ -233,7 +233,7 @@ def get_timeline_summary(files: List[str], correlation_id: str) -> str:
     """
     timeline = investigate.follow_thread(files=files, correlation_id=correlation_id)
 
-    if not timeline['entries']:
+    if not timeline["entries"]:
         return f"No entries found for correlation_id={correlation_id}"
 
     lines = []
@@ -242,20 +242,20 @@ def get_timeline_summary(files: List[str], correlation_id: str) -> str:
     lines.append(f"Total entries: {timeline['total_entries']}")
     lines.append("")
 
-    for i, entry in enumerate(timeline['entries'][:10], 1):  # Limit to first 10
+    for i, entry in enumerate(timeline["entries"][:10], 1):  # Limit to first 10
         level_emoji = {
-            'INFO': 'ℹ️',
-            'WARN': '⚠️',
-            'ERROR': '❌',
-            'FATAL': '💀',
-            'CRITICAL': '🔴'
-        }.get(entry.get('level'), '📝')
+            "INFO": "ℹ️",
+            "WARN": "⚠️",
+            "ERROR": "❌",
+            "FATAL": "💀",
+            "CRITICAL": "🔴",
+        }.get(entry.get("level"), "📝")
 
-        thread = entry.get('thread_id', 'unknown')
-        message = entry.get('message', '')[:60]
+        thread = entry.get("thread_id", "unknown")
+        message = entry.get("message", "")[:60]
         lines.append(f"{i:2d}. {level_emoji} [{thread}] {message}")
 
-    if timeline['total_entries'] > 10:
+    if timeline["total_entries"] > 10:
         lines.append(f"... and {timeline['total_entries'] - 10} more entries")
 
     return "\n".join(lines)

@@ -7,8 +7,7 @@ If your parser survives this gauntlet, it might be production-ready.
 
 import pytest
 import json
-from datetime import datetime, timezone
-from logler.parser import LogParser, LogEntry
+from logler.parser import LogParser
 
 
 class TestMalformedJSON:
@@ -80,9 +79,9 @@ class TestMalformedJSON:
 
     def test_json_empty_object(self, parser):
         """Empty JSON object"""
-        entry = parser.parse_line(1, '{}')
+        entry = parser.parse_line(1, "{}")
         assert entry.level == "UNKNOWN"
-        assert entry.message == '{}'
+        assert entry.message == "{}"
 
     def test_json_empty_string_values(self, parser):
         """JSON with empty string values"""
@@ -236,25 +235,28 @@ class TestLogLevelEdgeCases:
     def parser(self):
         return LogParser()
 
-    @pytest.mark.parametrize("level_str,expected", [
-        ("TRACE", "TRACE"),
-        ("trace", "TRACE"),
-        ("Trace", "TRACE"),
-        ("DEBUG", "DEBUG"),
-        ("debug", "DEBUG"),
-        ("INFO", "INFO"),
-        ("INFORMATION", "INFORMATION"),
-        ("WARN", "WARN"),
-        ("WARNING", "WARNING"),
-        ("warn", "WARN"),
-        ("ERROR", "ERROR"),
-        ("ERR", "ERR"),
-        ("error", "ERROR"),
-        ("FATAL", "FATAL"),
-        ("fatal", "FATAL"),
-        ("CRITICAL", "CRITICAL"),
-        ("CRIT", "CRIT"),
-    ])
+    @pytest.mark.parametrize(
+        "level_str,expected",
+        [
+            ("TRACE", "TRACE"),
+            ("trace", "TRACE"),
+            ("Trace", "TRACE"),
+            ("DEBUG", "DEBUG"),
+            ("debug", "DEBUG"),
+            ("INFO", "INFO"),
+            ("INFORMATION", "INFORMATION"),
+            ("WARN", "WARN"),
+            ("WARNING", "WARNING"),
+            ("warn", "WARN"),
+            ("ERROR", "ERROR"),
+            ("ERR", "ERR"),
+            ("error", "ERROR"),
+            ("FATAL", "FATAL"),
+            ("fatal", "FATAL"),
+            ("CRITICAL", "CRITICAL"),
+            ("CRIT", "CRIT"),
+        ],
+    )
     def test_level_case_variations(self, parser, level_str, expected):
         """Test all level case variations"""
         entry = parser.parse_line(1, f"2024-01-01T00:00:00Z {level_str} Message")
@@ -381,15 +383,17 @@ class TestIDExtractionEdgeCases:
 
     def test_ids_in_json(self, parser):
         """All ID types in JSON"""
-        line = json.dumps({
-            "timestamp": "2024-01-01T00:00:00Z",
-            "level": "INFO",
-            "thread_id": "worker-1",
-            "correlation_id": "req-123",
-            "trace_id": "abcd1234abcd1234",
-            "span_id": "efef5678",
-            "message": "Test"
-        })
+        line = json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "INFO",
+                "thread_id": "worker-1",
+                "correlation_id": "req-123",
+                "trace_id": "abcd1234abcd1234",
+                "span_id": "efef5678",
+                "message": "Test",
+            }
+        )
         entry = parser.parse_line(1, line)
         assert entry.thread_id == "worker-1"
         assert entry.correlation_id == "req-123"
@@ -517,7 +521,7 @@ class TestExtremeInputs:
 
     def test_timestamp_in_message(self, parser):
         """Timestamp that's part of the message, not a log timestamp"""
-        entry = parser.parse_line(1, 'INFO Scheduled for 2024-06-15T09:00:00Z')
+        entry = parser.parse_line(1, "INFO Scheduled for 2024-06-15T09:00:00Z")
         assert entry.level == "INFO"
         # May or may not extract the embedded timestamp
 
@@ -536,24 +540,31 @@ class TestRealWorldGarbage:
 
     def test_stack_trace_multiline_as_single(self, parser):
         """Java stack trace that got mangled into single line"""
-        entry = parser.parse_line(1, "ERROR java.lang.NullPointerException\tat com.example.Foo.bar(Foo.java:42)\tat com.example.Main.main(Main.java:10)")
+        entry = parser.parse_line(
+            1,
+            "ERROR java.lang.NullPointerException\tat com.example.Foo.bar(Foo.java:42)\tat com.example.Main.main(Main.java:10)",
+        )
         assert entry.level == "ERROR"
 
     def test_json_log_with_embedded_json(self, parser):
         """JSON log containing escaped JSON in message"""
         inner = json.dumps({"user_id": 123, "action": "login"})
-        outer = json.dumps({
-            "timestamp": "2024-01-01T00:00:00Z",
-            "level": "INFO",
-            "message": f"Received payload: {inner}"
-        })
+        outer = json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "INFO",
+                "message": f"Received payload: {inner}",
+            }
+        )
         entry = parser.parse_line(1, outer)
         assert entry.level == "INFO"
         assert "Received payload" in entry.message
 
     def test_kubernetes_pod_log_format(self, parser):
         """Kubernetes-style log prefix"""
-        entry = parser.parse_line(1, "2024-01-15T10:30:00.123456789Z stdout F INFO Application started")
+        entry = parser.parse_line(
+            1, "2024-01-15T10:30:00.123456789Z stdout F INFO Application started"
+        )
         assert entry.level == "INFO"
 
     def test_docker_compose_prefix(self, parser):
@@ -568,12 +579,18 @@ class TestRealWorldGarbage:
 
     def test_nginx_access_log(self, parser):
         """nginx access log format"""
-        entry = parser.parse_line(1, '192.168.1.1 - - [15/Jan/2024:10:30:00 +0000] "GET /api/health HTTP/1.1" 200 15 "-" "curl/7.68.0"')
+        entry = parser.parse_line(
+            1,
+            '192.168.1.1 - - [15/Jan/2024:10:30:00 +0000] "GET /api/health HTTP/1.1" 200 15 "-" "curl/7.68.0"',
+        )
         assert entry.line_number == 1
 
     def test_apache_error_log(self, parser):
         """Apache error log format"""
-        entry = parser.parse_line(1, "[Mon Jan 15 10:30:00.123456 2024] [error] [pid 1234] [client 192.168.1.1:54321] ModSecurity: Access denied")
+        entry = parser.parse_line(
+            1,
+            "[Mon Jan 15 10:30:00.123456 2024] [error] [pid 1234] [client 192.168.1.1:54321] ModSecurity: Access denied",
+        )
         assert entry.level in ["ERROR", "UNKNOWN"]
 
     def test_python_logging_default(self, parser):
@@ -589,7 +606,9 @@ class TestRealWorldGarbage:
 
     def test_rust_tracing_format(self, parser):
         """Rust tracing crate format"""
-        entry = parser.parse_line(1, "2024-01-15T10:30:00.123456Z  INFO myapp::server: Listening on 0.0.0.0:8080")
+        entry = parser.parse_line(
+            1, "2024-01-15T10:30:00.123456Z  INFO myapp::server: Listening on 0.0.0.0:8080"
+        )
         assert entry.level == "INFO"
 
     def test_elixir_logger_format(self, parser):
@@ -631,14 +650,16 @@ class TestFieldStorage:
 
     def test_extra_fields_preserved(self, parser):
         """Non-standard fields stored in entry.fields"""
-        line = json.dumps({
-            "timestamp": "2024-01-01T00:00:00Z",
-            "level": "INFO",
-            "message": "test",
-            "user_id": 42,
-            "request_path": "/api/users",
-            "response_time_ms": 150.5
-        })
+        line = json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "INFO",
+                "message": "test",
+                "user_id": 42,
+                "request_path": "/api/users",
+                "response_time_ms": 150.5,
+            }
+        )
         entry = parser.parse_line(1, line)
         assert entry.fields["user_id"] == 42
         assert entry.fields["request_path"] == "/api/users"
@@ -646,27 +667,31 @@ class TestFieldStorage:
 
     def test_nested_extra_fields(self, parser):
         """Nested objects in extra fields"""
-        line = json.dumps({
-            "timestamp": "2024-01-01T00:00:00Z",
-            "level": "INFO",
-            "message": "test",
-            "context": {
-                "user": {"id": 42, "name": "alice"},
-                "request": {"method": "POST", "path": "/api/orders"}
+        line = json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "INFO",
+                "message": "test",
+                "context": {
+                    "user": {"id": 42, "name": "alice"},
+                    "request": {"method": "POST", "path": "/api/orders"},
+                },
             }
-        })
+        )
         entry = parser.parse_line(1, line)
         assert entry.fields["context"]["user"]["id"] == 42
 
     def test_array_extra_fields(self, parser):
         """Array values in extra fields"""
-        line = json.dumps({
-            "timestamp": "2024-01-01T00:00:00Z",
-            "level": "INFO",
-            "message": "test",
-            "tags": ["production", "critical", "payment"],
-            "errors": [{"code": 1, "msg": "err1"}, {"code": 2, "msg": "err2"}]
-        })
+        line = json.dumps(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "level": "INFO",
+                "message": "test",
+                "tags": ["production", "critical", "payment"],
+                "errors": [{"code": 1, "msg": "err1"}, {"code": 2, "msg": "err2"}],
+            }
+        )
         entry = parser.parse_line(1, line)
         assert entry.fields["tags"] == ["production", "critical", "payment"]
         assert len(entry.fields["errors"]) == 2

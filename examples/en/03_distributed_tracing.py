@@ -18,14 +18,19 @@ print("=" * 80)
 
 meta = investigate.get_metadata([LOG_FILE])[0]
 print(f"File: {meta['path']}")
-print(f"Lines: {meta['lines']}, Time window: {meta['time_range']['start']} → {meta['time_range']['end']}")
+print(
+    f"Lines: {meta['lines']}, Time window: {meta['time_range']['start']} → {meta['time_range']['end']}"
+)
 print(f"Correlation IDs: {meta['unique_correlation_ids']}")
 
-timeline = investigate.follow_thread(files=[LOG_FILE], correlation_id=CORRELATION_ID, trace_id=TRACE_ID)
+timeline = investigate.follow_thread(
+    files=[LOG_FILE], correlation_id=CORRELATION_ID, trace_id=TRACE_ID
+)
 entries = timeline["entries"]
 
 if not entries:
     raise SystemExit("No entries found for the requested trace/correlation.")
+
 
 def as_dt(ts: str | None):
     if not ts:
@@ -44,6 +49,7 @@ def service_name(entry: dict) -> str:
 
 start_ts = as_dt(entries[0].get("timestamp"))
 
+
 def rel_ms(entry: dict) -> int | None:
     ts = as_dt(entry.get("timestamp"))
     if not ts or not start_ts:
@@ -53,7 +59,9 @@ def rel_ms(entry: dict) -> int | None:
 
 print("\n📜 Waterfall")
 print("-" * 80)
-print(f"Duration: {timeline['duration_ms']} ms | Entries: {timeline['total_entries']} | Spans: {len(timeline['unique_spans'])}")
+print(
+    f"Duration: {timeline['duration_ms']} ms | Entries: {timeline['total_entries']} | Spans: {len(timeline['unique_spans'])}"
+)
 print(f"{'t+ms':>8}  {'service':<18} {'lvl':<6} message")
 print("-" * 80)
 
@@ -62,7 +70,7 @@ for entry in entries:
     svc = service_name(entry)
     lvl = entry.get("level", "INFO")
     msg = (entry.get("message") or "")[:72]
-    marker = { "ERROR": "❌", "FATAL": "💀", "WARN": "⚠️" }.get(lvl, "·")
+    marker = {"ERROR": "❌", "FATAL": "💀", "WARN": "⚠️"}.get(lvl, "·")
     rel_display = f"{rel:>6}ms" if rel is not None else "  ?"
     print(f"{rel_display:>8}  {svc:<18} {lvl:<6} {marker} {msg}")
 
@@ -106,7 +114,9 @@ print("-" * 80)
 failures = [e for e in entries if e.get("level") in ("ERROR", "FATAL", "CRITICAL")]
 if failures:
     first_fail = failures[0]
-    print(f"First failure: {first_fail['timestamp']} in {service_name(first_fail)} → {first_fail['message']}")
+    print(
+        f"First failure: {first_fail['timestamp']} in {service_name(first_fail)} → {first_fail['message']}"
+    )
     downstream = failures[1:]
     if downstream:
         print("Downstream ripples:")
@@ -119,7 +129,8 @@ else:
 print("\n⚠️  Degraded response markers")
 print("-" * 80)
 degraded = [
-    e for e in entries
+    e
+    for e in entries
     if "degraded" in (e.get("message", "").lower())
     or "partial" in (e.get("message", "").lower())
     or str(e.get("fields", {}).get("status_code", "")) == "206"

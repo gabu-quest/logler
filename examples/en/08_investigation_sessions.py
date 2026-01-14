@@ -18,10 +18,7 @@ print("\n📝 Starting a new investigation session")
 print("-" * 70)
 
 # Create a session to track everything
-session = investigate.InvestigationSession(
-    files=[log_file],
-    name="production_incident_2024_01_15"
-)
+session = investigate.InvestigationSession(files=[log_file], name="production_incident_2024_01_15")
 
 print(f"Session name: {session.name}")
 print(f"Files: {session.files}")
@@ -44,8 +41,8 @@ for i, entry in enumerate(history, 1):
     print(f"\n{i}. {entry['description']}")
     print(f"   Time: {entry['timestamp']}")
     print(f"   Operation: {entry['operation']}")
-    if entry.get('result_summary'):
-        for key, value in entry['result_summary'].items():
+    if entry.get("result_summary"):
+        for key, value in entry["result_summary"].items():
             print(f"   {key}: {value}")
 
 print("\n⏮️  Undo last operation")

@@ -8,7 +8,6 @@ queries on the same files.
 Solution: Add a module-level LRU cache that reuses Investigator instances.
 """
 
-from functools import lru_cache
 import threading
 from typing import Dict
 import logler_rs
@@ -52,10 +51,12 @@ def get_cached_investigator(files) -> logler_rs.PyInvestigator:
     key = tuple(sorted(str(f) for f in files))
     return _get_cached_investigator(key)
 
+
 def clear_cache():
     """Clear the investigator cache (useful for testing or freeing memory)"""
     with _investigator_lock:
         _investigator_cache.clear()
+
 
 # Example usage showing the difference:
 #

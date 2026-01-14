@@ -13,7 +13,8 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Distributed Tracing Exports
 
     Logler can export hierarchies to standard distributed tracing formats:
@@ -29,17 +30,20 @@ def _(mo):
     4. How to import into tracing UIs
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Trace Data
 
     We'll create a multi-service trace to export.
-    """)
+    """
+    )
     return
 
 
@@ -54,71 +58,83 @@ def _():
     logs = []
 
     # E-commerce checkout flow
-    logs.append({
-        "timestamp": (base_time + timedelta(ms=0)).isoformat(),
-        "level": "INFO",
-        "message": "Checkout started",
-        "trace_id": "trace-export-001",
-        "span_id": "span-checkout",
-        "parent_span_id": None,
-        "service": "checkout-service",
-        "duration_ms": 1500
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(ms=0)).isoformat(),
+            "level": "INFO",
+            "message": "Checkout started",
+            "trace_id": "trace-export-001",
+            "span_id": "span-checkout",
+            "parent_span_id": None,
+            "service": "checkout-service",
+            "duration_ms": 1500,
+        }
+    )
 
-    logs.append({
-        "timestamp": (base_time + timedelta(ms=10)).isoformat(),
-        "level": "INFO",
-        "message": "Validating cart",
-        "trace_id": "trace-export-001",
-        "span_id": "span-cart",
-        "parent_span_id": "span-checkout",
-        "service": "cart-service",
-        "duration_ms": 200
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(ms=10)).isoformat(),
+            "level": "INFO",
+            "message": "Validating cart",
+            "trace_id": "trace-export-001",
+            "span_id": "span-cart",
+            "parent_span_id": "span-checkout",
+            "service": "cart-service",
+            "duration_ms": 200,
+        }
+    )
 
-    logs.append({
-        "timestamp": (base_time + timedelta(ms=220)).isoformat(),
-        "level": "INFO",
-        "message": "Processing payment",
-        "trace_id": "trace-export-001",
-        "span_id": "span-payment",
-        "parent_span_id": "span-checkout",
-        "service": "payment-service",
-        "duration_ms": 800
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(ms=220)).isoformat(),
+            "level": "INFO",
+            "message": "Processing payment",
+            "trace_id": "trace-export-001",
+            "span_id": "span-payment",
+            "parent_span_id": "span-checkout",
+            "service": "payment-service",
+            "duration_ms": 800,
+        }
+    )
 
-    logs.append({
-        "timestamp": (base_time + timedelta(ms=230)).isoformat(),
-        "level": "INFO",
-        "message": "Calling payment gateway",
-        "trace_id": "trace-export-001",
-        "span_id": "span-gateway",
-        "parent_span_id": "span-payment",
-        "service": "stripe-gateway",
-        "duration_ms": 600
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(ms=230)).isoformat(),
+            "level": "INFO",
+            "message": "Calling payment gateway",
+            "trace_id": "trace-export-001",
+            "span_id": "span-gateway",
+            "parent_span_id": "span-payment",
+            "service": "stripe-gateway",
+            "duration_ms": 600,
+        }
+    )
 
-    logs.append({
-        "timestamp": (base_time + timedelta(ms=1050)).isoformat(),
-        "level": "INFO",
-        "message": "Creating order",
-        "trace_id": "trace-export-001",
-        "span_id": "span-order",
-        "parent_span_id": "span-checkout",
-        "service": "order-service",
-        "duration_ms": 300
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(ms=1050)).isoformat(),
+            "level": "INFO",
+            "message": "Creating order",
+            "trace_id": "trace-export-001",
+            "span_id": "span-order",
+            "parent_span_id": "span-checkout",
+            "service": "order-service",
+            "duration_ms": 300,
+        }
+    )
 
-    logs.append({
-        "timestamp": (base_time + timedelta(ms=1360)).isoformat(),
-        "level": "INFO",
-        "message": "Sending confirmation",
-        "trace_id": "trace-export-001",
-        "span_id": "span-notify",
-        "parent_span_id": "span-checkout",
-        "service": "notification-service",
-        "duration_ms": 100
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(ms=1360)).isoformat(),
+            "level": "INFO",
+            "message": "Sending confirmation",
+            "trace_id": "trace-export-001",
+            "span_id": "span-notify",
+            "parent_span_id": "span-checkout",
+            "service": "notification-service",
+            "duration_ms": 100,
+        }
+    )
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()
@@ -133,11 +149,13 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Building the Hierarchy
 
     First, build the hierarchy from the logs.
-    """)
+    """
+    )
     return
 
 
@@ -150,12 +168,9 @@ def _():
 
 @app.cell
 def _(follow_thread_hierarchy, log_file):
-    hierarchy = follow_thread_hierarchy(
-        files=[str(log_file)],
-        root_identifier="trace-export-001"
-    )
+    hierarchy = follow_thread_hierarchy(files=[str(log_file)], root_identifier="trace-export-001")
 
-    print(f"=== Hierarchy ===")
+    print("=== Hierarchy ===")
     print(f"Total nodes: {hierarchy['total_nodes']}")
     print(f"Total duration: {hierarchy.get('total_duration_ms', 0)}ms")
     return (hierarchy,)
@@ -163,22 +178,21 @@ def _(follow_thread_hierarchy, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Exporting to Jaeger Format
 
     Jaeger is a popular distributed tracing platform.
     The export follows Jaeger's JSON format specification.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(export_to_jaeger, hierarchy):
     # Export to Jaeger format
-    jaeger_trace = export_to_jaeger(
-        hierarchy,
-        service_name="logler-checkout-demo"
-    )
+    jaeger_trace = export_to_jaeger(hierarchy, service_name="logler-checkout-demo")
 
     print("=== Jaeger Export ===\n")
     print(f"Trace ID: {jaeger_trace['data'][0]['traceID']}")
@@ -191,18 +205,18 @@ def _(export_to_jaeger, hierarchy):
 def _(jaeger_trace):
     print("=== Jaeger Spans ===\n")
 
-    for _span in jaeger_trace['data'][0]['spans'][:5]:
+    for _span in jaeger_trace["data"][0]["spans"][:5]:
         print(f"Span: {_span['operationName']}")
         print(f"  ID: {_span['spanID']}")
         print(f"  Duration: {_span['duration'] / 1000:.0f}ms")
 
         # Show parent reference if exists
-        if _span['references']:
-            _parent = _span['references'][0]['spanID']
+        if _span["references"]:
+            _parent = _span["references"][0]["spanID"]
             print(f"  Parent: {_parent}")
 
         # Show tags
-        _tags = {_t['key']: _t['value'] for _t in _span['tags']}
+        _tags = {_t["key"]: _t["value"] for _t in _span["tags"]}
         print(f"  Type: {_tags.get('node_type', 'unknown')}")
         print()
     return
@@ -210,7 +224,8 @@ def _(jaeger_trace):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Jaeger Export Structure
 
     The Jaeger format includes:
@@ -218,7 +233,8 @@ def _(mo):
     - **spans**: Array of span objects
     - **processes**: Service metadata
     - **references**: Parent-child relationships
-    """)
+    """
+    )
     return
 
 
@@ -234,22 +250,21 @@ def _(jaeger_trace):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Exporting to Zipkin Format
 
     Zipkin uses a different format - an array of spans
     with direct parentId references.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(export_to_zipkin, hierarchy):
     # Export to Zipkin format
-    zipkin_spans = export_to_zipkin(
-        hierarchy,
-        service_name="logler-checkout-demo"
-    )
+    zipkin_spans = export_to_zipkin(hierarchy, service_name="logler-checkout-demo")
 
     print("=== Zipkin Export ===\n")
     print(f"Number of spans: {len(zipkin_spans)}")
@@ -267,7 +282,7 @@ def _(zipkin_spans):
         print(f"  ID: {_span['id']}")
         print(f"  Duration: {_span['duration'] / 1000:.0f}ms")
 
-        if _span.get('parentId'):
+        if _span.get("parentId"):
             print(f"  Parent: {_span['parentId']}")
 
         print(f"  Service: {_span['localEndpoint']['serviceName']}")
@@ -278,7 +293,8 @@ def _(zipkin_spans):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Zipkin Export Structure
 
     Zipkin format is simpler - just an array of spans:
@@ -287,7 +303,8 @@ def _(mo):
     - **parentId**: Direct parent reference (optional)
     - **localEndpoint**: Service info
     - **tags**: Metadata
-    """)
+    """
+    )
     return
 
 
@@ -303,7 +320,8 @@ def _(zipkin_spans):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. How to Import
 
     **Jaeger:**
@@ -325,15 +343,18 @@ def _(mo):
          -H 'Content-Type: application/json' \
          -d @spans.json
     ```
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 8. Saving Exports to Files
-    """)
+    """
+    )
     return
 
 
@@ -358,7 +379,8 @@ def _(jaeger_trace, temp_dir, zipkin_spans):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned how to export traces:
@@ -381,13 +403,15 @@ def _(mo):
     **Next Steps:**
     - **Tour 10**: Smart sampling strategies
     - **Tour 11**: AI-powered insights
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(temp_dir):
     import shutil
+
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
     return (shutil,)

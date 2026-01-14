@@ -13,7 +13,8 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Investigation Sessions
 
     When debugging complex issues, you need to track what you've already
@@ -27,17 +28,20 @@ def _(mo):
     5. Generating investigation reports
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Sample Logs
 
     Let's create some logs to investigate:
-    """)
+    """
+    )
     return
 
 
@@ -53,53 +57,63 @@ def _():
 
     # Normal operations
     for i in range(20):
-        logs.append({
-            "timestamp": (base_time + timedelta(seconds=i)).isoformat(),
-            "level": "INFO" if i % 4 != 0 else "DEBUG",
-            "message": f"Processing request {i}",
-            "thread_id": f"worker-{i % 3}",
-            "correlation_id": f"req-{i:03d}",
-            "component": "api"
-        })
+        logs.append(
+            {
+                "timestamp": (base_time + timedelta(seconds=i)).isoformat(),
+                "level": "INFO" if i % 4 != 0 else "DEBUG",
+                "message": f"Processing request {i}",
+                "thread_id": f"worker-{i % 3}",
+                "correlation_id": f"req-{i:03d}",
+                "component": "api",
+            }
+        )
 
     # Inject some errors
-    logs.append({
-        "timestamp": (base_time + timedelta(seconds=25)).isoformat(),
-        "level": "ERROR",
-        "message": "Database connection timeout",
-        "thread_id": "worker-1",
-        "correlation_id": "req-025",
-        "component": "database",
-        "error_code": "DB_TIMEOUT"
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(seconds=25)).isoformat(),
+            "level": "ERROR",
+            "message": "Database connection timeout",
+            "thread_id": "worker-1",
+            "correlation_id": "req-025",
+            "component": "database",
+            "error_code": "DB_TIMEOUT",
+        }
+    )
 
-    logs.append({
-        "timestamp": (base_time + timedelta(seconds=26)).isoformat(),
-        "level": "ERROR",
-        "message": "Failed to process request: database unavailable",
-        "thread_id": "worker-1",
-        "correlation_id": "req-025",
-        "component": "api",
-        "error_code": "API_500"
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(seconds=26)).isoformat(),
+            "level": "ERROR",
+            "message": "Failed to process request: database unavailable",
+            "thread_id": "worker-1",
+            "correlation_id": "req-025",
+            "component": "api",
+            "error_code": "API_500",
+        }
+    )
 
-    logs.append({
-        "timestamp": (base_time + timedelta(seconds=30)).isoformat(),
-        "level": "WARN",
-        "message": "Retrying database connection",
-        "thread_id": "worker-1",
-        "correlation_id": "req-030",
-        "component": "database"
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(seconds=30)).isoformat(),
+            "level": "WARN",
+            "message": "Retrying database connection",
+            "thread_id": "worker-1",
+            "correlation_id": "req-030",
+            "component": "database",
+        }
+    )
 
-    logs.append({
-        "timestamp": (base_time + timedelta(seconds=35)).isoformat(),
-        "level": "INFO",
-        "message": "Database connection restored",
-        "thread_id": "worker-1",
-        "correlation_id": "req-030",
-        "component": "database"
-    })
+    logs.append(
+        {
+            "timestamp": (base_time + timedelta(seconds=35)).isoformat(),
+            "level": "INFO",
+            "message": "Database connection restored",
+            "thread_id": "worker-1",
+            "correlation_id": "req-030",
+            "component": "database",
+        }
+    )
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()
@@ -109,18 +123,20 @@ def _():
             _f.write(json.dumps(_log) + "\n")
 
     print(f"Created {len(logs)} log entries")
-    print(f"Including 2 errors and 1 warning to investigate")
+    print("Including 2 errors and 1 warning to investigate")
     return Path, base_time, log_file, logs, temp_dir
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Creating an Investigation Session
 
     An `InvestigationSession` tracks all your analysis steps,
     allowing you to review what you've done and undo if needed.
-    """)
+    """
+    )
     return
 
 
@@ -134,12 +150,9 @@ def _():
 @app.cell
 def _(InvestigationSession, log_file):
     # Create a new investigation session
-    session = InvestigationSession(
-        files=[str(log_file)],
-        name="db_timeout_investigation"
-    )
+    session = InvestigationSession(files=[str(log_file)], name="db_timeout_investigation")
 
-    print(f"=== Investigation Session Created ===")
+    print("=== Investigation Session Created ===")
     print(f"Name: {session.name}")
     print(f"Files: {session.files}")
     return (session,)
@@ -147,11 +160,13 @@ def _(InvestigationSession, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Conducting the Investigation
 
     Each operation is automatically tracked in the session history:
-    """)
+    """
+    )
     return
 
 
@@ -181,11 +196,13 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Viewing Investigation History
 
     See all the steps you've taken:
-    """)
+    """
+    )
     return
 
 
@@ -196,9 +213,9 @@ def _(session):
 
     print("=== Investigation History ===\n")
     for _i, _entry in enumerate(history):
-        _op = _entry['operation']
-        _desc = _entry['description']
-        _summary = _entry.get('result_summary', {})
+        _op = _entry["operation"]
+        _desc = _entry["description"]
+        _summary = _entry.get("result_summary", {})
 
         print(f"{_i+1}. [{_op}] {_desc}")
         if _summary:
@@ -210,11 +227,13 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Undo/Redo Operations
 
     Made a wrong turn? Undo your last step:
-    """)
+    """
+    )
     return
 
 
@@ -243,11 +262,13 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Adding Notes
 
     Document your findings as you go:
-    """)
+    """
+    )
     return
 
 
@@ -268,11 +289,13 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. Saving and Loading Sessions
 
     Save your investigation to continue later:
-    """)
+    """
+    )
     return
 
 
@@ -287,9 +310,10 @@ def _(session, temp_dir):
 
     # Show what was saved
     import json as _json
+
     with open(save_path) as _f:
         saved = _json.load(_f)
-    print(f"\nSaved session contains:")
+    print("\nSaved session contains:")
     print(f"  Name: {saved['name']}")
     print(f"  Files: {saved['files']}")
     print(f"  History entries: {len(saved['history'])}")
@@ -301,20 +325,22 @@ def _(InvestigationSession, save_path):
     # Load the session back
     loaded_session = InvestigationSession.load(str(save_path))
 
-    print(f"=== Loaded Session ===")
+    print("=== Loaded Session ===")
     print(f"Name: {loaded_session.name}")
     print(f"History entries: {len(loaded_session.history)}")
-    print(f"\nCan continue investigation from where you left off!")
+    print("\nCan continue investigation from where you left off!")
     return (loaded_session,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 8. Generating Reports
 
     Summarize your investigation for documentation or sharing:
-    """)
+    """
+    )
     return
 
 
@@ -330,18 +356,20 @@ def _(session):
 
     print("STEPS TAKEN:")
     for _i, _entry in enumerate(session.get_history(), 1):
-        if _entry['operation'] == 'note':
+        if _entry["operation"] == "note":
             print(f"  {_i}. NOTE: {_entry['description']}")
         else:
-            _summary = _entry.get('result_summary', {})
-            _result_str = ", ".join(f"{_k}={_v}" for _k, _v in _summary.items()) if _summary else "completed"
+            _summary = _entry.get("result_summary", {})
+            _result_str = (
+                ", ".join(f"{_k}={_v}" for _k, _v in _summary.items()) if _summary else "completed"
+            )
             print(f"  {_i}. {_entry['description']} ({_result_str})")
 
     print()
     print("FINDINGS:")
     for _entry in session.get_history():
-        if _entry['operation'] == 'note':
-            _note = _entry.get('params', {}).get('note', '')
+        if _entry["operation"] == "note":
+            _note = _entry.get("params", {}).get("note", "")
             print(f"  - {_note}")
     print("=" * 60)
     return
@@ -349,7 +377,8 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned how to use Investigation Sessions:
@@ -368,13 +397,15 @@ def _(mo):
 
     **Next Steps:**
     - **Tour 05**: Pattern detection (find recurring issues)
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(temp_dir):
     import shutil
+
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
     return (shutil,)

@@ -32,7 +32,7 @@ print(f"   Unique messages: {summary_results['unique_messages']}")
 print(f"   Log levels: {summary_results['log_levels']}")
 
 print("\n   Top error messages:")
-for msg in summary_results['top_messages'][:3]:
+for msg in summary_results["top_messages"][:3]:
     print(f"   • {msg['message'][:60]}... (occurred {msg['count']} times)")
 
 # EVEN BETTER: Count mode - just statistics
@@ -41,14 +41,16 @@ count_results = investigate.search([log_file], level="ERROR", output_format="cou
 print(f"   Returned {len(str(count_results))} characters")
 print(f"   Total matches: {count_results['total_matches']}")
 print(f"   By level: {count_results['by_level']}")
-print(f"   Time range: {count_results['time_range']['start']} → {count_results['time_range']['end']}")
+print(
+    f"   Time range: {count_results['time_range']['start']} → {count_results['time_range']['end']}"
+)
 
 # Compact mode - essential fields only
 print("\n✅ Compact mode (essential fields only)")
 compact_results = investigate.search([log_file], level="ERROR", limit=3, output_format="compact")
 print(f"   Returned {len(str(compact_results))} characters")
-print(f"\n   First 3 errors in compact format:")
-for match in compact_results['matches']:
+print("\n   First 3 errors in compact format:")
+for match in compact_results["matches"]:
     print(f"   • [{match['level']}] {match['time']} - {match['msg'][:50]}...")
 
 print("\n💡 Strategy: Start with count/summary, drill down with full only when needed")

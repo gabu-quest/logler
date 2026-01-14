@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 
 def test_mixed_formats_parse_levels_and_formats(investigate_module, tmp_path):
     inv = investigate_module.Investigator()
@@ -32,7 +29,9 @@ def test_custom_regex_parses_weird_lines(investigate_module, tmp_path):
     target = tmp_path / "weird.log"
     target.write_text("02-02-2024 10:00:00|ERROR|payment failed")
 
-    regex = r"(?P<timestamp>\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})\|(?P<level>[A-Z]+)\|(?P<message>.+)"
+    regex = (
+        r"(?P<timestamp>\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})\|(?P<level>[A-Z]+)\|(?P<message>.+)"
+    )
     inv.load_files([str(target)], custom_regex=regex)
 
     results = inv.search(query="payment", limit=None)

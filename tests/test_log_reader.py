@@ -13,7 +13,7 @@ class TestLogReader:
     @pytest.fixture
     def sample_log_file(self):
         """Create a temporary log file for testing."""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("Line 1: INFO Test message\n")
             f.write("Line 2: DEBUG Debug message\n")
             f.write("Line 3: ERROR Error message\n")
@@ -29,7 +29,7 @@ class TestLogReader:
     @pytest.fixture
     def large_log_file(self):
         """Create a larger temporary log file."""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(1000):
                 f.write(f"Line {i}: Test message {i}\n")
             temp_path = f.name
@@ -184,6 +184,7 @@ class TestLogReader:
 
         # use glob
         import glob
+
         files = glob.glob(str(tmp_path / "*.log"))
         assert len(files) == 2
 

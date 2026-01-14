@@ -780,7 +780,7 @@ The parser is designed to be extremely forgiving. When in doubt, use JSON for ma
 
 ## 📞 Support & Resources
 
-- **Repo:** https://github.com/yourusername/logler
+- **Repo:** https://github.com/gabu-quest/logler
 - **Issues:** Use GitHub issues for bugs
 - **Tests:** Run `uv run pytest -v`
 - **Build Rust:** `uv run maturin develop --release`

@@ -460,7 +460,7 @@ logler view app.log -n 1000        # Show more lines
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/logler.git
+git clone https://github.com/gabu-quest/logler.git
 cd logler
 
 # Install in development mode

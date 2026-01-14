@@ -10,11 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple, Set
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-import aiofiles
 
 from ..parser import LogEntry, LogParser
 from ..log_reader import LogReader
@@ -243,7 +242,7 @@ def _python_filter(
         path = _ensure_within_root(Path(raw_path))
         if not path.exists():
             continue
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             for line_number, line in enumerate(f, start=1):
                 entry = parser.parse_line(line_number, line.rstrip())
                 if track:
@@ -294,24 +293,28 @@ def _tail_entries(path: Path, limit: int) -> Tuple[List[Dict[str, Any]], int]:
     for idx, raw in enumerate(raw_lines):
         line_no = start_line + idx
         entry = parser.parse_line(line_no, raw.rstrip())
-        entries.append({
-            "entry_id": f"{path}:{line_no}",
-            "file": str(path),
-            "line_number": line_no,
-            "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
-            "level": entry.level,
-            "message": entry.message,
-            "thread_id": entry.thread_id,
-            "correlation_id": entry.correlation_id,
-            "service_name": entry.service_name,
-            "trace_id": entry.trace_id,
-            "span_id": entry.span_id,
-        })
+        entries.append(
+            {
+                "entry_id": f"{path}:{line_no}",
+                "file": str(path),
+                "line_number": line_no,
+                "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
+                "level": entry.level,
+                "message": entry.message,
+                "thread_id": entry.thread_id,
+                "correlation_id": entry.correlation_id,
+                "service_name": entry.service_name,
+                "trace_id": entry.trace_id,
+                "span_id": entry.span_id,
+            }
+        )
 
     return entries, total_lines
 
 
-def sample_entries(entries: List[Dict[str, Any]], per_level: Optional[int], per_thread: Optional[int]) -> List[Dict[str, Any]]:
+def sample_entries(
+    entries: List[Dict[str, Any]], per_level: Optional[int], per_thread: Optional[int]
+) -> List[Dict[str, Any]]:
     if not entries:
         return entries
 
@@ -381,7 +384,7 @@ async def index(request: Request):
         {
             "request": request,
             "active_files": active_files,
-        }
+        },
     )
 
 
@@ -398,16 +401,20 @@ async def browse_files(directory: str = "."):
     try:
         for item in sorted(dir_path.iterdir()):
             if item.is_dir() and _ensure_within_root(item):
-                directories.append({
-                    "name": item.name,
-                    "path": str(item.absolute()),
-                })
+                directories.append(
+                    {
+                        "name": item.name,
+                        "path": str(item.absolute()),
+                    }
+                )
             if item.is_file() and (item.suffix in [".log", ".txt"] or "log" in item.name.lower()):
-                files.append({
-                    "name": item.name,
-                    "path": str(item.absolute()),
-                    "size": item.stat().st_size,
-                })
+                files.append(
+                    {
+                        "name": item.name,
+                        "path": str(item.absolute()),
+                        "size": item.stat().st_size,
+                    }
+                )
     except PermissionError:
         return {"error": "Permission denied", "files": []}
 
@@ -441,15 +448,22 @@ async def glob_files(pattern: str = "**/*.log", base_dir: str = ".", limit: int 
     for p in matches[:limit]:
         try:
             stat = p.stat()
-            files.append({
-                "name": p.name,
-                "path": str(p),
-                "size": stat.st_size,
-                "modified": stat.st_mtime,
-            })
+            files.append(
+                {
+                    "name": p.name,
+                    "path": str(p),
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                }
+            )
         except OSError:
             continue
-    return {"pattern": pattern, "count": len(matches), "files": files, "truncated": len(matches) > limit}
+    return {
+        "pattern": pattern,
+        "count": len(matches),
+        "files": files,
+        "truncated": len(matches) > limit,
+    }
 
 
 @app.post("/api/files/open")
@@ -544,7 +558,15 @@ async def open_many(request: FilesRequest):
         "entries": entries,
         "total": len(entries),
         "file_counts": file_counts,
-        "file_meta": [{"file": f, "count": file_counts.get(f, 0), "first": meta.get("first"), "last": meta.get("last")} for f, meta in file_meta.items()],
+        "file_meta": [
+            {
+                "file": f,
+                "count": file_counts.get(f, 0),
+                "first": meta.get("first"),
+                "last": meta.get("last"),
+            }
+            for f, meta in file_meta.items()
+        ],
     }
 
 
@@ -628,7 +650,9 @@ async def websocket_endpoint(websocket: WebSocket):
         websocket_clients.remove(websocket)
 
 
-async def follow_file(websocket: WebSocket, file_path: str, filters: Dict[str, Any], drop_count: int):
+async def follow_file(
+    websocket: WebSocket, file_path: str, filters: Dict[str, Any], drop_count: int
+):
     """Follow a log file and send updates via WebSocket."""
     try:
         path = _ensure_within_root(Path(file_path))
@@ -641,7 +665,7 @@ async def follow_file(websocket: WebSocket, file_path: str, filters: Dict[str, A
         return
 
     # Get initial position (end of file)
-    with open(path, 'r') as f:
+    with open(path, "r") as f:
         f.seek(0, 2)
         position = f.tell()
         line_number = sum(1 for _ in open(path))
@@ -649,7 +673,7 @@ async def follow_file(websocket: WebSocket, file_path: str, filters: Dict[str, A
     # Follow file
     try:
         while True:
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 current_size = path.stat().st_size
                 if current_size < position:
                     # File was truncated/rotated; restart from beginning
@@ -679,10 +703,10 @@ async def follow_file(websocket: WebSocket, file_path: str, filters: Dict[str, A
                         continue
 
                     try:
-                        await asyncio.wait_for(websocket.send_json({
-                            "type": "log_entry",
-                            "entry": entry_dict
-                        }), timeout=0.25)
+                        await asyncio.wait_for(
+                            websocket.send_json({"type": "log_entry", "entry": entry_dict}),
+                            timeout=0.25,
+                        )
                     except asyncio.TimeoutError:
                         drop_count += 1
                         # Occasionally inform client of drops to avoid flooding

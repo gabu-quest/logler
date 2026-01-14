@@ -3,6 +3,7 @@
 Ensures the local `src` layout is importable without requiring an editable
 install when running `pytest` from the repository root.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,6 +31,7 @@ class RustBackendStatus:
 def _attempt_import_logler_rs() -> tuple[bool, Exception | None]:
     try:
         import logler_rs  # noqa: F401
+
         return True, None
     except Exception as exc:  # pragma: no cover - only hit when Rust missing
         return False, exc
@@ -86,6 +88,7 @@ def rust_backend():
         pytest.fail(status.error or "Rust backend missing even though maturin is available")
 
     import logler_rs
+
     return logler_rs
 
 
@@ -94,5 +97,7 @@ def investigate_module(rust_backend):
     import logler.investigate as investigate
 
     investigate = importlib.reload(investigate)
-    assert getattr(investigate, "RUST_AVAILABLE", False), "logler.investigate reports RUST_AVAILABLE=False"
+    assert getattr(
+        investigate, "RUST_AVAILABLE", False
+    ), "logler.investigate reports RUST_AVAILABLE=False"
     return investigate

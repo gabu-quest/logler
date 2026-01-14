@@ -18,18 +18,17 @@ Quick Start:
 
 For full examples, see the bottom of this file.
 """
+
 import sys
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Optional, Dict, Any
 
 
 # ==================== LOGURU ====================
 
-def configure_loguru_for_logler(logger, log_file: str = "app.log",
-                                console_level: str = "INFO"):
+
+def configure_loguru_for_logler(logger, log_file: str = "app.log", console_level: str = "INFO"):
     """
     Configure Loguru to output logs in Logler's preferred JSON format.
 
@@ -69,18 +68,18 @@ def configure_loguru_for_logler(logger, log_file: str = "app.log",
         enqueue=True,  # Thread-safe
         rotation="500 MB",
         retention="10 days",
-        compression="zip"
+        compression="zip",
     )
 
     # Add console handler (plain text for humans)
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-               "<level>{level: <8}</level> | "
-               "<cyan>{thread.name}</cyan> | "
-               "<level>{message}</level>",
+        "<level>{level: <8}</level> | "
+        "<cyan>{thread.name}</cyan> | "
+        "<level>{message}</level>",
         level=console_level,
-        colorize=True
+        colorize=True,
     )
 
     return logger
@@ -98,6 +97,7 @@ def loguru_json_format():
         logger.add("app.log", format=loguru_json_format())
         logger.info("Processing", user_id="alice", correlation_id="req-123")
     """
+
     def formatter(record):
         # Build Logler-optimized JSON structure
         log_entry = {
@@ -107,7 +107,7 @@ def loguru_json_format():
             "thread_id": record["thread"].name,
             "service_name": record.get("extra", {}).get("service_name", "app"),
             "file": f"{record['file'].name}:{record['line']}",
-            "function": record["function"]
+            "function": record["function"],
         }
 
         # Add optional fields from extra context
@@ -135,6 +135,7 @@ def loguru_json_format():
 
 # ==================== STRUCTLOG ====================
 
+
 def configure_structlog_for_logler():
     """
     Configure structlog to output Logler-compatible JSON.
@@ -159,7 +160,7 @@ def configure_structlog_for_logler():
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
-            JSONRenderer()  # JSON output for Logler
+            JSONRenderer(),  # JSON output for Logler
         ],
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -168,6 +169,7 @@ def configure_structlog_for_logler():
 
 
 # ==================== PYTHON STDLIB LOGGING ====================
+
 
 def get_logler_json_formatter():
     """
@@ -184,6 +186,7 @@ def get_logler_json_formatter():
         logger.addHandler(handler)
         logger.info("Processing request", extra={"correlation_id": "req-123"})
     """
+
     class LoglerJSONFormatter(logging.Formatter):
         def format(self, record):
             log_entry = {
@@ -194,7 +197,7 @@ def get_logler_json_formatter():
                 "service_name": getattr(record, "service_name", "app"),
                 "file": f"{record.filename}:{record.lineno}",
                 "function": record.funcName,
-                "logger": record.name
+                "logger": record.name,
             }
 
             # Add custom fields from extra dict
@@ -232,13 +235,14 @@ def get_logler_plaintext_formatter():
         logger.addHandler(handler)
         logger.info("Processing", extra={"correlation_id": "req-123"})
     """
+
     class LoglerPlainTextFormatter(logging.Formatter):
         def format(self, record):
             # Build plain text in Logler-friendly format
             parts = [
                 datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                 record.levelname.ljust(8),
-                f"[{record.threadName}]"
+                f"[{record.threadName}]",
             ]
 
             # Add correlation ID if present
@@ -262,8 +266,8 @@ def get_logler_plaintext_formatter():
 
 # ==================== FLASK ====================
 
-def configure_flask_logging_for_logler(app, log_file: str = "flask.log",
-                                      use_json: bool = True):
+
+def configure_flask_logging_for_logler(app, log_file: str = "flask.log", use_json: bool = True):
     """
     Configure Flask's app.logger for Logler.
 
@@ -290,11 +294,7 @@ def configure_flask_logging_for_logler(app, log_file: str = "flask.log",
     app.logger.handlers.clear()
 
     # Add file handler with JSON or plain text
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=10 * 1024 * 1024,  # 10MB
-        backupCount=10
-    )
+    file_handler = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=10)  # 10MB
 
     if use_json:
         file_handler.setFormatter(get_logler_json_formatter())
@@ -307,9 +307,7 @@ def configure_flask_logging_for_logler(app, log_file: str = "flask.log",
     # Add console handler (always plain text)
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s"
-        )
+        logging.Formatter("%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s")
     )
     console_handler.setLevel(logging.INFO)
     app.logger.addHandler(console_handler)
@@ -319,8 +317,8 @@ def configure_flask_logging_for_logler(app, log_file: str = "flask.log",
 
 # ==================== FASTAPI ====================
 
-def configure_fastapi_logging_for_logler(log_file: str = "fastapi.log",
-                                         use_json: bool = True):
+
+def configure_fastapi_logging_for_logler(log_file: str = "fastapi.log", use_json: bool = True):
     """
     Configure FastAPI/Uvicorn logging for Logler.
 
@@ -351,11 +349,7 @@ def configure_fastapi_logging_for_logler(log_file: str = "fastapi.log",
     logger = logging.getLogger("uvicorn")
     logger.handlers.clear()
 
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=10 * 1024 * 1024,
-        backupCount=10
-    )
+    file_handler = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=10)
 
     if use_json:
         file_handler.setFormatter(get_logler_json_formatter())
@@ -371,6 +365,7 @@ def configure_fastapi_logging_for_logler(log_file: str = "fastapi.log",
 
 
 # ==================== CORRELATION ID MIDDLEWARE ====================
+
 
 def add_correlation_id_to_flask(app):
     """
@@ -389,7 +384,7 @@ def add_correlation_id_to_flask(app):
 
     @app.before_request
     def assign_correlation_id():
-        g.correlation_id = request.headers.get('X-Request-ID', str(uuid.uuid4()))
+        g.correlation_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
 
     # Patch logger methods to include correlation_id
     original_info = app.logger.info
@@ -399,11 +394,12 @@ def add_correlation_id_to_flask(app):
 
     def add_correlation(log_fn):
         def wrapper(msg, *args, **kwargs):
-            if hasattr(g, 'correlation_id'):
-                if 'extra' not in kwargs:
-                    kwargs['extra'] = {}
-                kwargs['extra']['correlation_id'] = g.correlation_id
+            if hasattr(g, "correlation_id"):
+                if "extra" not in kwargs:
+                    kwargs["extra"] = {}
+                kwargs["extra"]["correlation_id"] = g.correlation_id
             return log_fn(msg, *args, **kwargs)
+
         return wrapper
 
     app.logger.info = add_correlation(original_info)
@@ -414,12 +410,14 @@ def add_correlation_id_to_flask(app):
 
 # ==================== EXAMPLE USAGE ====================
 
+
 def example_loguru():
     """Example: Loguru configuration"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("EXAMPLE 1: Loguru with Logler")
-    print("="*60)
-    print("""
+    print("=" * 60)
+    print(
+        """
 from loguru import logger
 from logler_helpers import configure_loguru_for_logler
 
@@ -434,15 +432,17 @@ logger.error("Database timeout", correlation_id="req-123", table="users")
 # $ logler serve app.log --open
 
 # Filter by correlation ID in the web UI to see the full request flow!
-    """)
+    """
+    )
 
 
 def example_flask():
     """Example: Flask application"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("EXAMPLE 2: Flask with Correlation Tracking")
-    print("="*60)
-    print("""
+    print("=" * 60)
+    print(
+        """
 from flask import Flask
 from logler_helpers import configure_flask_logging_for_logler, add_correlation_id_to_flask
 
@@ -464,15 +464,17 @@ def get_data():
 # $ logler serve flask.log --open
 
 # The web UI will show all logs grouped by correlation_id!
-    """)
+    """
+    )
 
 
 def example_plain_text():
     """Example: Plain text format (still works great!)"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("EXAMPLE 3: Plain Text (Human-Friendly)")
-    print("="*60)
-    print("""
+    print("=" * 60)
+    print(
+        """
 from loguru import logger
 
 # Plain text format - Logler's regex extracts everything!
@@ -493,7 +495,8 @@ logger.info("Request completed", correlation_id="req-456")
 # - Groups logs by correlation_id
 
 # $ logler serve app.log
-    """)
+    """
+    )
 
 
 if __name__ == "__main__":
@@ -505,14 +508,16 @@ if __name__ == "__main__":
     example_flask()
     example_plain_text()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("📚 Documentation")
-    print("="*60)
-    print("""
+    print("=" * 60)
+    print(
+        """
 For more information:
-- Logler Docs: https://github.com/yourusername/logler
+- Logler Docs: https://github.com/gabu-quest/logler
 - See handoff.md for complete format guide
 - Run: logler --help
 
 Happy logging! ✨
-    """)
+    """
+    )

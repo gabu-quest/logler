@@ -4,7 +4,6 @@ Thread and trace tracking for log correlation.
 
 from typing import Dict, List, Optional
 from collections import defaultdict
-from datetime import datetime
 
 from .parser import LogEntry
 
@@ -76,11 +75,13 @@ class ThreadTracker:
         trace = self.traces[trace_id]
 
         if entry.span_id:
-            trace["spans"].append({
-                "span_id": entry.span_id,
-                "timestamp": entry.timestamp,
-                "message": entry.message,
-            })
+            trace["spans"].append(
+                {
+                    "span_id": entry.span_id,
+                    "timestamp": entry.timestamp,
+                    "message": entry.message,
+                }
+            )
 
         if entry.service_name:
             trace["services"].add(entry.service_name)

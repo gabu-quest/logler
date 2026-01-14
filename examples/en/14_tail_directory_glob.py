@@ -22,6 +22,7 @@ async def tail_file(path):
         print(f"==> tailing {path}")
         for line in reader.tail(num_lines=5, follow=False):
             print(f"{os.path.basename(path)}: {line}")
+
     await asyncio.to_thread(consume)
 
 

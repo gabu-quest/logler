@@ -3,7 +3,7 @@
 import os
 import time
 from pathlib import Path
-from typing import Iterator, Optional, List
+from typing import Iterator, Optional
 
 
 class LogReader:
@@ -27,10 +27,7 @@ class LogReader:
             raise ValueError(f"Not a file: {file_path}")
 
     def read_lines(
-        self,
-        start_line: int = 0,
-        max_lines: Optional[int] = None,
-        reverse: bool = False
+        self, start_line: int = 0, max_lines: Optional[int] = None, reverse: bool = False
     ) -> Iterator[str]:
         """
         Read lines from the log file.
@@ -49,18 +46,16 @@ class LogReader:
             yield from self._read_lines_forward(start_line, max_lines)
 
     def _read_lines_forward(
-        self,
-        start_line: int = 0,
-        max_lines: Optional[int] = None
+        self, start_line: int = 0, max_lines: Optional[int] = None
     ) -> Iterator[str]:
         """Read lines forward from the file."""
-        with open(self.file_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(self.file_path, "r", encoding="utf-8", errors="replace") as f:
             line_num = 0
             lines_read = 0
 
             for line in f:
                 if line_num >= start_line:
-                    yield line.rstrip('\n\r')
+                    yield line.rstrip("\n\r")
                     lines_read += 1
 
                     if max_lines and lines_read >= max_lines:
@@ -69,9 +64,7 @@ class LogReader:
                 line_num += 1
 
     def _read_lines_reverse(
-        self,
-        start_line: int = 0,
-        max_lines: Optional[int] = None
+        self, start_line: int = 0, max_lines: Optional[int] = None
     ) -> Iterator[str]:
         """
         Read lines in reverse order using an efficient algorithm.
@@ -79,13 +72,13 @@ class LogReader:
         This reads the file from the end in chunks to avoid loading
         the entire file into memory.
         """
-        with open(self.file_path, 'rb') as f:
+        with open(self.file_path, "rb") as f:
             # Seek to end of file
             f.seek(0, os.SEEK_END)
             file_size = f.tell()
 
             # Read in chunks from the end
-            buffer = b''
+            buffer = b""
             position = file_size
             lines = []
 
@@ -102,7 +95,7 @@ class LogReader:
                 buffer = chunk + buffer
 
                 # Split into lines
-                chunk_lines = buffer.split(b'\n')
+                chunk_lines = buffer.split(b"\n")
 
                 # Keep the first incomplete line in buffer
                 buffer = chunk_lines[0]
@@ -112,16 +105,16 @@ class LogReader:
                 for line in reversed(chunk_lines):
                     if line or lines:  # Skip empty lines at the end
                         try:
-                            decoded = line.decode('utf-8', errors='replace')
-                            lines.append(decoded.rstrip('\r'))
+                            decoded = line.decode("utf-8", errors="replace")
+                            lines.append(decoded.rstrip("\r"))
                         except UnicodeDecodeError:
                             continue
 
             # Add the first line if buffer has content
             if buffer:
                 try:
-                    decoded = buffer.decode('utf-8', errors='replace')
-                    lines.append(decoded.rstrip('\r'))
+                    decoded = buffer.decode("utf-8", errors="replace")
+                    lines.append(decoded.rstrip("\r"))
                 except UnicodeDecodeError:
                     pass
 
@@ -134,10 +127,7 @@ class LogReader:
                 yield line
 
     def tail(
-        self,
-        num_lines: int = 10,
-        follow: bool = False,
-        sleep_interval: float = 0.1
+        self, num_lines: int = 10, follow: bool = False, sleep_interval: float = 0.1
     ) -> Iterator[str]:
         """
         Tail the log file (like tail -f).
@@ -162,14 +152,14 @@ class LogReader:
             return
 
         # Follow mode: watch for new lines
-        with open(self.file_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(self.file_path, "r", encoding="utf-8", errors="replace") as f:
             # Seek to end
             f.seek(0, os.SEEK_END)
 
             while True:
                 line = f.readline()
                 if line:
-                    yield line.rstrip('\n\r')
+                    yield line.rstrip("\n\r")
                 else:
                     # Check if file was truncated (log rotation)
                     current_pos = f.tell()
@@ -188,7 +178,7 @@ class LogReader:
         pattern: str,
         case_sensitive: bool = False,
         regex: bool = False,
-        max_lines: Optional[int] = None
+        max_lines: Optional[int] = None,
     ) -> Iterator[tuple[int, str]]:
         """
         Search for lines matching a pattern.
@@ -215,11 +205,11 @@ class LogReader:
             else:
                 match_func = lambda line: pattern in line
 
-        with open(self.file_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(self.file_path, "r", encoding="utf-8", errors="replace") as f:
             matches_found = 0
 
             for line_num, line in enumerate(f, 1):
-                line = line.rstrip('\n\r')
+                line = line.rstrip("\n\r")
 
                 if match_func(line):
                     yield (line_num, line)
@@ -248,7 +238,7 @@ class LogReader:
     @staticmethod
     def _format_bytes(size: int) -> str:
         """Format bytes to human-readable string."""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
             if size < 1024.0:
                 return f"{size:.2f} {unit}"
             size /= 1024.0
@@ -262,7 +252,7 @@ class LogReader:
             Number of lines
         """
         count = 0
-        with open(self.file_path, 'rb') as f:
+        with open(self.file_path, "rb") as f:
             for _ in f:
                 count += 1
         return count

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -120,11 +119,17 @@ def test_cross_service_timeline_rust_path(investigate_module):
     assert timeline["duration_ms"] is not None and timeline["duration_ms"] > 0
     assert any(entry["entry"].get("service_name") for entry in timeline["timeline"])
 
-    relative_times = [entry["relative_time_ms"] for entry in timeline["timeline"] if entry["relative_time_ms"] is not None]
+    relative_times = [
+        entry["relative_time_ms"]
+        for entry in timeline["timeline"]
+        if entry["relative_time_ms"] is not None
+    ]
     assert relative_times == sorted(relative_times)
 
     # First failure in the microservices trace is inventory-service timeout
-    failure_messages = [entry for entry in timeline["timeline"] if entry["entry"].get("level") in ("ERROR", "FATAL")]
+    failure_messages = [
+        entry for entry in timeline["timeline"] if entry["entry"].get("level") in ("ERROR", "FATAL")
+    ]
     assert failure_messages, "no failure entries found in timeline"
     first_failure = failure_messages[0]["entry"]
     assert "timeout" in first_failure["message"].lower()

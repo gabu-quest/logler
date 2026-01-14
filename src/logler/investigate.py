@@ -36,12 +36,15 @@ from collections import defaultdict
 
 try:
     import logler_rs
+
     RUST_AVAILABLE = True
 except ImportError:
     try:
         from .bootstrap import ensure_rust_backend
+
         if ensure_rust_backend():
             import logler_rs  # type: ignore
+
             RUST_AVAILABLE = True
         else:
             RUST_AVAILABLE = False
@@ -335,7 +338,9 @@ def follow_thread(
     if parser_format or custom_regex:
         inv = Investigator()
         inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
-        return inv.follow_thread(thread_id=thread_id, correlation_id=correlation_id, trace_id=trace_id)
+        return inv.follow_thread(
+            thread_id=thread_id, correlation_id=correlation_id, trace_id=trace_id
+        )
 
     result_json = logler_rs.follow_thread(files, thread_id, correlation_id, trace_id)
     result = json.loads(result_json)
@@ -488,7 +493,7 @@ def follow_thread_hierarchy(
             max_depth=max_depth,
             use_naming_patterns=use_naming_patterns,
             use_temporal_inference=use_temporal_inference,
-            min_confidence=min_confidence
+            min_confidence=min_confidence,
         )
 
     # Call Rust directly for better performance
@@ -498,7 +503,7 @@ def follow_thread_hierarchy(
         max_depth,
         use_naming_patterns,
         use_temporal_inference,
-        min_confidence
+        min_confidence,
     )
     return json.loads(result_json)
 
@@ -527,26 +532,28 @@ def get_hierarchy_summary(hierarchy: Dict[str, Any]) -> str:
     lines.append(f"Detection method: {hierarchy.get('detection_method', 'Unknown')}")
 
     # Duration
-    total_duration = hierarchy.get('total_duration_ms')
+    total_duration = hierarchy.get("total_duration_ms")
     if total_duration:
         lines.append(f"Total duration: {total_duration}ms ({total_duration/1000:.2f}s)")
 
     # Concurrent operations
-    concurrent = hierarchy.get('concurrent_count', 0)
+    concurrent = hierarchy.get("concurrent_count", 0)
     if concurrent > 1:
         lines.append(f"Concurrent operations: {concurrent}")
 
     # Bottleneck
-    bottleneck = hierarchy.get('bottleneck')
+    bottleneck = hierarchy.get("bottleneck")
     if bottleneck:
         lines.append("")
         lines.append("⚠️  BOTTLENECK DETECTED:")
         lines.append(f"  Node: {bottleneck.get('node_id')}")
-        lines.append(f"  Duration: {bottleneck.get('duration_ms')}ms ({bottleneck.get('percentage', 0):.1f}% of total)")
+        lines.append(
+            f"  Duration: {bottleneck.get('duration_ms')}ms ({bottleneck.get('percentage', 0):.1f}% of total)"
+        )
         lines.append(f"  Depth: {bottleneck.get('depth')}")
 
     # Errors
-    error_nodes = hierarchy.get('error_nodes', [])
+    error_nodes = hierarchy.get("error_nodes", [])
     if error_nodes:
         lines.append("")
         lines.append(f"❌ Errors in {len(error_nodes)} node(s):")
@@ -556,12 +563,14 @@ def get_hierarchy_summary(hierarchy: Dict[str, Any]) -> str:
             lines.append(f"  ... and {len(error_nodes) - 5} more")
 
     # Tree structure preview
-    roots = hierarchy.get('roots', [])
+    roots = hierarchy.get("roots", [])
     if roots:
         lines.append("")
         lines.append("Tree Structure:")
         for root in roots[:3]:  # Show first 3 roots
-            lines.append(f"  📁 {root.get('id')} ({root.get('entry_count', 0)} entries, {len(root.get('children', []))} children)")
+            lines.append(
+                f"  📁 {root.get('id')} ({root.get('entry_count', 0)} entries, {len(root.get('children', []))} children)"
+            )
             _append_tree_preview(root, lines, depth=1, max_depth=2)
         if len(roots) > 3:
             lines.append(f"  ... and {len(roots) - 3} more root(s)")
@@ -574,16 +583,18 @@ def _append_tree_preview(node: Dict[str, Any], lines: List[str], depth: int, max
     if depth >= max_depth:
         return
 
-    children = node.get('children', [])
+    children = node.get("children", [])
     for i, child in enumerate(children[:3]):  # Show first 3 children
         is_last = i == len(children) - 1
         prefix = "  " * depth + ("└─ " if is_last else "├─ ")
 
-        error_marker = "❌ " if child.get('error_count', 0) > 0 else ""
-        duration = child.get('duration_ms', 0)
+        error_marker = "❌ " if child.get("error_count", 0) > 0 else ""
+        duration = child.get("duration_ms", 0)
         duration_str = f" ({duration}ms)" if duration > 0 else ""
 
-        lines.append(f"{prefix}{error_marker}{child.get('id')} ({child.get('entry_count', 0)} entries){duration_str}")
+        lines.append(
+            f"{prefix}{error_marker}{child.get('id')} ({child.get('entry_count', 0)} entries){duration_str}"
+        )
         _append_tree_preview(child, lines, depth + 1, max_depth)
 
     if len(children) > 3:
@@ -668,12 +679,12 @@ def analyze_error_flow(
             "total_affected_nodes": 0,
             "affected_percentage": 0.0,
             "max_propagation_depth": 0,
-            "concurrent_failures": 0
+            "concurrent_failures": 0,
         },
-        "recommendations": []
+        "recommendations": [],
     }
 
-    error_nodes = hierarchy.get('error_nodes', [])
+    error_nodes = hierarchy.get("error_nodes", [])
     if not error_nodes:
         return result
 
@@ -685,15 +696,15 @@ def analyze_error_flow(
     parent_map = {}  # child_id -> parent_id
 
     def collect_nodes(node: Dict[str, Any], parent_id: Optional[str] = None):
-        node_id = node.get('id')
+        node_id = node.get("id")
         if node_id:
             all_nodes[node_id] = node
             if parent_id:
                 parent_map[node_id] = parent_id
-        for child in node.get('children', []):
+        for child in node.get("children", []):
             collect_nodes(child, node_id)
 
-    for root in hierarchy.get('roots', []):
+    for root in hierarchy.get("roots", []):
         collect_nodes(root)
 
     # Find root causes (errors at leaf nodes or deepest error in each chain)
@@ -701,27 +712,28 @@ def analyze_error_flow(
     for node_id in error_nodes:
         node = all_nodes.get(node_id)
         if node:
-            error_node_data.append({
-                "node_id": node_id,
-                "node_type": node.get('node_type', 'Unknown'),
-                "error_count": node.get('error_count', 0),
-                "depth": node.get('depth', 0),
-                "timestamp": node.get('start_time'),
-                "is_leaf": len(node.get('children', [])) == 0,
-                "children_with_errors": sum(
-                    1 for c in node.get('children', [])
-                    if c.get('error_count', 0) > 0
-                )
-            })
+            error_node_data.append(
+                {
+                    "node_id": node_id,
+                    "node_type": node.get("node_type", "Unknown"),
+                    "error_count": node.get("error_count", 0),
+                    "depth": node.get("depth", 0),
+                    "timestamp": node.get("start_time"),
+                    "is_leaf": len(node.get("children", [])) == 0,
+                    "children_with_errors": sum(
+                        1 for c in node.get("children", []) if c.get("error_count", 0) > 0
+                    ),
+                }
+            )
 
     # Sort by depth (deepest first) and timestamp (earliest first)
-    error_node_data.sort(key=lambda x: (-x['depth'], x['timestamp'] or ''))
+    error_node_data.sort(key=lambda x: (-x["depth"], x["timestamp"] or ""))
 
     # Identify root causes - errors that didn't come from children
     root_causes = []
 
     for error_node in error_node_data:
-        node_id = error_node['node_id']
+        node_id = error_node["node_id"]
 
         # Build path from root to this node
         path = []
@@ -731,20 +743,22 @@ def analyze_error_flow(
             current = parent_map.get(current)
 
         # Check if this is a root cause (no child errors, or leaf node)
-        if error_node['children_with_errors'] == 0:
+        if error_node["children_with_errors"] == 0:
             # Calculate confidence based on evidence
-            confidence = 1.0 if error_node['is_leaf'] else 0.85
+            confidence = 1.0 if error_node["is_leaf"] else 0.85
 
-            root_causes.append({
-                "node_id": node_id,
-                "node_type": error_node['node_type'],
-                "error_count": error_node['error_count'],
-                "depth": error_node['depth'],
-                "timestamp": error_node['timestamp'],
-                "path": path,
-                "is_leaf": error_node['is_leaf'],
-                "confidence": confidence
-            })
+            root_causes.append(
+                {
+                    "node_id": node_id,
+                    "node_type": error_node["node_type"],
+                    "error_count": error_node["error_count"],
+                    "depth": error_node["depth"],
+                    "timestamp": error_node["timestamp"],
+                    "path": path,
+                    "is_leaf": error_node["is_leaf"],
+                    "confidence": confidence,
+                }
+            )
 
     result["root_causes"] = root_causes
 
@@ -753,49 +767,53 @@ def analyze_error_flow(
 
     for root_cause in root_causes:
         chain = []
-        current_id = root_cause['node_id']
+        current_id = root_cause["node_id"]
 
         # Walk up the tree
         while current_id:
             node = all_nodes.get(current_id)
             if node:
-                chain.append({
-                    "node_id": current_id,
-                    "error_count": node.get('error_count', 0),
-                    "depth": node.get('depth', 0)
-                })
+                chain.append(
+                    {
+                        "node_id": current_id,
+                        "error_count": node.get("error_count", 0),
+                        "depth": node.get("depth", 0),
+                    }
+                )
             current_id = parent_map.get(current_id)
 
         # Only include chains where errors actually propagated
         if len(chain) > 1:
             # Check if parent nodes also have errors
-            propagated_chain = [c for c in chain if c['error_count'] > 0]
+            propagated_chain = [c for c in chain if c["error_count"] > 0]
             if len(propagated_chain) > 1:
-                propagation_chains.append({
-                    "root_cause": root_cause['node_id'],
-                    "chain": propagated_chain,
-                    "total_affected": len(propagated_chain),
-                    "propagation_type": "upward"
-                })
+                propagation_chains.append(
+                    {
+                        "root_cause": root_cause["node_id"],
+                        "chain": propagated_chain,
+                        "total_affected": len(propagated_chain),
+                        "propagation_type": "upward",
+                    }
+                )
 
     result["propagation_chains"] = propagation_chains
 
     # Calculate impact summary
-    total_nodes = hierarchy.get('total_nodes', 1)
+    total_nodes = hierarchy.get("total_nodes", 1)
     affected_nodes = len(set(error_nodes))
-    max_depth = max((rc['depth'] for rc in root_causes), default=0)
+    max_depth = max((rc["depth"] for rc in root_causes), default=0)
 
     # Count concurrent failures (root causes at same depth)
     depth_counts = defaultdict(int)
     for rc in root_causes:
-        depth_counts[rc['depth']] += 1
+        depth_counts[rc["depth"]] += 1
     concurrent = max(depth_counts.values(), default=0)
 
     result["impact_summary"] = {
         "total_affected_nodes": affected_nodes,
         "affected_percentage": (affected_nodes / total_nodes * 100) if total_nodes > 0 else 0,
         "max_propagation_depth": max_depth,
-        "concurrent_failures": concurrent if concurrent > 1 else 0
+        "concurrent_failures": concurrent if concurrent > 1 else 0,
     }
 
     # Generate recommendations
@@ -807,13 +825,13 @@ def analyze_error_flow(
             f"Investigate {primary_cause['node_id']} first - it appears to be the root cause"
         )
 
-        if primary_cause['is_leaf']:
+        if primary_cause["is_leaf"]:
             recommendations.append(
                 f"Error originated at leaf node (depth {primary_cause['depth']}) - check external dependencies"
             )
 
     if len(propagation_chains) > 0:
-        total_propagated = sum(c['total_affected'] for c in propagation_chains)
+        total_propagated = sum(c["total_affected"] for c in propagation_chains)
         recommendations.append(
             f"{total_propagated} nodes show cascading failures - consider adding circuit breakers"
         )
@@ -856,7 +874,7 @@ def format_error_flow(
     """
     lines = []
 
-    if not error_analysis.get('has_errors'):
+    if not error_analysis.get("has_errors"):
         return "✅ No errors detected in hierarchy"
 
     # Header
@@ -866,26 +884,26 @@ def format_error_flow(
     lines.append("")
 
     # Summary
-    total = error_analysis.get('total_error_nodes', 0)
-    impact = error_analysis.get('impact_summary', {})
+    total = error_analysis.get("total_error_nodes", 0)
+    impact = error_analysis.get("impact_summary", {})
     lines.append(f"Total error nodes: {total}")
     lines.append(f"Affected: {impact.get('affected_percentage', 0):.1f}% of hierarchy")
 
-    if impact.get('concurrent_failures', 0) > 1:
+    if impact.get("concurrent_failures", 0) > 1:
         lines.append(f"Concurrent failures: {impact['concurrent_failures']}")
 
     lines.append("")
 
     # Root Causes
-    root_causes = error_analysis.get('root_causes', [])
+    root_causes = error_analysis.get("root_causes", [])
     if root_causes:
         lines.append("-" * 70)
         lines.append("🔴 ROOT CAUSE(S)")
         lines.append("-" * 70)
 
         for i, cause in enumerate(root_causes, 1):
-            confidence_pct = int(cause.get('confidence', 0) * 100)
-            leaf_marker = " (leaf node)" if cause.get('is_leaf') else ""
+            confidence_pct = int(cause.get("confidence", 0) * 100)
+            leaf_marker = " (leaf node)" if cause.get("is_leaf") else ""
 
             lines.append(f"\n  {i}. {cause['node_id']}{leaf_marker}")
             lines.append(f"     Type: {cause.get('node_type', 'Unknown')}")
@@ -893,16 +911,16 @@ def format_error_flow(
             lines.append(f"     Depth: {cause.get('depth', 0)}")
             lines.append(f"     Confidence: {confidence_pct}%")
 
-            if cause.get('timestamp'):
+            if cause.get("timestamp"):
                 lines.append(f"     Time: {cause['timestamp']}")
 
-            if cause.get('path'):
-                path_str = " → ".join(cause['path'])
+            if cause.get("path"):
+                path_str = " → ".join(cause["path"])
                 lines.append(f"     Path: {path_str}")
 
     # Propagation Chains
     if show_chains:
-        chains = error_analysis.get('propagation_chains', [])
+        chains = error_analysis.get("propagation_chains", [])
         if chains:
             lines.append("")
             lines.append("-" * 70)
@@ -914,16 +932,18 @@ def format_error_flow(
                 lines.append(f"  Affected nodes: {chain_data['total_affected']}")
                 lines.append("  Chain:")
 
-                chain = chain_data.get('chain', [])
+                chain = chain_data.get("chain", [])
                 for j, node in enumerate(chain):
                     is_last = j == len(chain) - 1
                     prefix = "     └─" if is_last else "     ├─"
                     arrow = " ← ROOT CAUSE" if j == 0 else ""
-                    lines.append(f"{prefix} {node['node_id']} ({node['error_count']} errors){arrow}")
+                    lines.append(
+                        f"{prefix} {node['node_id']} ({node['error_count']} errors){arrow}"
+                    )
 
     # Recommendations
     if show_recommendations:
-        recommendations = error_analysis.get('recommendations', [])
+        recommendations = error_analysis.get("recommendations", [])
         if recommendations:
             lines.append("")
             lines.append("-" * 70)
@@ -996,11 +1016,11 @@ def detect_correlation_chains(
         r'parent_request_id["\s:=]+([a-zA-Z0-9_-]+)',
         r'spawned_request["\s:=]+([a-zA-Z0-9_-]+)',
         # Message patterns
-        r'[Ss]pawning (?:sub-?)?request[:\s]+([a-zA-Z0-9_-]+)',
-        r'[Cc]reating child request[:\s]+([a-zA-Z0-9_-]+)',
-        r'[Ff]orked to[:\s]+([a-zA-Z0-9_-]+)',
-        r'[Dd]elegating to[:\s]+([a-zA-Z0-9_-]+)',
-        r'[Ss]ub-?request[:\s]+([a-zA-Z0-9_-]+)',
+        r"[Ss]pawning (?:sub-?)?request[:\s]+([a-zA-Z0-9_-]+)",
+        r"[Cc]reating child request[:\s]+([a-zA-Z0-9_-]+)",
+        r"[Ff]orked to[:\s]+([a-zA-Z0-9_-]+)",
+        r"[Dd]elegating to[:\s]+([a-zA-Z0-9_-]+)",
+        r"[Ss]ub-?request[:\s]+([a-zA-Z0-9_-]+)",
     ]
 
     patterns = chain_patterns or default_patterns
@@ -1020,20 +1040,21 @@ def detect_correlation_chains(
                 None,  # start_time
                 None,  # end_time
                 10000,  # limit - get many entries
-                0,      # offset
+                0,  # offset
             )
             result = json.loads(result_json)
             entries.extend(result.get("entries", []))
     else:
         # Fallback to Python parsing
         from .parser import LogParser
+
         parser = LogParser()
         for file_path in files:
-            with open(file_path, 'r') as f:
+            with open(file_path, "r") as f:
                 for line in f:
                     entry = parser.parse_line(line)
                     if entry:
-                        entries.append(entry.__dict__ if hasattr(entry, '__dict__') else entry)
+                        entries.append(entry.__dict__ if hasattr(entry, "__dict__") else entry)
 
     # Detect chains
     chains = []
@@ -1041,37 +1062,41 @@ def detect_correlation_chains(
     all_correlation_ids = set()
 
     for entry in entries:
-        correlation_id = entry.get('correlation_id')
-        message = entry.get('message', '')
-        timestamp = entry.get('timestamp')
-        fields = entry.get('fields', {})
+        correlation_id = entry.get("correlation_id")
+        message = entry.get("message", "")
+        timestamp = entry.get("timestamp")
+        fields = entry.get("fields", {})
 
         if correlation_id:
             all_correlation_ids.add(correlation_id)
 
         # Check explicit fields first
-        child_id = fields.get('child_correlation_id') or fields.get('spawned_request')
-        parent_id = fields.get('parent_correlation_id') or fields.get('parent_request_id')
+        child_id = fields.get("child_correlation_id") or fields.get("spawned_request")
+        parent_id = fields.get("parent_correlation_id") or fields.get("parent_request_id")
 
         if child_id and correlation_id:
-            chains.append({
-                "parent_correlation_id": correlation_id,
-                "child_correlation_id": child_id,
-                "evidence": f"Explicit field: child_correlation_id={child_id}",
-                "timestamp": timestamp,
-                "confidence": 1.0
-            })
+            chains.append(
+                {
+                    "parent_correlation_id": correlation_id,
+                    "child_correlation_id": child_id,
+                    "evidence": f"Explicit field: child_correlation_id={child_id}",
+                    "timestamp": timestamp,
+                    "confidence": 1.0,
+                }
+            )
             hierarchy[correlation_id].append(child_id)
             all_correlation_ids.add(child_id)
 
         if parent_id and correlation_id:
-            chains.append({
-                "parent_correlation_id": parent_id,
-                "child_correlation_id": correlation_id,
-                "evidence": f"Explicit field: parent_correlation_id={parent_id}",
-                "timestamp": timestamp,
-                "confidence": 1.0
-            })
+            chains.append(
+                {
+                    "parent_correlation_id": parent_id,
+                    "child_correlation_id": correlation_id,
+                    "evidence": f"Explicit field: parent_correlation_id={parent_id}",
+                    "timestamp": timestamp,
+                    "confidence": 1.0,
+                }
+            )
             hierarchy[parent_id].append(correlation_id)
             all_correlation_ids.add(parent_id)
 
@@ -1082,23 +1107,27 @@ def detect_correlation_chains(
                 detected_id = match.group(1)
                 if detected_id != correlation_id:
                     # Determine if it's a parent or child reference
-                    if 'parent' in pattern.pattern.lower():
-                        chains.append({
-                            "parent_correlation_id": detected_id,
-                            "child_correlation_id": correlation_id,
-                            "evidence": f"Pattern match in message: {match.group(0)}",
-                            "timestamp": timestamp,
-                            "confidence": 0.85
-                        })
+                    if "parent" in pattern.pattern.lower():
+                        chains.append(
+                            {
+                                "parent_correlation_id": detected_id,
+                                "child_correlation_id": correlation_id,
+                                "evidence": f"Pattern match in message: {match.group(0)}",
+                                "timestamp": timestamp,
+                                "confidence": 0.85,
+                            }
+                        )
                         hierarchy[detected_id].append(correlation_id)
                     else:
-                        chains.append({
-                            "parent_correlation_id": correlation_id,
-                            "child_correlation_id": detected_id,
-                            "evidence": f"Pattern match in message: {match.group(0)}",
-                            "timestamp": timestamp,
-                            "confidence": 0.85
-                        })
+                        chains.append(
+                            {
+                                "parent_correlation_id": correlation_id,
+                                "child_correlation_id": detected_id,
+                                "evidence": f"Pattern match in message: {match.group(0)}",
+                                "timestamp": timestamp,
+                                "confidence": 0.85,
+                            }
+                        )
                         hierarchy[correlation_id].append(detected_id)
                     all_correlation_ids.add(detected_id)
 
@@ -1106,7 +1135,7 @@ def detect_correlation_chains(
     seen = set()
     unique_chains = []
     for chain in chains:
-        key = (chain['parent_correlation_id'], chain['child_correlation_id'])
+        key = (chain["parent_correlation_id"], chain["child_correlation_id"])
         if key not in seen:
             seen.add(key)
             unique_chains.append(chain)
@@ -1132,8 +1161,10 @@ def detect_correlation_chains(
 
         relevant_ids = get_descendants(root_correlation_id, set())
         unique_chains = [
-            c for c in unique_chains
-            if c['parent_correlation_id'] in relevant_ids or c['child_correlation_id'] in relevant_ids
+            c
+            for c in unique_chains
+            if c["parent_correlation_id"] in relevant_ids
+            or c["child_correlation_id"] in relevant_ids
         ]
         root_ids = [root_correlation_id] if root_correlation_id in root_ids else []
 
@@ -1145,7 +1176,7 @@ def detect_correlation_chains(
         "root_ids": sorted(root_ids),
         "hierarchy": hierarchy_dict,
         "total_chains": len(unique_chains),
-        "total_correlation_ids": len(all_correlation_ids)
+        "total_correlation_ids": len(all_correlation_ids),
     }
 
 
@@ -1191,34 +1222,31 @@ def build_hierarchy_with_correlation_chains(
         max_depth=max_depth,
         use_naming_patterns=use_naming_patterns,
         use_temporal_inference=use_temporal_inference,
-        min_confidence=min_confidence
+        min_confidence=min_confidence,
     )
 
     if not include_correlation_chains:
         return hierarchy
 
     # Detect correlation chains
-    chains = detect_correlation_chains(
-        files=files,
-        root_correlation_id=root_identifier
-    )
+    chains = detect_correlation_chains(files=files, root_correlation_id=root_identifier)
 
     # Add chain information to hierarchy
-    hierarchy['correlation_chains'] = chains['chains']
-    hierarchy['chained_correlation_ids'] = list(chains['hierarchy'].keys())
+    hierarchy["correlation_chains"] = chains["chains"]
+    hierarchy["chained_correlation_ids"] = list(chains["hierarchy"].keys())
 
     # If there are chained correlation IDs, we could optionally merge their hierarchies
     # For now, just add metadata about them
-    if chains['total_chains'] > 0:
-        hierarchy['has_correlation_chains'] = True
-        hierarchy['correlation_chain_count'] = chains['total_chains']
+    if chains["total_chains"] > 0:
+        hierarchy["has_correlation_chains"] = True
+        hierarchy["correlation_chain_count"] = chains["total_chains"]
 
         # Add note about additional correlation IDs that could be explored
         child_ids = set()
-        for chain in chains['chains']:
-            child_ids.add(chain['child_correlation_id'])
+        for chain in chains["chains"]:
+            child_ids.add(chain["child_correlation_id"])
 
-        hierarchy['related_correlation_ids'] = sorted(child_ids)
+        hierarchy["related_correlation_ids"] = sorted(child_ids)
 
     return hierarchy
 
@@ -1266,11 +1294,11 @@ def analyze_bottlenecks(
         "estimated_improvement_ms": 0,
     }
 
-    total_duration = hierarchy.get('total_duration_ms', 0)
+    total_duration = hierarchy.get("total_duration_ms", 0)
     if total_duration <= 0:
         return result
 
-    bottleneck = hierarchy.get('bottleneck')
+    bottleneck = hierarchy.get("bottleneck")
     if bottleneck:
         result["primary_bottleneck"] = bottleneck
 
@@ -1278,30 +1306,32 @@ def analyze_bottlenecks(
     all_nodes = []
 
     def collect_nodes(node: Dict[str, Any]):
-        duration = node.get('duration_ms', 0)
+        duration = node.get("duration_ms", 0)
         if duration and duration > 0:
             percentage = (duration / total_duration) * 100
-            all_nodes.append({
-                "id": node.get('id'),
-                "duration_ms": duration,
-                "percentage": percentage,
-                "depth": node.get('depth', 0),
-                "children_count": len(node.get('children', [])),
-                "is_leaf": len(node.get('children', [])) == 0,
-                "error_count": node.get('error_count', 0),
-            })
-        for child in node.get('children', []):
+            all_nodes.append(
+                {
+                    "id": node.get("id"),
+                    "duration_ms": duration,
+                    "percentage": percentage,
+                    "depth": node.get("depth", 0),
+                    "children_count": len(node.get("children", [])),
+                    "is_leaf": len(node.get("children", [])) == 0,
+                    "error_count": node.get("error_count", 0),
+                }
+            )
+        for child in node.get("children", []):
             collect_nodes(child)
 
-    for root in hierarchy.get('roots', []):
+    for root in hierarchy.get("roots", []):
         collect_nodes(root)
 
     # Sort by duration
-    all_nodes.sort(key=lambda x: -x['duration_ms'])
+    all_nodes.sort(key=lambda x: -x["duration_ms"])
 
     # Find secondary bottlenecks
     for node in all_nodes[1:5]:  # Top 5 excluding primary
-        if node['percentage'] >= threshold_percentage:
+        if node["percentage"] >= threshold_percentage:
             result["secondary_bottlenecks"].append(node)
 
     # Generate optimization suggestions
@@ -1311,40 +1341,42 @@ def analyze_bottlenecks(
     # Look for siblings at same depth with no dependencies
     depth_groups = defaultdict(list)
     for node in all_nodes:
-        depth_groups[node['depth']].append(node)
+        depth_groups[node["depth"]].append(node)
 
     for depth, nodes in depth_groups.items():
         if len(nodes) >= 2:
-            total_sibling_time = sum(n['duration_ms'] for n in nodes)
-            max_sibling_time = max(n['duration_ms'] for n in nodes)
+            total_sibling_time = sum(n["duration_ms"] for n in nodes)
+            max_sibling_time = max(n["duration_ms"] for n in nodes)
             savings = total_sibling_time - max_sibling_time
 
             if savings > total_duration * 0.1:  # >10% potential savings
-                sibling_names = [n['id'] for n in nodes[:3]]
-                result["parallelization_opportunities"].append({
-                    "depth": depth,
-                    "nodes": sibling_names,
-                    "potential_savings_ms": savings,
-                })
+                sibling_names = [n["id"] for n in nodes[:3]]
+                result["parallelization_opportunities"].append(
+                    {
+                        "depth": depth,
+                        "nodes": sibling_names,
+                        "potential_savings_ms": savings,
+                    }
+                )
                 suggestions.append(
                     f"Parallelize operations at depth {depth} ({', '.join(sibling_names[:2])}) - "
                     f"potential savings: {savings:.0f}ms"
                 )
 
     # Check for caching opportunities (repeated patterns)
-    leaf_nodes = [n for n in all_nodes if n['is_leaf']]
+    leaf_nodes = [n for n in all_nodes if n["is_leaf"]]
     if len(leaf_nodes) > 3:
-        avg_leaf_time = sum(n['duration_ms'] for n in leaf_nodes) / len(leaf_nodes)
-        slow_leaves = [n for n in leaf_nodes if n['duration_ms'] > avg_leaf_time * 2]
+        avg_leaf_time = sum(n["duration_ms"] for n in leaf_nodes) / len(leaf_nodes)
+        slow_leaves = [n for n in leaf_nodes if n["duration_ms"] > avg_leaf_time * 2]
         if slow_leaves:
             suggestions.append(
                 f"Consider caching for slow leaf operations: {', '.join(n['id'] for n in slow_leaves[:3])}"
             )
-            result["caching_opportunities"] = [n['id'] for n in slow_leaves[:3]]
+            result["caching_opportunities"] = [n["id"] for n in slow_leaves[:3]]
 
     # Primary bottleneck specific suggestions
     if bottleneck:
-        percentage = bottleneck.get('percentage', 0)
+        percentage = bottleneck.get("percentage", 0)
         if percentage > 50:
             suggestions.append(
                 f"CRITICAL: {bottleneck['node_id']} takes {percentage:.0f}% of total time - prioritize optimization"
@@ -1354,13 +1386,13 @@ def analyze_bottlenecks(
                 f"IMPORTANT: Consider optimizing {bottleneck['node_id']} ({percentage:.0f}% of time)"
             )
 
-        if bottleneck.get('depth', 0) > 2:
+        if bottleneck.get("depth", 0) > 2:
             suggestions.append(
                 f"Bottleneck is deep in call stack (depth {bottleneck['depth']}) - consider moving to async"
             )
 
     # Check for error-prone bottlenecks
-    error_nodes = [n for n in all_nodes if n['error_count'] > 0 and n['percentage'] > 10]
+    error_nodes = [n for n in all_nodes if n["error_count"] > 0 and n["percentage"] > 10]
     for node in error_nodes:
         suggestions.append(
             f"Add circuit breaker for {node['id']} - errors detected and {node['percentage']:.0f}% of time"
@@ -1371,7 +1403,7 @@ def analyze_bottlenecks(
     # Estimate potential improvement
     if result["parallelization_opportunities"]:
         result["estimated_improvement_ms"] = sum(
-            p['potential_savings_ms'] for p in result["parallelization_opportunities"]
+            p["potential_savings_ms"] for p in result["parallelization_opportunities"]
         )
 
     return result
@@ -1435,7 +1467,7 @@ def diff_hierarchies(
         "error_changes": {
             "new_errors": [],
             "resolved_errors": [],
-        }
+        },
     }
 
     # Collect nodes from both hierarchies
@@ -1443,17 +1475,17 @@ def diff_hierarchies(
         nodes = {}
 
         def walk(node: Dict[str, Any]):
-            node_id = node.get('id')
+            node_id = node.get("id")
             if node_id:
                 nodes[node_id] = {
-                    "duration_ms": node.get('duration_ms', 0),
-                    "error_count": node.get('error_count', 0),
-                    "entry_count": node.get('entry_count', 0),
+                    "duration_ms": node.get("duration_ms", 0),
+                    "error_count": node.get("error_count", 0),
+                    "entry_count": node.get("entry_count", 0),
                 }
-            for child in node.get('children', []):
+            for child in node.get("children", []):
                 walk(child)
 
-        for root in hierarchy.get('roots', []):
+        for root in hierarchy.get("roots", []):
             walk(root)
 
         return nodes
@@ -1462,8 +1494,8 @@ def diff_hierarchies(
     nodes_b = collect_nodes(hierarchy_b)
 
     # Duration changes
-    duration_a = hierarchy_a.get('total_duration_ms', 0)
-    duration_b = hierarchy_b.get('total_duration_ms', 0)
+    duration_a = hierarchy_a.get("total_duration_ms", 0)
+    duration_b = hierarchy_b.get("total_duration_ms", 0)
 
     result["summary"]["total_duration_change_ms"] = duration_b - duration_a
     if duration_a > 0:
@@ -1482,15 +1514,19 @@ def diff_hierarchies(
         in_b = node_id in nodes_b
 
         if in_a and not in_b:
-            result["removed_nodes"].append({
-                "id": node_id,
-                "duration_ms": nodes_a[node_id]["duration_ms"],
-            })
+            result["removed_nodes"].append(
+                {
+                    "id": node_id,
+                    "duration_ms": nodes_a[node_id]["duration_ms"],
+                }
+            )
         elif in_b and not in_a:
-            result["new_nodes"].append({
-                "id": node_id,
-                "duration_ms": nodes_b[node_id]["duration_ms"],
-            })
+            result["new_nodes"].append(
+                {
+                    "id": node_id,
+                    "duration_ms": nodes_b[node_id]["duration_ms"],
+                }
+            )
         else:
             # Both exist - compare
             dur_a = nodes_a[node_id]["duration_ms"]
@@ -1499,21 +1535,25 @@ def diff_hierarchies(
             change_pct = ((dur_b - dur_a) / dur_a * 100) if dur_a > 0 else 0
 
             if change_ms < -10:  # >10ms improvement
-                result["improved_nodes"].append({
-                    "id": node_id,
-                    "before_ms": dur_a,
-                    "after_ms": dur_b,
-                    "change_ms": change_ms,
-                    "change_pct": change_pct,
-                })
+                result["improved_nodes"].append(
+                    {
+                        "id": node_id,
+                        "before_ms": dur_a,
+                        "after_ms": dur_b,
+                        "change_ms": change_ms,
+                        "change_pct": change_pct,
+                    }
+                )
             elif change_ms > 10:  # >10ms degradation
-                result["degraded_nodes"].append({
-                    "id": node_id,
-                    "before_ms": dur_a,
-                    "after_ms": dur_b,
-                    "change_ms": change_ms,
-                    "change_pct": change_pct,
-                })
+                result["degraded_nodes"].append(
+                    {
+                        "id": node_id,
+                        "before_ms": dur_a,
+                        "after_ms": dur_b,
+                        "change_ms": change_ms,
+                        "change_pct": change_pct,
+                    }
+                )
 
             # Error changes
             err_a = nodes_a[node_id]["error_count"]
@@ -1633,11 +1673,11 @@ def export_to_jaeger(
         span_id = uuid.uuid4().hex[:16]
 
         # Parse timestamps
-        start_time = node.get('start_time')
+        start_time = node.get("start_time")
         if start_time:
             if isinstance(start_time, str):
                 try:
-                    dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
                     start_us = int(dt.timestamp() * 1_000_000)
                 except Exception:
                     start_us = 0
@@ -1646,19 +1686,19 @@ def export_to_jaeger(
         else:
             start_us = 0
 
-        duration_us = int((node.get('duration_ms', 0) or 0) * 1000)
+        duration_us = int((node.get("duration_ms", 0) or 0) * 1000)
 
         span = {
             "traceID": trace_id,
             "spanID": span_id,
-            "operationName": node.get('id', 'unknown'),
+            "operationName": node.get("id", "unknown"),
             "references": [],
             "startTime": start_us,
             "duration": duration_us,
             "tags": [
-                {"key": "node_type", "type": "string", "value": node.get('node_type', 'unknown')},
-                {"key": "entry_count", "type": "int64", "value": node.get('entry_count', 0)},
-                {"key": "error_count", "type": "int64", "value": node.get('error_count', 0)},
+                {"key": "node_type", "type": "string", "value": node.get("node_type", "unknown")},
+                {"key": "entry_count", "type": "int64", "value": node.get("entry_count", 0)},
+                {"key": "error_count", "type": "int64", "value": node.get("error_count", 0)},
             ],
             "logs": [],
             "processID": "p1",
@@ -1666,39 +1706,43 @@ def export_to_jaeger(
         }
 
         if parent_span_id:
-            span["references"].append({
-                "refType": "CHILD_OF",
-                "traceID": trace_id,
-                "spanID": parent_span_id,
-            })
+            span["references"].append(
+                {
+                    "refType": "CHILD_OF",
+                    "traceID": trace_id,
+                    "spanID": parent_span_id,
+                }
+            )
 
-        if node.get('error_count', 0) > 0:
+        if node.get("error_count", 0) > 0:
             span["tags"].append({"key": "error", "type": "bool", "value": True})
 
         spans.append(span)
 
         # Process children
-        for child in node.get('children', []):
+        for child in node.get("children", []):
             convert_node(child, span_id)
 
     # Convert all roots
-    for root in hierarchy.get('roots', []):
+    for root in hierarchy.get("roots", []):
         convert_node(root)
 
     return {
-        "data": [{
-            "traceID": trace_id,
-            "spans": spans,
-            "processes": {
-                "p1": {
-                    "serviceName": service_name,
-                    "tags": [
-                        {"key": "exported_by", "type": "string", "value": "logler"},
-                    ]
-                }
-            },
-            "warnings": [],
-        }]
+        "data": [
+            {
+                "traceID": trace_id,
+                "spans": spans,
+                "processes": {
+                    "p1": {
+                        "serviceName": service_name,
+                        "tags": [
+                            {"key": "exported_by", "type": "string", "value": "logler"},
+                        ],
+                    }
+                },
+                "warnings": [],
+            }
+        ]
     }
 
 
@@ -1732,45 +1776,45 @@ def export_to_zipkin(
         span_id = uuid.uuid4().hex[:16]
 
         # Parse timestamp
-        start_time = node.get('start_time')
+        start_time = node.get("start_time")
         timestamp_us = 0
         if start_time:
             if isinstance(start_time, str):
                 try:
-                    dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
                     timestamp_us = int(dt.timestamp() * 1_000_000)
                 except Exception:
                     pass
 
-        duration_us = int((node.get('duration_ms', 0) or 0) * 1000)
+        duration_us = int((node.get("duration_ms", 0) or 0) * 1000)
 
         span = {
             "traceId": trace_id,
             "id": span_id,
-            "name": node.get('id', 'unknown'),
+            "name": node.get("id", "unknown"),
             "timestamp": timestamp_us,
             "duration": duration_us,
             "localEndpoint": {
                 "serviceName": service_name,
             },
             "tags": {
-                "node_type": node.get('node_type', 'unknown'),
-                "entry_count": str(node.get('entry_count', 0)),
+                "node_type": node.get("node_type", "unknown"),
+                "entry_count": str(node.get("entry_count", 0)),
             },
         }
 
         if parent_id:
             span["parentId"] = parent_id
 
-        if node.get('error_count', 0) > 0:
+        if node.get("error_count", 0) > 0:
             span["tags"]["error"] = "true"
 
         spans.append(span)
 
-        for child in node.get('children', []):
+        for child in node.get("children", []):
             convert_node(child, span_id)
 
-    for root in hierarchy.get('roots', []):
+    for root in hierarchy.get("roots", []):
         convert_node(root)
 
     return spans
@@ -1873,8 +1917,12 @@ class Investigator:
         self._files = []
         self._custom_regex = None
 
-    def load_files(self, files: List[str], parser_format: Optional[str] = None,
-                   custom_regex: Optional[str] = None):
+    def load_files(
+        self,
+        files: List[str],
+        parser_format: Optional[str] = None,
+        custom_regex: Optional[str] = None,
+    ):
         """Load log files and build index."""
         _load_files_with_config(self._investigator, files, parser_format, custom_regex)
         self._files = files
@@ -1919,7 +1967,9 @@ class Investigator:
         trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Follow thread in loaded files."""
-        result_json = self._investigator.follow_thread(self._files, thread_id, correlation_id, trace_id)
+        result_json = self._investigator.follow_thread(
+            self._files, thread_id, correlation_id, trace_id
+        )
         result = json.loads(result_json)
         _normalize_entries(result.get("entries", []))
         return result
@@ -1944,7 +1994,9 @@ class Investigator:
         lines_after: int = 10,
     ) -> Dict[str, Any]:
         """Get context around a line."""
-        result_json = self._investigator.get_context(file, line_number, lines_before, lines_after, False)
+        result_json = self._investigator.get_context(
+            file, line_number, lines_before, lines_after, False
+        )
         result = json.loads(result_json)
         _normalize_context_payload(result)
         return result
@@ -1967,20 +2019,20 @@ class Investigator:
                 ORDER BY count DESC
             \"\"\")
         """
-        if not hasattr(self._investigator, 'sql_query'):
+        if not hasattr(self._investigator, "sql_query"):
             raise RuntimeError("SQL feature not available. Build with --features sql")
         result_json = self._investigator.sql_query(query)
         return json.loads(result_json)
 
     def sql_tables(self) -> List[str]:
         """Get list of available SQL tables (requires 'sql' feature)."""
-        if not hasattr(self._investigator, 'sql_tables'):
+        if not hasattr(self._investigator, "sql_tables"):
             raise RuntimeError("SQL feature not available. Build with --features sql")
         return self._investigator.sql_tables()
 
     def sql_schema(self, table: str) -> List[Dict[str, Any]]:
         """Get schema for a SQL table (requires 'sql' feature)."""
-        if not hasattr(self._investigator, 'sql_schema'):
+        if not hasattr(self._investigator, "sql_schema"):
             raise RuntimeError("SQL feature not available. Build with --features sql")
         result_json = self._investigator.sql_schema(table)
         return json.loads(result_json)
@@ -2019,12 +2071,13 @@ class Investigator:
             max_depth,
             use_naming_patterns,
             use_temporal_inference,
-            min_confidence
+            min_confidence,
         )
         return json.loads(result_json)
 
 
 # Advanced LLM-optimized features
+
 
 def cross_service_timeline(
     files: Dict[str, List[str]],
@@ -2104,63 +2157,66 @@ def cross_service_timeline(
         filters = {}
         if correlation_id:
             result = follow_thread(service_files, correlation_id=correlation_id, trace_id=trace_id)
-            entries = result.get('entries', [])
+            entries = result.get("entries", [])
         elif trace_id:
             result = follow_thread(service_files, trace_id=trace_id)
-            entries = result.get('entries', [])
+            entries = result.get("entries", [])
         else:
             # Get all entries
-            result = search(service_files, limit=None, parser_format=parser_format, custom_regex=custom_regex)
-            entries = [r['entry'] for r in result.get('results', [])]
+            result = search(
+                service_files, limit=None, parser_format=parser_format, custom_regex=custom_regex
+            )
+            entries = [r["entry"] for r in result.get("results", [])]
 
         # Add service label to each entry
         for entry in entries:
             # Parse timestamp if present
-            timestamp_str = entry.get('timestamp')
+            timestamp_str = entry.get("timestamp")
             if timestamp_str:
                 try:
-                    timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
                 except (ValueError, TypeError):
                     timestamp = None
             else:
                 timestamp = None
 
-            all_entries.append({
-                'service': service_name,
-                'timestamp': timestamp,
-                'timestamp_str': timestamp_str,
-                'entry': entry
-            })
+            all_entries.append(
+                {
+                    "service": service_name,
+                    "timestamp": timestamp,
+                    "timestamp_str": timestamp_str,
+                    "entry": entry,
+                }
+            )
             service_counts[service_name] += 1
 
     # Filter by time window if specified
     if time_window:
         start_time, end_time = time_window
         try:
-            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
             all_entries = [
-                e for e in all_entries
-                if e['timestamp'] and start_dt <= e['timestamp'] <= end_dt
+                e for e in all_entries if e["timestamp"] and start_dt <= e["timestamp"] <= end_dt
             ]
         except Exception as e:
             print(f"Warning: Could not parse time window: {e}")
 
     # Sort by timestamp
-    all_entries.sort(key=lambda e: e['timestamp'] if e['timestamp'] else datetime.min)
+    all_entries.sort(key=lambda e: e["timestamp"] if e["timestamp"] else datetime.min)
 
     # Calculate relative times
-    if all_entries and all_entries[0]['timestamp']:
-        start_time = all_entries[0]['timestamp']
+    if all_entries and all_entries[0]["timestamp"]:
+        start_time = all_entries[0]["timestamp"]
         for entry in all_entries:
-            if entry['timestamp']:
-                delta = entry['timestamp'] - start_time
-                entry['relative_time_ms'] = int(delta.total_seconds() * 1000)
+            if entry["timestamp"]:
+                delta = entry["timestamp"] - start_time
+                entry["relative_time_ms"] = int(delta.total_seconds() * 1000)
             else:
-                entry['relative_time_ms'] = None
+                entry["relative_time_ms"] = None
     else:
         for entry in all_entries:
-            entry['relative_time_ms'] = None
+            entry["relative_time_ms"] = None
 
     # Apply limit if specified
     if limit:
@@ -2168,26 +2224,28 @@ def cross_service_timeline(
 
     # Calculate duration
     duration_ms = None
-    if len(all_entries) >= 2 and all_entries[0]['timestamp'] and all_entries[-1]['timestamp']:
-        duration = all_entries[-1]['timestamp'] - all_entries[0]['timestamp']
+    if len(all_entries) >= 2 and all_entries[0]["timestamp"] and all_entries[-1]["timestamp"]:
+        duration = all_entries[-1]["timestamp"] - all_entries[0]["timestamp"]
         duration_ms = int(duration.total_seconds() * 1000)
 
     # Clean up entries for output (remove internal timestamp objects)
     timeline = []
     for e in all_entries:
-        timeline.append({
-            'service': e['service'],
-            'timestamp': e['timestamp_str'],
-            'entry': e['entry'],
-            'relative_time_ms': e['relative_time_ms']
-        })
+        timeline.append(
+            {
+                "service": e["service"],
+                "timestamp": e["timestamp_str"],
+                "entry": e["entry"],
+                "relative_time_ms": e["relative_time_ms"],
+            }
+        )
 
     return {
-        'timeline': timeline,
-        'services': list(files.keys()),
-        'total_entries': len(timeline),
-        'duration_ms': duration_ms,
-        'service_breakdown': dict(service_counts)
+        "timeline": timeline,
+        "services": list(files.keys()),
+        "total_entries": len(timeline),
+        "duration_ms": duration_ms,
+        "service_breakdown": dict(service_counts),
     }
 
 
@@ -2251,15 +2309,19 @@ def compare_threads(
         raise RuntimeError("Rust backend not available")
 
     # Get both threads
-    timeline_a = follow_thread(files, thread_id=thread_a, correlation_id=correlation_a, trace_id=trace_a)
-    timeline_b = follow_thread(files, thread_id=thread_b, correlation_id=correlation_b, trace_id=trace_b)
+    timeline_a = follow_thread(
+        files, thread_id=thread_a, correlation_id=correlation_a, trace_id=trace_a
+    )
+    timeline_b = follow_thread(
+        files, thread_id=thread_b, correlation_id=correlation_b, trace_id=trace_b
+    )
 
     # Analyze thread A
-    entries_a = timeline_a.get('entries', [])
+    entries_a = timeline_a.get("entries", [])
     analysis_a = _analyze_thread(entries_a, thread_a or correlation_a or trace_a or "Thread A")
 
     # Analyze thread B
-    entries_b = timeline_b.get('entries', [])
+    entries_b = timeline_b.get("entries", [])
     analysis_b = _analyze_thread(entries_b, thread_b or correlation_b or trace_b or "Thread B")
 
     # Compare
@@ -2269,10 +2331,10 @@ def compare_threads(
     summary = _generate_comparison_summary(analysis_a, analysis_b, differences)
 
     return {
-        'thread_a': analysis_a,
-        'thread_b': analysis_b,
-        'differences': differences,
-        'summary': summary
+        "thread_a": analysis_a,
+        "thread_b": analysis_b,
+        "differences": differences,
+        "summary": summary,
     }
 
 
@@ -2342,10 +2404,16 @@ def compare_time_periods(
     results_b = search(files, limit=None)
 
     # Filter by time
-    entries_a = [r['entry'] for r in results_a.get('results', [])
-                 if _in_time_range(r['entry'], period_a_start, period_a_end)]
-    entries_b = [r['entry'] for r in results_b.get('results', [])
-                 if _in_time_range(r['entry'], period_b_start, period_b_end)]
+    entries_a = [
+        r["entry"]
+        for r in results_a.get("results", [])
+        if _in_time_range(r["entry"], period_a_start, period_a_end)
+    ]
+    entries_b = [
+        r["entry"]
+        for r in results_b.get("results", [])
+        if _in_time_range(r["entry"], period_b_start, period_b_end)
+    ]
 
     # Analyze periods
     analysis_a = _analyze_period(entries_a, period_a_start, period_a_end)
@@ -2357,28 +2425,24 @@ def compare_time_periods(
     # Generate summary
     summary = _generate_period_summary(analysis_a, analysis_b, changes)
 
-    return {
-        'period_a': analysis_a,
-        'period_b': analysis_b,
-        'changes': changes,
-        'summary': summary
-    }
+    return {"period_a": analysis_a, "period_b": analysis_b, "changes": changes, "summary": summary}
 
 
 # Helper functions for comparison
+
 
 def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
     """Analyze a single thread's entries"""
     if not entries:
         return {
-            'id': thread_id,
-            'entries': [],
-            'duration_ms': 0,
-            'error_count': 0,
-            'log_levels': {},
-            'unique_messages': 0,
-            'messages': [],
-            'services': []
+            "id": thread_id,
+            "entries": [],
+            "duration_ms": 0,
+            "error_count": 0,
+            "log_levels": {},
+            "unique_messages": 0,
+            "messages": [],
+            "services": [],
         }
 
     # Count log levels
@@ -2388,15 +2452,15 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
     services = set()
 
     for entry in entries:
-        level = entry.get('level', 'INFO')
+        level = entry.get("level", "INFO")
         level_counts[level] += 1
-        if level in ['ERROR', 'FATAL']:
+        if level in ["ERROR", "FATAL"]:
             error_count += 1
 
-        message = entry.get('message', '')
+        message = entry.get("message", "")
         messages.append(message)
 
-        service = entry.get('service') or entry.get('service_name')
+        service = entry.get("service") or entry.get("service_name")
         if service:
             services.add(service)
 
@@ -2404,55 +2468,55 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
     duration_ms = 0
     if len(entries) >= 2:
         try:
-            start = datetime.fromisoformat(entries[0].get('timestamp', '').replace('Z', '+00:00'))
-            end = datetime.fromisoformat(entries[-1].get('timestamp', '').replace('Z', '+00:00'))
+            start = datetime.fromisoformat(entries[0].get("timestamp", "").replace("Z", "+00:00"))
+            end = datetime.fromisoformat(entries[-1].get("timestamp", "").replace("Z", "+00:00"))
             duration_ms = int((end - start).total_seconds() * 1000)
         except (ValueError, TypeError, AttributeError):
             pass  # Skip if timestamps are missing or invalid
 
     return {
-        'id': thread_id,
-        'entries': entries,
-        'entry_count': len(entries),
-        'duration_ms': duration_ms,
-        'error_count': error_count,
-        'log_levels': dict(level_counts),
-        'unique_messages': len(set(messages)),
-        'messages': messages,
-        'services': list(services)
+        "id": thread_id,
+        "entries": entries,
+        "entry_count": len(entries),
+        "duration_ms": duration_ms,
+        "error_count": error_count,
+        "log_levels": dict(level_counts),
+        "unique_messages": len(set(messages)),
+        "messages": messages,
+        "services": list(services),
     }
 
 
 def _compute_differences(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
     """Compute differences between two thread analyses"""
     # Duration difference
-    duration_diff_ms = analysis_b['duration_ms'] - analysis_a['duration_ms']
+    duration_diff_ms = analysis_b["duration_ms"] - analysis_a["duration_ms"]
 
     # Error difference
-    error_diff = analysis_b['error_count'] - analysis_a['error_count']
+    error_diff = analysis_b["error_count"] - analysis_a["error_count"]
 
     # Message differences
-    messages_a = set(analysis_a['messages'])
-    messages_b = set(analysis_b['messages'])
+    messages_a = set(analysis_a["messages"])
+    messages_b = set(analysis_b["messages"])
     only_in_a = list(messages_a - messages_b)
     only_in_b = list(messages_b - messages_a)
 
     # Log level changes
     level_changes = {}
-    all_levels = set(list(analysis_a['log_levels'].keys()) + list(analysis_b['log_levels'].keys()))
+    all_levels = set(list(analysis_a["log_levels"].keys()) + list(analysis_b["log_levels"].keys()))
     for level in all_levels:
-        count_a = analysis_a['log_levels'].get(level, 0)
-        count_b = analysis_b['log_levels'].get(level, 0)
+        count_a = analysis_a["log_levels"].get(level, 0)
+        count_b = analysis_b["log_levels"].get(level, 0)
         if count_a != count_b:
             level_changes[level] = count_b - count_a
 
     return {
-        'duration_diff_ms': duration_diff_ms,
-        'error_diff': error_diff,
-        'only_in_a': only_in_a[:10],  # Limit to 10
-        'only_in_b': only_in_b[:10],
-        'level_changes': level_changes,
-        'entry_count_diff': analysis_b['entry_count'] - analysis_a['entry_count']
+        "duration_diff_ms": duration_diff_ms,
+        "error_diff": error_diff,
+        "only_in_a": only_in_a[:10],  # Limit to 10
+        "only_in_b": only_in_b[:10],
+        "level_changes": level_changes,
+        "entry_count_diff": analysis_b["entry_count"] - analysis_a["entry_count"],
     }
 
 
@@ -2461,7 +2525,7 @@ def _generate_comparison_summary(analysis_a: Dict, analysis_b: Dict, differences
     parts = []
 
     # Duration
-    duration_diff = differences['duration_diff_ms']
+    duration_diff = differences["duration_diff_ms"]
     if abs(duration_diff) > 100:
         if duration_diff > 0:
             parts.append(f"Thread B took {duration_diff}ms longer")
@@ -2469,17 +2533,17 @@ def _generate_comparison_summary(analysis_a: Dict, analysis_b: Dict, differences
             parts.append(f"Thread B was {-duration_diff}ms faster")
 
     # Errors
-    error_diff = differences['error_diff']
+    error_diff = differences["error_diff"]
     if error_diff > 0:
         parts.append(f"Thread B had {error_diff} more error(s)")
-        if differences['only_in_b']:
-            examples = differences['only_in_b'][:3]
+        if differences["only_in_b"]:
+            examples = differences["only_in_b"][:3]
             parts.append(f"including: {', '.join(examples)}")
     elif error_diff < 0:
         parts.append(f"Thread B had {-error_diff} fewer error(s)")
 
     # New messages in B
-    if differences['only_in_b'] and error_diff == 0:
+    if differences["only_in_b"] and error_diff == 0:
         parts.append(f"Thread B had unique messages: {', '.join(differences['only_in_b'][:3])}")
 
     if not parts:
@@ -2495,59 +2559,61 @@ def _analyze_period(entries: List[Dict], start: str, end: str) -> Dict[str, Any]
     threads = set()
 
     for entry in entries:
-        level = entry.get('level', 'INFO')
+        level = entry.get("level", "INFO")
         level_counts[level] += 1
 
-        if level in ['ERROR', 'FATAL']:
-            error_messages.append(entry.get('message', ''))
+        if level in ["ERROR", "FATAL"]:
+            error_messages.append(entry.get("message", ""))
 
-        thread = entry.get('thread_id') or entry.get('correlation_id')
+        thread = entry.get("thread_id") or entry.get("correlation_id")
         if thread:
             threads.add(thread)
 
     total = len(entries)
-    error_count = level_counts.get('ERROR', 0) + level_counts.get('FATAL', 0)
+    error_count = level_counts.get("ERROR", 0) + level_counts.get("FATAL", 0)
     error_rate = error_count / total if total > 0 else 0
 
     return {
-        'start': start,
-        'end': end,
-        'total_logs': total,
-        'error_count': error_count,
-        'error_rate': error_rate,
-        'log_levels': dict(level_counts),
-        'top_errors': list(set(error_messages))[:10],
-        'unique_threads': len(threads)
+        "start": start,
+        "end": end,
+        "total_logs": total,
+        "error_count": error_count,
+        "error_rate": error_rate,
+        "log_levels": dict(level_counts),
+        "top_errors": list(set(error_messages))[:10],
+        "unique_threads": len(threads),
     }
 
 
 def _compute_period_changes(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
     """Compute changes between two time periods"""
     # Volume change
-    if analysis_a['total_logs'] > 0:
-        volume_change_pct = ((analysis_b['total_logs'] - analysis_a['total_logs']) / analysis_a['total_logs']) * 100
+    if analysis_a["total_logs"] > 0:
+        volume_change_pct = (
+            (analysis_b["total_logs"] - analysis_a["total_logs"]) / analysis_a["total_logs"]
+        ) * 100
     else:
-        volume_change_pct = 100 if analysis_b['total_logs'] > 0 else 0
+        volume_change_pct = 100 if analysis_b["total_logs"] > 0 else 0
 
     # Error rate change
-    if analysis_a['error_rate'] > 0:
-        error_rate_multiplier = analysis_b['error_rate'] / analysis_a['error_rate']
+    if analysis_a["error_rate"] > 0:
+        error_rate_multiplier = analysis_b["error_rate"] / analysis_a["error_rate"]
     else:
-        error_rate_multiplier = float('inf') if analysis_b['error_rate'] > 0 else 1.0
+        error_rate_multiplier = float("inf") if analysis_b["error_rate"] > 0 else 1.0
 
     # New vs resolved errors
-    errors_a = set(analysis_a['top_errors'])
-    errors_b = set(analysis_b['top_errors'])
+    errors_a = set(analysis_a["top_errors"])
+    errors_b = set(analysis_b["top_errors"])
     new_errors = list(errors_b - errors_a)
     resolved_errors = list(errors_a - errors_b)
 
     return {
-        'log_volume_change_pct': volume_change_pct,
-        'error_rate_multiplier': error_rate_multiplier,
-        'error_count_change': analysis_b['error_count'] - analysis_a['error_count'],
-        'new_errors': new_errors[:10],
-        'resolved_errors': resolved_errors[:10],
-        'thread_count_change': analysis_b['unique_threads'] - analysis_a['unique_threads']
+        "log_volume_change_pct": volume_change_pct,
+        "error_rate_multiplier": error_rate_multiplier,
+        "error_count_change": analysis_b["error_count"] - analysis_a["error_count"],
+        "new_errors": new_errors[:10],
+        "resolved_errors": resolved_errors[:10],
+        "thread_count_change": analysis_b["unique_threads"] - analysis_a["unique_threads"],
     }
 
 
@@ -2556,19 +2622,21 @@ def _generate_period_summary(analysis_a: Dict, analysis_b: Dict, changes: Dict) 
     parts = []
 
     # Volume
-    vol_change = changes['log_volume_change_pct']
+    vol_change = changes["log_volume_change_pct"]
     if abs(vol_change) > 20:
-        parts.append(f"Log volume {'increased' if vol_change > 0 else 'decreased'} by {abs(vol_change):.1f}%")
+        parts.append(
+            f"Log volume {'increased' if vol_change > 0 else 'decreased'} by {abs(vol_change):.1f}%"
+        )
 
     # Error rate
-    err_mult = changes['error_rate_multiplier']
+    err_mult = changes["error_rate_multiplier"]
     if err_mult > 1.5:
         parts.append(f"Error rate increased {err_mult:.1f}x")
     elif err_mult < 0.7 and err_mult > 0:
         parts.append(f"Error rate decreased to {err_mult:.1f}x")
 
     # New errors
-    if changes['new_errors']:
+    if changes["new_errors"]:
         parts.append(f"New errors: {', '.join(changes['new_errors'][:3])}")
 
     if not parts:
@@ -2579,20 +2647,21 @@ def _generate_period_summary(analysis_a: Dict, analysis_b: Dict, changes: Dict) 
 
 def _in_time_range(entry: Dict, start: str, end: str) -> bool:
     """Check if entry timestamp is within range"""
-    timestamp_str = entry.get('timestamp')
+    timestamp_str = entry.get("timestamp")
     if not timestamp_str:
         return False
 
     try:
-        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-        start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-        end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+        timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
         return start_dt <= timestamp <= end_dt
     except (ValueError, TypeError, AttributeError):
         return False
 
 
 # Token-efficient output formatters
+
 
 def _format_as_summary(result: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -2601,34 +2670,36 @@ def _format_as_summary(result: Dict[str, Any]) -> Dict[str, Any]:
     Instead of returning all log entries, groups them by message and
     provides aggregated statistics with a few examples.
     """
-    results = result.get('results', [])
+    results = result.get("results", [])
     if not results:
         return {
-            'total_matches': 0,
-            'unique_messages': 0,
-            'log_levels': {},
-            'top_messages': [],
-            'sample_entries': []
+            "total_matches": 0,
+            "unique_messages": 0,
+            "log_levels": {},
+            "top_messages": [],
+            "sample_entries": [],
         }
 
     # Group by message
-    message_groups = defaultdict(lambda: {
-        'count': 0,
-        'first_seen': None,
-        'last_seen': None,
-        'levels': defaultdict(int),
-        'examples': []
-    })
+    message_groups = defaultdict(
+        lambda: {
+            "count": 0,
+            "first_seen": None,
+            "last_seen": None,
+            "levels": defaultdict(int),
+            "examples": [],
+        }
+    )
 
     level_counts = defaultdict(int)
     file_counts = defaultdict(int)
 
     for item in results:
-        entry = item.get('entry', {})
-        message = entry.get('message', '').strip()
-        level = entry.get('level', 'INFO')
-        timestamp = entry.get('timestamp')
-        file_path = entry.get('file', '')
+        entry = item.get("entry", {})
+        message = entry.get("message", "").strip()
+        level = entry.get("level", "INFO")
+        timestamp = entry.get("timestamp")
+        file_path = entry.get("file", "")
 
         # Update level counts
         level_counts[level] += 1
@@ -2636,47 +2707,53 @@ def _format_as_summary(result: Dict[str, Any]) -> Dict[str, Any]:
 
         # Update message group
         group = message_groups[message]
-        group['count'] += 1
-        group['levels'][level] += 1
+        group["count"] += 1
+        group["levels"][level] += 1
 
-        if group['first_seen'] is None or (timestamp and timestamp < group['first_seen']):
-            group['first_seen'] = timestamp
+        if group["first_seen"] is None or (timestamp and timestamp < group["first_seen"]):
+            group["first_seen"] = timestamp
 
-        if group['last_seen'] is None or (timestamp and timestamp > group['last_seen']):
-            group['last_seen'] = timestamp
+        if group["last_seen"] is None or (timestamp and timestamp > group["last_seen"]):
+            group["last_seen"] = timestamp
 
         # Keep up to 2 examples per message
-        if len(group['examples']) < 2:
-            group['examples'].append({
-                'file': file_path,
-                'line': entry.get('line_number'),
-                'timestamp': timestamp,
-                'level': level
-            })
+        if len(group["examples"]) < 2:
+            group["examples"].append(
+                {
+                    "file": file_path,
+                    "line": entry.get("line_number"),
+                    "timestamp": timestamp,
+                    "level": level,
+                }
+            )
 
     # Convert to sorted list (most frequent first)
     top_messages = []
-    for message, data in sorted(message_groups.items(), key=lambda x: x[1]['count'], reverse=True)[:20]:
-        top_messages.append({
-            'message': message[:200],  # Truncate long messages
-            'count': data['count'],
-            'first_seen': data['first_seen'],
-            'last_seen': data['last_seen'],
-            'levels': dict(data['levels']),
-            'examples': data['examples']
-        })
+    for message, data in sorted(message_groups.items(), key=lambda x: x[1]["count"], reverse=True)[
+        :20
+    ]:
+        top_messages.append(
+            {
+                "message": message[:200],  # Truncate long messages
+                "count": data["count"],
+                "first_seen": data["first_seen"],
+                "last_seen": data["last_seen"],
+                "levels": dict(data["levels"]),
+                "examples": data["examples"],
+            }
+        )
 
     # Sample entries (diverse selection)
     sample_entries = _select_diverse_samples(results, max_samples=5)
 
     return {
-        'total_matches': len(results),
-        'unique_messages': len(message_groups),
-        'log_levels': dict(level_counts),
-        'by_file': dict(file_counts),
-        'top_messages': top_messages,
-        'sample_entries': sample_entries,
-        'full_results_available': True
+        "total_matches": len(results),
+        "unique_messages": len(message_groups),
+        "log_levels": dict(level_counts),
+        "by_file": dict(file_counts),
+        "top_messages": top_messages,
+        "sample_entries": sample_entries,
+        "full_results_available": True,
     }
 
 
@@ -2686,24 +2763,19 @@ def _format_as_count(result: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns only statistics, no actual log content.
     """
-    results = result.get('results', [])
+    results = result.get("results", [])
     if not results:
-        return {
-            'total_matches': 0,
-            'by_level': {},
-            'by_file': {},
-            'time_range': None
-        }
+        return {"total_matches": 0, "by_level": {}, "by_file": {}, "time_range": None}
 
     level_counts = defaultdict(int)
     file_counts = defaultdict(int)
     timestamps = []
 
     for item in results:
-        entry = item.get('entry', {})
-        level = entry.get('level', 'INFO')
-        file_path = entry.get('file', '')
-        timestamp = entry.get('timestamp')
+        entry = item.get("entry", {})
+        level = entry.get("level", "INFO")
+        file_path = entry.get("file", "")
+        timestamp = entry.get("timestamp")
 
         level_counts[level] += 1
         file_counts[file_path] += 1
@@ -2715,16 +2787,13 @@ def _format_as_count(result: Dict[str, Any]) -> Dict[str, Any]:
     time_range = None
     if timestamps:
         timestamps.sort()
-        time_range = {
-            'start': timestamps[0],
-            'end': timestamps[-1]
-        }
+        time_range = {"start": timestamps[0], "end": timestamps[-1]}
 
     return {
-        'total_matches': len(results),
-        'by_level': dict(level_counts),
-        'by_file': dict(file_counts),
-        'time_range': time_range
+        "total_matches": len(results),
+        "by_level": dict(level_counts),
+        "by_file": dict(file_counts),
+        "time_range": time_range,
     }
 
 
@@ -2734,29 +2803,25 @@ def _format_as_compact(result: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns only essential fields, removing raw logs and extra context.
     """
-    results = result.get('results', [])
+    results = result.get("results", [])
     if not results:
-        return {
-            'matches': [],
-            'total': 0
-        }
+        return {"matches": [], "total": 0}
 
     compact_matches = []
     for item in results:
-        entry = item.get('entry', {})
-        compact_matches.append({
-            'time': entry.get('timestamp'),
-            'level': entry.get('level'),
-            'msg': entry.get('message', '')[:150],  # Truncate messages
-            'thread': entry.get('thread_id') or entry.get('correlation_id'),
-            'file': entry.get('file', '').split('/')[-1],  # Just filename
-            'line': entry.get('line_number')
-        })
+        entry = item.get("entry", {})
+        compact_matches.append(
+            {
+                "time": entry.get("timestamp"),
+                "level": entry.get("level"),
+                "msg": entry.get("message", "")[:150],  # Truncate messages
+                "thread": entry.get("thread_id") or entry.get("correlation_id"),
+                "file": entry.get("file", "").split("/")[-1],  # Just filename
+                "line": entry.get("line_number"),
+            }
+        )
 
-    return {
-        'matches': compact_matches,
-        'total': len(results)
-    }
+    return {"matches": compact_matches, "total": len(results)}
 
 
 def _select_diverse_samples(results: List[Dict], max_samples: int = 5) -> List[Dict]:
@@ -2773,25 +2838,25 @@ def _select_diverse_samples(results: List[Dict], max_samples: int = 5) -> List[D
         return []
 
     if len(results) <= max_samples:
-        return [r.get('entry', {}) for r in results]
+        return [r.get("entry", {}) for r in results]
 
     samples = []
     indices_used = set()
 
     # Always include first and last
-    samples.append(results[0].get('entry', {}))
+    samples.append(results[0].get("entry", {}))
     indices_used.add(0)
 
     if len(results) > 1:
-        samples.append(results[-1].get('entry', {}))
+        samples.append(results[-1].get("entry", {}))
         indices_used.add(len(results) - 1)
 
     # Find first error
     for i, item in enumerate(results):
         if i in indices_used:
             continue
-        entry = item.get('entry', {})
-        if entry.get('level') in ['ERROR', 'FATAL']:
+        entry = item.get("entry", {})
+        if entry.get("level") in ["ERROR", "FATAL"]:
             samples.append(entry)
             indices_used.add(i)
             break
@@ -2803,13 +2868,14 @@ def _select_diverse_samples(results: List[Dict], max_samples: int = 5) -> List[D
         for i in range(1, remaining + 1):
             idx = min(i * step, len(results) - 1)
             if idx not in indices_used:
-                samples.append(results[idx].get('entry', {}))
+                samples.append(results[idx].get("entry", {}))
                 indices_used.add(idx)
 
     return samples[:max_samples]
 
 
 # Investigation Session Management
+
 
 class InvestigationSession:
     """
@@ -2852,8 +2918,13 @@ class InvestigationSession:
         if files:
             self._add_to_history("init", "Initialize investigation", {"files": files}, None)
 
-    def search(self, query: Optional[str] = None, level: Optional[str] = None,
-               output_format: str = "summary", **kwargs) -> Dict[str, Any]:
+    def search(
+        self,
+        query: Optional[str] = None,
+        level: Optional[str] = None,
+        output_format: str = "summary",
+        **kwargs,
+    ) -> Dict[str, Any]:
         """Perform search and track in history"""
         params = {"query": query, "level": level, "output_format": output_format, **kwargs}
         result = search(self.files, query=query, level=level, output_format=output_format, **kwargs)
@@ -2862,26 +2933,25 @@ class InvestigationSession:
             "search",
             f"Search for {level or 'all'} logs" + (f" matching '{query}'" if query else ""),
             params,
-            result
+            result,
         )
 
         return result
 
-    def follow_thread(self, thread_id: Optional[str] = None,
-                     correlation_id: Optional[str] = None,
-                     trace_id: Optional[str] = None) -> Dict[str, Any]:
+    def follow_thread(
+        self,
+        thread_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Follow thread and track in history"""
         params = {"thread_id": thread_id, "correlation_id": correlation_id, "trace_id": trace_id}
-        result = follow_thread(self.files, thread_id=thread_id,
-                              correlation_id=correlation_id, trace_id=trace_id)
+        result = follow_thread(
+            self.files, thread_id=thread_id, correlation_id=correlation_id, trace_id=trace_id
+        )
 
         thread_desc = thread_id or correlation_id or trace_id
-        self._add_to_history(
-            "follow_thread",
-            f"Follow thread: {thread_desc}",
-            params,
-            result
-        )
+        self._add_to_history("follow_thread", f"Follow thread: {thread_desc}", params, result)
 
         return result
 
@@ -2891,10 +2961,7 @@ class InvestigationSession:
         result = find_patterns(self.files, min_occurrences=min_occurrences)
 
         self._add_to_history(
-            "find_patterns",
-            f"Find patterns (min {min_occurrences} occurrences)",
-            params,
-            result
+            "find_patterns", f"Find patterns (min {min_occurrences} occurrences)", params, result
         )
 
         return result
@@ -2908,12 +2975,16 @@ class InvestigationSession:
 
         return result
 
-    def cross_service_timeline(self, service_files: Dict[str, List[str]], **kwargs) -> Dict[str, Any]:
+    def cross_service_timeline(
+        self, service_files: Dict[str, List[str]], **kwargs
+    ) -> Dict[str, Any]:
         """Create cross-service timeline and track in history"""
         result = cross_service_timeline(service_files, **kwargs)
 
         desc = f"Cross-service timeline for {list(service_files.keys())}"
-        self._add_to_history("cross_service_timeline", desc, {"service_files": service_files, **kwargs}, result)
+        self._add_to_history(
+            "cross_service_timeline", desc, {"service_files": service_files, **kwargs}, result
+        )
 
         return result
 
@@ -2921,18 +2992,23 @@ class InvestigationSession:
         """Add a text note to the investigation"""
         self._add_to_history("note", f"Note: {note[:50]}...", {"note": note}, None)
 
-    def _add_to_history(self, operation_type: str, description: str,
-                       params: Dict[str, Any], result: Optional[Dict[str, Any]]):
+    def _add_to_history(
+        self,
+        operation_type: str,
+        description: str,
+        params: Dict[str, Any],
+        result: Optional[Dict[str, Any]],
+    ):
         """Add operation to history"""
         # Remove any operations after current index (for undo/redo)
-        self.history = self.history[:self.current_index + 1]
+        self.history = self.history[: self.current_index + 1]
 
         entry = {
             "timestamp": datetime.now().isoformat(),
             "operation": operation_type,
             "description": description,
             "params": params,
-            "result_summary": self._summarize_result(result) if result else None
+            "result_summary": self._summarize_result(result) if result else None,
         }
 
         self.history.append(entry)
@@ -2946,22 +3022,22 @@ class InvestigationSession:
         summary = {}
 
         # Common fields
-        if 'total_matches' in result:
-            summary['total_matches'] = result['total_matches']
-        if 'total_entries' in result:
-            summary['total_entries'] = result['total_entries']
-        if 'duration_ms' in result:
-            summary['duration_ms'] = result['duration_ms']
-        if 'summary' in result:
-            summary['summary'] = result['summary']
+        if "total_matches" in result:
+            summary["total_matches"] = result["total_matches"]
+        if "total_entries" in result:
+            summary["total_entries"] = result["total_entries"]
+        if "duration_ms" in result:
+            summary["duration_ms"] = result["duration_ms"]
+        if "summary" in result:
+            summary["summary"] = result["summary"]
 
         # Pattern results
-        if 'patterns' in result:
-            summary['pattern_count'] = len(result['patterns'])
+        if "patterns" in result:
+            summary["pattern_count"] = len(result["patterns"])
 
         # Timeline results
-        if 'timeline' in result:
-            summary['timeline_length'] = len(result['timeline'])
+        if "timeline" in result:
+            summary["timeline_length"] = len(result["timeline"])
 
         return summary
 
@@ -2971,12 +3047,15 @@ class InvestigationSession:
             return self.history
         else:
             # Return without full results (more token-efficient)
-            return [{
-                "timestamp": h["timestamp"],
-                "operation": h["operation"],
-                "description": h["description"],
-                "result_summary": h.get("result_summary")
-            } for h in self.history]
+            return [
+                {
+                    "timestamp": h["timestamp"],
+                    "operation": h["operation"],
+                    "description": h["description"],
+                    "result_summary": h.get("result_summary"),
+                }
+                for h in self.history
+            ]
 
     def undo(self) -> bool:
         """Undo last operation"""
@@ -3008,24 +3087,24 @@ class InvestigationSession:
             "history": self.history,
             "current_index": self.current_index,
             "metadata": self.metadata,
-            "saved_at": datetime.now().isoformat()
+            "saved_at": datetime.now().isoformat(),
         }
 
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(data, f, indent=2)
 
     @classmethod
-    def load(cls, filepath: str) -> 'InvestigationSession':
+    def load(cls, filepath: str) -> "InvestigationSession":
         """Load session from file"""
         import json
 
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             data = json.load(f)
 
-        session = cls(files=data['files'], name=data['name'])
-        session.history = data['history']
-        session.current_index = data['current_index']
-        session.metadata = data.get('metadata', {})
+        session = cls(files=data["files"], name=data["name"])
+        session.history = data["history"]
+        session.current_index = data["current_index"]
+        session.metadata = data.get("metadata", {})
 
         return session
 
@@ -3037,15 +3116,15 @@ class InvestigationSession:
         lines = [
             f"Investigation: {self.name}",
             f"Steps completed: {len(self.history)}",
-            f"",
-            "Timeline:"
+            "",
+            "Timeline:",
         ]
 
         for i, entry in enumerate(self.history):
             marker = "→" if i == self.current_index else " "
             lines.append(f"  {marker} {i+1}. {entry['description']}")
-            if entry.get('result_summary'):
-                for key, value in entry['result_summary'].items():
+            if entry.get("result_summary"):
+                for key, value in entry["result_summary"].items():
                     lines.append(f"      {key}: {value}")
 
         return "\n".join(lines)
@@ -3067,6 +3146,7 @@ class InvestigationSession:
             return self._generate_text_report(include_evidence)
         elif format == "json":
             import json
+
             return json.dumps(self._generate_json_report(include_evidence), indent=2)
         else:
             return self._generate_markdown_report(include_evidence)
@@ -3075,15 +3155,15 @@ class InvestigationSession:
         """Generate Markdown format report"""
         lines = [
             f"# Investigation Report: {self.name}",
-            f"",
+            "",
             f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"**Files Analyzed:** {', '.join(self.files)}",
             f"**Steps Completed:** {len(self.history)}",
-            f"",
-            f"---",
-            f"",
-            f"## Executive Summary",
-            f"",
+            "",
+            "---",
+            "",
+            "## Executive Summary",
+            "",
         ]
 
         # Try to extract key findings
@@ -3092,12 +3172,14 @@ class InvestigationSession:
         key_insights = []
 
         for entry in self.history:
-            summary = entry.get('result_summary') or {}
-            if 'total_matches' in summary and entry['operation'] == 'search':
-                error_counts.append(f"- Found {summary['total_matches']} matches in {entry['description']}")
-            if 'pattern_count' in summary:
+            summary = entry.get("result_summary") or {}
+            if "total_matches" in summary and entry["operation"] == "search":
+                error_counts.append(
+                    f"- Found {summary['total_matches']} matches in {entry['description']}"
+                )
+            if "pattern_count" in summary:
                 patterns_found.append(f"- Identified {summary['pattern_count']} repeated patterns")
-            if 'summary' in summary:
+            if "summary" in summary:
                 key_insights.append(f"- {summary['summary']}")
 
         if error_counts:
@@ -3109,48 +3191,44 @@ class InvestigationSession:
             lines.append("### Key Findings")
             lines.extend(key_insights)
 
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## Investigation Timeline",
-            ""
-        ])
+        lines.extend(["", "---", "", "## Investigation Timeline", ""])
 
         # Add detailed timeline
         for i, entry in enumerate(self.history):
-            timestamp = entry.get('timestamp', 'Unknown time')
-            desc = entry['description']
-            operation = entry['operation']
+            timestamp = entry.get("timestamp", "Unknown time")
+            desc = entry["description"]
+            operation = entry["operation"]
 
             lines.append(f"### Step {i+1}: {desc}")
-            lines.append(f"")
+            lines.append("")
             lines.append(f"- **Time:** {timestamp}")
             lines.append(f"- **Operation:** `{operation}`")
 
             # Add results
-            if entry.get('result_summary'):
-                lines.append(f"- **Results:**")
-                for key, value in entry['result_summary'].items():
+            if entry.get("result_summary"):
+                lines.append("- **Results:**")
+                for key, value in entry["result_summary"].items():
                     lines.append(f"  - {key}: {value}")
 
             lines.append("")
 
-        lines.extend([
-            "---",
-            "",
-            "## Conclusions",
-            "",
-            "Based on the investigation steps above, review the key findings and error patterns.",
-            "",
-            "## Next Steps",
-            "",
-            "- [ ] Review identified error patterns",
-            "- [ ] Investigate root causes",
-            "- [ ] Implement fixes",
-            "- [ ] Monitor for recurrence",
-            ""
-        ])
+        lines.extend(
+            [
+                "---",
+                "",
+                "## Conclusions",
+                "",
+                "Based on the investigation steps above, review the key findings and error patterns.",
+                "",
+                "## Next Steps",
+                "",
+                "- [ ] Review identified error patterns",
+                "- [ ] Investigate root causes",
+                "- [ ] Implement fixes",
+                "- [ ] Monitor for recurrence",
+                "",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -3166,23 +3244,19 @@ class InvestigationSession:
             "=" * 70,
             "",
             "TIMELINE:",
-            ""
+            "",
         ]
 
         for i, entry in enumerate(self.history):
-            timestamp = entry.get('timestamp', 'Unknown')
+            timestamp = entry.get("timestamp", "Unknown")
             lines.append(f"{i+1}. [{timestamp}] {entry['description']}")
 
-            if entry.get('result_summary'):
-                for key, value in entry['result_summary'].items():
+            if entry.get("result_summary"):
+                for key, value in entry["result_summary"].items():
                     lines.append(f"   - {key}: {value}")
             lines.append("")
 
-        lines.extend([
-            "=" * 70,
-            "END OF REPORT",
-            "=" * 70
-        ])
+        lines.extend(["=" * 70, "END OF REPORT", "=" * 70])
 
         return "\n".join(lines)
 
@@ -3193,18 +3267,21 @@ class InvestigationSession:
             "generated_at": datetime.now().isoformat(),
             "files": self.files,
             "steps_completed": len(self.history),
-            "timeline": self.history if include_evidence else self.get_history(include_results=False),
-            "metadata": self.metadata
+            "timeline": (
+                self.history if include_evidence else self.get_history(include_results=False)
+            ),
+            "metadata": self.metadata,
         }
 
 
 # Smart Sampling
 
+
 def smart_sample(
     files: List[str],
     level: Optional[str] = None,
     strategy: str = "representative",
-    sample_size: int = 50
+    sample_size: int = 50,
 ) -> Dict[str, Any]:
     """
     Get a smart sample of log entries that represents the full dataset.
@@ -3253,7 +3330,7 @@ def smart_sample(
 
     # Get all entries
     results = search(files, level=level, limit=None)
-    all_entries = [r['entry'] for r in results.get('results', [])]
+    all_entries = [r["entry"] for r in results.get("results", [])]
 
     if not all_entries:
         return {
@@ -3261,7 +3338,7 @@ def smart_sample(
             "total_population": 0,
             "sample_size": 0,
             "strategy": strategy,
-            "coverage": {}
+            "coverage": {},
         }
 
     # Apply sampling strategy
@@ -3285,7 +3362,7 @@ def smart_sample(
         "total_population": len(all_entries),
         "sample_size": len(samples),
         "strategy": strategy,
-        "coverage": coverage
+        "coverage": coverage,
     }
 
 
@@ -3299,7 +3376,7 @@ def _sample_representative(entries: List[Dict], size: int) -> List[Dict]:
     # Group by level
     by_level = defaultdict(list)
     for entry in entries:
-        level = entry.get('level', 'INFO')
+        level = entry.get("level", "INFO")
         by_level[level].append(entry)
 
     # Calculate proportional samples per level
@@ -3338,11 +3415,11 @@ def _sample_diverse(entries: List[Dict], size: int) -> List[Dict]:
         if len(samples) >= size:
             break
 
-        message = entry.get('message', '')
+        message = entry.get("message", "")
         if message and message not in used_messages:
             samples.append(entry)
             used_messages.add(message)
-            thread = entry.get('thread_id') or entry.get('correlation_id')
+            thread = entry.get("thread_id") or entry.get("correlation_id")
             if thread:
                 used_threads.add(thread)
 
@@ -3352,7 +3429,7 @@ def _sample_diverse(entries: List[Dict], size: int) -> List[Dict]:
             if len(samples) >= size:
                 break
 
-            thread = entry.get('thread_id') or entry.get('correlation_id')
+            thread = entry.get("thread_id") or entry.get("correlation_id")
             if thread and thread not in used_threads:
                 samples.append(entry)
                 used_threads.add(thread)
@@ -3375,10 +3452,7 @@ def _sample_chronological(entries: List[Dict], size: int) -> List[Dict]:
         return entries
 
     # Sort by timestamp
-    sorted_entries = sorted(
-        entries,
-        key=lambda e: e.get('timestamp', '')
-    )
+    sorted_entries = sorted(entries, key=lambda e: e.get("timestamp", ""))
 
     # Sample evenly
     step = len(sorted_entries) / size
@@ -3397,8 +3471,8 @@ def _sample_errors_focused(entries: List[Dict], size: int) -> List[Dict]:
 
     # Separate errors from non-errors
     for i, entry in enumerate(entries):
-        level = entry.get('level', 'INFO')
-        if level in ['ERROR', 'FATAL']:
+        level = entry.get("level", "INFO")
+        if level in ["ERROR", "FATAL"]:
             error_indices.append(i)
         else:
             non_error_indices.append(i)
@@ -3441,8 +3515,8 @@ def _sample_errors_focused(entries: List[Dict], size: int) -> List[Dict]:
 def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str, Any]:
     """Calculate how well the sample covers the population"""
     # Time coverage
-    pop_times = [e.get('timestamp') for e in population if e.get('timestamp')]
-    sample_times = [e.get('timestamp') for e in sample if e.get('timestamp')]
+    pop_times = [e.get("timestamp") for e in population if e.get("timestamp")]
+    sample_times = [e.get("timestamp") for e in sample if e.get("timestamp")]
 
     time_coverage = 0.0
     if pop_times and sample_times:
@@ -3452,10 +3526,10 @@ def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str,
         sample_range = sample_times[-1], sample_times[0]
         # Simple coverage: sample span / population span
         try:
-            pop_start = datetime.fromisoformat(pop_times[0].replace('Z', '+00:00'))
-            pop_end = datetime.fromisoformat(pop_times[-1].replace('Z', '+00:00'))
-            sample_start = datetime.fromisoformat(sample_times[0].replace('Z', '+00:00'))
-            sample_end = datetime.fromisoformat(sample_times[-1].replace('Z', '+00:00'))
+            pop_start = datetime.fromisoformat(pop_times[0].replace("Z", "+00:00"))
+            pop_end = datetime.fromisoformat(pop_times[-1].replace("Z", "+00:00"))
+            sample_start = datetime.fromisoformat(sample_times[0].replace("Z", "+00:00"))
+            sample_end = datetime.fromisoformat(sample_times[-1].replace("Z", "+00:00"))
 
             pop_duration = (pop_end - pop_start).total_seconds()
             sample_duration = (sample_end - sample_start).total_seconds()
@@ -3468,18 +3542,18 @@ def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str,
     # Level coverage
     level_coverage = defaultdict(int)
     for entry in sample:
-        level = entry.get('level', 'INFO')
+        level = entry.get("level", "INFO")
         level_coverage[level] += 1
 
     # Thread coverage
     pop_threads = set()
     sample_threads = set()
     for entry in population:
-        thread = entry.get('thread_id') or entry.get('correlation_id')
+        thread = entry.get("thread_id") or entry.get("correlation_id")
         if thread:
             pop_threads.add(thread)
     for entry in sample:
-        thread = entry.get('thread_id') or entry.get('correlation_id')
+        thread = entry.get("thread_id") or entry.get("correlation_id")
         if thread:
             sample_threads.add(thread)
 
@@ -3490,16 +3564,15 @@ def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str,
         "level_distribution": dict(level_coverage),
         "unique_threads_in_sample": len(sample_threads),
         "unique_threads_in_population": len(pop_threads),
-        "thread_coverage_pct": thread_coverage_pct
+        "thread_coverage_pct": thread_coverage_pct,
     }
 
 
 # Automatic Insights and Suggestions
 
+
 def analyze_with_insights(
-    files: List[str],
-    level: Optional[str] = None,
-    auto_investigate: bool = True
+    files: List[str], level: Optional[str] = None, auto_investigate: bool = True
 ) -> Dict[str, Any]:
     """
     Analyze logs and automatically generate insights and suggestions.
@@ -3554,73 +3627,81 @@ def analyze_with_insights(
     search_results = search(files, level=level, output_format="summary")
 
     # Insight 1: Error rate analysis
-    total = search_results.get('total_matches', 0)
-    levels = search_results.get('log_levels', {})
-    error_count = levels.get('ERROR', 0) + levels.get('FATAL', 0)
+    total = search_results.get("total_matches", 0)
+    levels = search_results.get("log_levels", {})
+    error_count = levels.get("ERROR", 0) + levels.get("FATAL", 0)
 
     if total > 0:
         error_rate = error_count / total
         if error_rate > 0.1:  # More than 10% errors
-            insights.append({
-                "type": "high_error_rate",
-                "severity": "high",
-                "description": f"High error rate: {error_rate:.1%} ({error_count}/{total})",
-                "evidence": {"error_count": error_count, "total": total, "rate": error_rate},
-                "suggestion": "Investigate most common errors first"
-            })
+            insights.append(
+                {
+                    "type": "high_error_rate",
+                    "severity": "high",
+                    "description": f"High error rate: {error_rate:.1%} ({error_count}/{total})",
+                    "evidence": {"error_count": error_count, "total": total, "rate": error_rate},
+                    "suggestion": "Investigate most common errors first",
+                }
+            )
             next_steps.append("Run: find_patterns(files, min_occurrences=3)")
 
     # Insight 2: Pattern detection
     if auto_investigate and error_count > 0:
         patterns = find_patterns(files, min_occurrences=2)
-        if patterns.get('patterns'):
-            pattern_count = len(patterns['patterns'])
-            insights.append({
-                "type": "repeated_patterns",
-                "severity": "medium",
-                "description": f"Found {pattern_count} repeated error patterns",
-                "evidence": patterns['patterns'][:3],  # Top 3
-                "suggestion": "These errors are systematic, not random"
-            })
+        if patterns.get("patterns"):
+            pattern_count = len(patterns["patterns"])
+            insights.append(
+                {
+                    "type": "repeated_patterns",
+                    "severity": "medium",
+                    "description": f"Found {pattern_count} repeated error patterns",
+                    "evidence": patterns["patterns"][:3],  # Top 3
+                    "suggestion": "These errors are systematic, not random",
+                }
+            )
 
             # Suggest investigating the most frequent pattern
-            if patterns['patterns']:
-                top_pattern = patterns['patterns'][0]
-                suggestions.append(f"Investigate pattern: '{top_pattern.get('pattern', '')[:50]}...'")
+            if patterns["patterns"]:
+                top_pattern = patterns["patterns"][0]
+                suggestions.append(
+                    f"Investigate pattern: '{top_pattern.get('pattern', '')[:50]}...'"
+                )
 
     # Insight 3: Check for cascading failures
     if error_count > 5:
         # Look for timing patterns
-        top_messages = search_results.get('top_messages', [])
+        top_messages = search_results.get("top_messages", [])
         if top_messages:
             # Check if errors happened in quick succession
-            time_clustered = any(
-                msg.get('count', 0) > 3 for msg in top_messages
-            )
+            time_clustered = any(msg.get("count", 0) > 3 for msg in top_messages)
             if time_clustered:
-                insights.append({
-                    "type": "possible_cascade",
-                    "severity": "high",
-                    "description": "Errors may be cascading (multiple errors in short time)",
-                    "evidence": top_messages[:2],
-                    "suggestion": "Look for root cause - later errors may be symptoms"
-                })
+                insights.append(
+                    {
+                        "type": "possible_cascade",
+                        "severity": "high",
+                        "description": "Errors may be cascading (multiple errors in short time)",
+                        "evidence": top_messages[:2],
+                        "suggestion": "Look for root cause - later errors may be symptoms",
+                    }
+                )
                 suggestions.append("Check timestamps - investigate earliest error first")
 
     # Insight 4: Thread analysis
     for meta in metadata:
-        unique_threads = meta.get('unique_threads', 0)
-        unique_correlations = meta.get('unique_correlation_ids', 0)
+        unique_threads = meta.get("unique_threads", 0)
+        unique_correlations = meta.get("unique_correlation_ids", 0)
 
         if error_count > 0 and unique_correlations > 0:
             # Some threads are failing
-            insights.append({
-                "type": "thread_failures",
-                "severity": "medium",
-                "description": f"Errors across {unique_correlations} different requests",
-                "evidence": {"unique_correlations": unique_correlations},
-                "suggestion": "Compare successful vs failed requests"
-            })
+            insights.append(
+                {
+                    "type": "thread_failures",
+                    "severity": "medium",
+                    "description": f"Errors across {unique_correlations} different requests",
+                    "evidence": {"unique_correlations": unique_correlations},
+                    "suggestion": "Compare successful vs failed requests",
+                }
+            )
             next_steps.append("Use: compare_threads() to find differences")
 
     # Generate suggestions based on insights
@@ -3637,7 +3718,7 @@ def analyze_with_insights(
         "error_count": error_count,
         "error_rate": error_count / total if total > 0 else 0,
         "files_analyzed": len(files),
-        "log_levels": levels
+        "log_levels": levels,
     }
 
     return {
@@ -3645,14 +3726,14 @@ def analyze_with_insights(
         "insights": insights,
         "suggestions": suggestions,
         "next_steps": next_steps,
-        "investigated_automatically": auto_investigate
+        "investigated_automatically": auto_investigate,
     }
 
 
 def explain(
     entry: Optional[Dict[str, Any]] = None,
     error_message: Optional[str] = None,
-    context: str = "general"
+    context: str = "general",
 ) -> str:
     """
     Explain a log entry or error message in simple terms.
@@ -3683,9 +3764,9 @@ def explain(
         )
     """
     if entry:
-        message = entry.get('message', '')
-        level = entry.get('level', 'INFO')
-        error_field = entry.get('error', '')
+        message = entry.get("message", "")
+        level = entry.get("level", "INFO")
+        error_field = entry.get("error", "")
     elif error_message:
         message = error_message
         level = "ERROR"
@@ -3714,7 +3795,9 @@ def explain(
         lines.append("2. Look at the service being called - is it slow or down?")
         lines.append("3. Review timeout configuration - is it too short?")
 
-    elif "connection" in message_lower and ("refused" in message_lower or "failed" in message_lower):
+    elif "connection" in message_lower and (
+        "refused" in message_lower or "failed" in message_lower
+    ):
         lines.append("A connection failure means the application couldn't reach another service.")
         lines.append("\n**Common causes:**")
         lines.append("- Service is down or not responding")
@@ -3764,7 +3847,11 @@ def explain(
         lines.append("2. Add null checks and validation")
         lines.append("3. Review why the value was null")
 
-    elif "permission" in message_lower or "access denied" in message_lower or "forbidden" in message_lower:
+    elif (
+        "permission" in message_lower
+        or "access denied" in message_lower
+        or "forbidden" in message_lower
+    ):
         lines.append("The application doesn't have permission to perform this action.")
         lines.append("\n**Common causes:**")
         lines.append("- Incorrect file/resource permissions")
@@ -3779,7 +3866,7 @@ def explain(
     else:
         # Generic explanation
         if level == "ERROR" or level == "FATAL":
-            lines.append(f"This is an error that prevented normal operation.")
+            lines.append("This is an error that prevented normal operation.")
             lines.append(f"\nError message: `{message}`")
             lines.append("\n**Next steps:**")
             lines.append("1. Look at the full stack trace if available")
@@ -3794,7 +3881,7 @@ def explain(
             lines.append("2. Check if it's happening frequently")
             lines.append("3. Consider if it could become a problem")
         else:
-            lines.append(f"This is an informational message.")
+            lines.append("This is an informational message.")
             lines.append(f"\nMessage: `{message}`")
 
     # Context-specific advice
@@ -3808,7 +3895,9 @@ def explain(
     return "\n".join(lines)
 
 
-def suggest_next_action(current_results: Dict[str, Any], investigation_context: Optional[Dict] = None) -> List[str]:
+def suggest_next_action(
+    current_results: Dict[str, Any], investigation_context: Optional[Dict] = None
+) -> List[str]:
     """
     Suggest what to investigate next based on current results.
 
@@ -3822,8 +3911,8 @@ def suggest_next_action(current_results: Dict[str, Any], investigation_context: 
     suggestions = []
 
     # Based on search results
-    if 'total_matches' in current_results:
-        total = current_results['total_matches']
+    if "total_matches" in current_results:
+        total = current_results["total_matches"]
         if total == 0:
             suggestions.append("No matches found. Try:")
             suggestions.append("  - Broaden search (remove filters)")
@@ -3836,16 +3925,18 @@ def suggest_next_action(current_results: Dict[str, Any], investigation_context: 
             suggestions.append("  - Use smart_sample() to get representative sample")
         elif total > 0:
             # Good result size, suggest next steps
-            if 'top_messages' in current_results:
-                top_msg = current_results['top_messages'][0] if current_results['top_messages'] else None
-                if top_msg and top_msg.get('count', 0) > 3:
+            if "top_messages" in current_results:
+                top_msg = (
+                    current_results["top_messages"][0] if current_results["top_messages"] else None
+                )
+                if top_msg and top_msg.get("count", 0) > 3:
                     suggestions.append("Repeated errors detected. Next:")
-                    suggestions.append(f"  - find_patterns(files, min_occurrences=3)")
+                    suggestions.append("  - find_patterns(files, min_occurrences=3)")
                     suggestions.append("  - Follow one of these threads to see full context")
 
     # Based on patterns
-    if 'patterns' in current_results:
-        pattern_count = len(current_results.get('patterns', []))
+    if "patterns" in current_results:
+        pattern_count = len(current_results.get("patterns", []))
         if pattern_count > 0:
             suggestions.append(f"Found {pattern_count} patterns. Next:")
             suggestions.append("  - Compare successful vs failed requests")
@@ -3859,6 +3950,8 @@ def suggest_next_action(current_results: Dict[str, Any], investigation_context: 
         suggestions.append("  - compare_time_periods() - Before/after analysis")
 
     return suggestions
+
+
 def _load_files_with_config(
     inv: Any,
     files: List[str],

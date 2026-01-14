@@ -18,16 +18,13 @@ log_file = "examples/logs/production_incident.log"
 print("\n🚀 PHASE 1: Quick Triage (token-efficient)")
 print("-" * 70)
 
-result = investigate.analyze_with_insights(
-    files=[log_file],
-    auto_investigate=True
-)
+result = investigate.analyze_with_insights(files=[log_file], auto_investigate=True)
 
 print(f"Error rate: {result['overview']['error_rate']:.1%}")
 print(f"Insights found: {len(result['insights'])}")
 
-if result['insights']:
-    top_insight = result['insights'][0]
+if result["insights"]:
+    top_insight = result["insights"][0]
     print(f"\nTop insight: [{top_insight['severity'].upper()}] {top_insight['description']}")
     print(f"Suggestion: {top_insight['suggestion']}")
 
@@ -35,18 +32,11 @@ if result['insights']:
 print("\n📝 PHASE 2: Detailed Investigation (with session tracking)")
 print("-" * 70)
 
-session = investigate.InvestigationSession(
-    files=[log_file],
-    name="incident_investigation"
-)
+session = investigate.InvestigationSession(files=[log_file], name="incident_investigation")
 
 # Step 1: Get representative sample (token-efficient)
 print("\nStep 1: Get representative sample")
-sample = investigate.smart_sample(
-    files=[log_file],
-    strategy="errors_focused",
-    sample_size=10
-)
+sample = investigate.smart_sample(files=[log_file], strategy="errors_focused", sample_size=10)
 print(f"  Sampled {sample['sample_size']} from {sample['total_population']} entries")
 session.add_note(f"Analyzed sample of {sample['sample_size']} entries")
 
@@ -61,8 +51,8 @@ print("\nStep 3: Find error patterns")
 patterns = session.find_patterns(min_occurrences=2)
 print(f"  Found {len(patterns.get('patterns', []))} patterns")
 
-if patterns.get('patterns'):
-    top_pattern = patterns['patterns'][0]
+if patterns.get("patterns"):
+    top_pattern = patterns["patterns"][0]
     print(f"  Top pattern: {top_pattern.get('pattern', '')[:60]}...")
     print(f"  Occurrences: {top_pattern.get('occurrences', 0)}")
 
@@ -70,12 +60,9 @@ if patterns.get('patterns'):
     print("\n🤔 PHASE 3: Understand the Error")
     print("-" * 70)
 
-    if top_pattern.get('examples'):
-        example = top_pattern['examples'][0]
-        explanation = investigate.explain(
-            entry=example,
-            context="production"
-        )
+    if top_pattern.get("examples"):
+        example = top_pattern["examples"][0]
+        explanation = investigate.explain(entry=example, context="production")
         print(explanation[:400] + "...\n[Explanation truncated]")
         session.add_note("Identified root cause: connection pool exhaustion")
 
