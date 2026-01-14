@@ -1,5 +1,13 @@
 """Test script for hierarchy visualization"""
 
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+from logler.tree_formatter import format_tree, format_waterfall
+from logler.investigate import get_hierarchy_summary
+
 # Mock hierarchy data (what would be returned from Rust)
 mock_hierarchy = {
     "roots": [
@@ -134,15 +142,6 @@ mock_hierarchy = {
     "error_nodes": [],
     "detection_method": "ExplicitParentId",
 }
-
-# Test tree formatter
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
-
-from logler.tree_formatter import format_tree, format_waterfall
-from logler.investigate import get_hierarchy_summary
 
 print("=" * 80)
 print("TESTING HIERARCHY VISUALIZATION")

@@ -2153,8 +2153,6 @@ def cross_service_timeline(
     service_counts = defaultdict(int)
 
     for service_name, service_files in files.items():
-        # Search with filters
-        filters = {}
         if correlation_id:
             result = follow_thread(service_files, correlation_id=correlation_id, trace_id=trace_id)
             entries = result.get("entries", [])
@@ -3479,7 +3477,6 @@ def _sample_errors_focused(entries: List[Dict], size: int) -> List[Dict]:
 
     # Allocate 70% to errors, 30% to context
     error_budget = int(size * 0.7)
-    context_budget = size - error_budget
 
     # Sample errors
     if error_indices:
@@ -3522,8 +3519,6 @@ def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str,
     if pop_times and sample_times:
         pop_times.sort()
         sample_times.sort()
-        pop_range = pop_times[-1], pop_times[0]
-        sample_range = sample_times[-1], sample_times[0]
         # Simple coverage: sample span / population span
         try:
             pop_start = datetime.fromisoformat(pop_times[0].replace("Z", "+00:00"))
@@ -3688,7 +3683,6 @@ def analyze_with_insights(
 
     # Insight 4: Thread analysis
     for meta in metadata:
-        unique_threads = meta.get("unique_threads", 0)
         unique_correlations = meta.get("unique_correlation_ids", 0)
 
         if error_count > 0 and unique_correlations > 0:
@@ -3766,11 +3760,9 @@ def explain(
     if entry:
         message = entry.get("message", "")
         level = entry.get("level", "INFO")
-        error_field = entry.get("error", "")
     elif error_message:
         message = error_message
         level = "ERROR"
-        error_field = ""
     else:
         return "No entry or message provided to explain"
 

@@ -217,10 +217,10 @@ class TestEmitCommand:
         result = run_llm_command(["emit", sample_log_file, "--level", "ERROR"])
         assert result.returncode == EXIT_SUCCESS
 
-        lines = [l for l in result.stdout.strip().split("\n") if l]
+        lines = [line for line in result.stdout.strip().split("\n") if line]
         assert len(lines) > 0
-        for line in lines:
-            parsed = json.loads(line)
+        for output_line in lines:
+            parsed = json.loads(output_line)
             level = parsed.get("level") or parsed.get("lv")
             assert level == "ERROR"
 
@@ -237,7 +237,7 @@ class TestVerifyPatternCommand:
         assert "pattern" in output
         assert "verified" in output
         assert "statistics" in output
-        assert output["verified"] == True
+        assert output["verified"] is True
 
     def test_verify_pattern_no_match(self, sample_log_file):
         """Test pattern that doesn't match."""
@@ -247,7 +247,7 @@ class TestVerifyPatternCommand:
         assert result.returncode == EXIT_NO_RESULTS
 
         output = json.loads(result.stdout)
-        assert output["verified"] == False
+        assert output["verified"] is False
 
     def test_verify_pattern_with_groups(self, sample_log_file):
         """Test pattern with capture groups."""
@@ -385,7 +385,7 @@ class TestNoTruncation:
             result = run_llm_command(["emit", log_file])
             assert result.returncode == EXIT_SUCCESS
 
-            lines = [l for l in result.stdout.strip().split("\n") if l]
+            lines = [line for line in result.stdout.strip().split("\n") if line]
             assert len(lines) == 150
 
         finally:

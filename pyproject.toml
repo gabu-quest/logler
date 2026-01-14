@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "logler"
-version = "1.0.0"
+version = "1.0.1"
 description = "Beautiful local log viewer with thread tracking and real-time updates"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple, Set
+from typing import List, Optional, Dict, Any, Tuple
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -237,7 +237,6 @@ def _python_filter(
     track: bool,
 ) -> List[Dict[str, Any]]:
     matched: List[Dict[str, Any]] = []
-    thread_set: Set[str] = set(filters.get("threads") or [])
     for raw_path in files:
         path = _ensure_within_root(Path(raw_path))
         if not path.exists():

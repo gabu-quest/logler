@@ -68,8 +68,6 @@ class LogParser:
 
     def parse_line(self, line_number: int, raw: str) -> LogEntry:
         """Parse a single log line."""
-        entry = LogEntry(line_number=line_number, raw=raw)
-
         # Try JSON first
         if raw.strip().startswith("{"):
             try:

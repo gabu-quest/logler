@@ -194,16 +194,25 @@ class LogReader:
         """
         import re as regex_module
 
+        def make_regex_matcher(compiled):
+            return lambda line: compiled.search(line)
+
+        def make_case_insensitive_matcher(pat):
+            return lambda line: pat in line.lower()
+
+        def make_case_sensitive_matcher(pat):
+            return lambda line: pat in line
+
         if regex:
             flags = 0 if case_sensitive else regex_module.IGNORECASE
             compiled_pattern = regex_module.compile(pattern, flags)
-            match_func = lambda line: compiled_pattern.search(line)
+            match_func = make_regex_matcher(compiled_pattern)
         else:
             if not case_sensitive:
                 pattern = pattern.lower()
-                match_func = lambda line: pattern in line.lower()
+                match_func = make_case_insensitive_matcher(pattern)
             else:
-                match_func = lambda line: pattern in line
+                match_func = make_case_sensitive_matcher(pattern)
 
         with open(self.file_path, "r", encoding="utf-8", errors="replace") as f:
             matches_found = 0
