@@ -317,7 +317,7 @@ def _(session, temp_dir):
     print(f"  Name: {saved['name']}")
     print(f"  Files: {saved['files']}")
     print(f"  History entries: {len(saved['history'])}")
-    return P, json, save_path, saved
+    return P, _json, save_path, saved
 
 
 @app.cell

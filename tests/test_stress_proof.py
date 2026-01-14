@@ -27,7 +27,6 @@ try:
     from logler.investigate import (
         search,
         follow_thread,
-        get_context,
         find_patterns,
         get_metadata,
         Investigator,
@@ -1075,11 +1074,10 @@ class TestUltimateStress:
             assert metadata[0]["lines"] == len(logs)
 
             # 2. Search for errors
-            errors = session.search("ERROR", level="ERROR")
-            error_count = errors["total_matches"]
+            session.search("ERROR", level="ERROR")
 
             # 3. Find patterns
-            patterns = session.find_patterns(min_occurrences=3)
+            session.find_patterns(min_occurrences=3)
 
             # 4. Follow random threads
             thread_ids = list(set(log.get("thread_id") for log in logs if log.get("thread_id")))

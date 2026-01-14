@@ -817,7 +817,6 @@ def verify_pattern(
         matches = []
         total_entries = 0
         group_values = defaultdict(lambda: defaultdict(int))
-        by_hour = defaultdict(int)
         by_thread = defaultdict(int)
         first_match = None
         last_match = None

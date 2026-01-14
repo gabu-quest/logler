@@ -14,10 +14,9 @@ from datetime import datetime
 
 
 try:
-    from rich.console import Console
-    from rich.text import Text
-    from rich.tree import Tree as RichTree
-    from rich import box
+    from rich.console import Console  # noqa: F401
+    from rich.text import Text  # noqa: F401
+    from rich.tree import Tree as RichTree  # noqa: F401
 
     RICH_AVAILABLE = True
 except ImportError:
@@ -325,7 +324,6 @@ def _create_rich_node(
 
         if show_confidence:
             confidence = node.get("confidence", 0.0)
-            color = "green" if confidence >= 0.9 else "yellow" if confidence >= 0.6 else "red"
             metadata.append(f"confidence={confidence:.2f}")
 
     elif mode == "compact":
