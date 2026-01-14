@@ -1102,8 +1102,8 @@ class TestUltimateStress:
                 tree = format_tree(hierarchy, use_colors=False)
                 assert isinstance(tree, str)
 
-            # If we got here without crashing, the library WORKS
-            assert True, "10,000 log gauntlet PASSED"
+            # Verify we processed all logs successfully
+            assert metadata[0]["lines"] == len(logs), "All logs were processed"
 
         finally:
             Path(temp_path).unlink()

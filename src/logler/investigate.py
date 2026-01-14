@@ -30,6 +30,7 @@ Example Usage:
 
 import json
 import re
+import warnings
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from collections import defaultdict
@@ -48,10 +49,10 @@ except ImportError:
             RUST_AVAILABLE = True
         else:
             RUST_AVAILABLE = False
-            print("Warning: Rust backend not available. Using Python fallback.")
+            warnings.warn("Rust backend not available. Using Python fallback.", stacklevel=2)
     except Exception:
         RUST_AVAILABLE = False
-        print("Warning: Rust backend not available. Using Python fallback.")
+        warnings.warn("Rust backend not available. Using Python fallback.", stacklevel=2)
 
 
 def _normalize_entry(entry: Dict[str, Any]) -> None:
@@ -2198,7 +2199,7 @@ def cross_service_timeline(
                 e for e in all_entries if e["timestamp"] and start_dt <= e["timestamp"] <= end_dt
             ]
         except Exception as e:
-            print(f"Warning: Could not parse time window: {e}")
+            warnings.warn(f"Could not parse time window: {e}", stacklevel=2)
 
     # Sort by timestamp
     all_entries.sort(key=lambda e: e["timestamp"] if e["timestamp"] else datetime.min)
