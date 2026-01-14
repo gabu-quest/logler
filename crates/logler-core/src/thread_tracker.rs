@@ -32,7 +32,7 @@ impl ThreadTracker {
         if let Some(correlation_id) = &entry.correlation_id {
             self.correlations
                 .entry(correlation_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(entry.id);
         }
 
@@ -96,12 +96,10 @@ impl ThreadTracker {
                         if let Some(end_time) = entry.timestamp {
                             if span.end_time.is_none() || span.end_time.unwrap() < end_time {
                                 span.end_time = Some(end_time);
-                                if let Some(duration) = span.end_time.and_then(|end| {
+                                if let Some(duration) = span.end_time.map(|end| {
                                     end.signed_duration_since(span.start_time)
                                         .num_milliseconds()
-                                        .try_into()
-                                        .ok()
-                                        .map(|ms: i64| ms as f64)
+                                        as f64
                                 }) {
                                     span.duration_ms = Some(duration);
                                 }

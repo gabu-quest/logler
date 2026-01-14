@@ -37,7 +37,7 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "TRACE" => Some(Self::Trace),
             "DEBUG" => Some(Self::Debug),

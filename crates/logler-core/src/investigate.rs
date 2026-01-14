@@ -349,7 +349,7 @@ impl Investigator {
                         let prefix = entry.message.chars().take(50).collect::<String>();
                         error_messages
                             .entry(prefix)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(entry.clone());
                     }
                 }
