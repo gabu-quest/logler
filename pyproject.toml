@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "logler"
-version = "1.0.1"
+version = "1.0.2"
 description = "Beautiful local log viewer with thread tracking and real-time updates"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -70,6 +70,7 @@ manifest-path = "crates/logler-py/Cargo.toml"
 python-source = "src"
 python-packages = ["logler"]
 features = ["sql"]
+include = ["LICENSE", "README.md"]
 
 [tool.black]
 line-length = 100
