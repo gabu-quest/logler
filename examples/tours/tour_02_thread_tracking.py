@@ -13,7 +13,8 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Thread & Correlation Tracking
 
     In distributed systems, a single request often spans multiple threads,
@@ -27,18 +28,21 @@ def _(mo):
     5. Comparing parallel executions
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Microservice Simulation
 
     We'll create logs that simulate a request flowing through multiple services,
     similar to what you'd see in a real microservice architecture.
-    """)
+    """
+    )
     return
 
 
@@ -57,80 +61,166 @@ def _():
     correlation_id = "req-001"
     trace_id = "trace-abc123"
 
-    logs.extend([
-        {"timestamp": (base_time + timedelta(ms=0)).isoformat(), "level": "INFO",
-         "message": "Received POST /api/orders", "service": "api-gateway",
-         "thread_id": "http-1", "correlation_id": correlation_id, "trace_id": trace_id},
-
-        {"timestamp": (base_time + timedelta(ms=5)).isoformat(), "level": "DEBUG",
-         "message": "Validating JWT token", "service": "auth-service",
-         "thread_id": "auth-pool-1", "correlation_id": correlation_id, "trace_id": trace_id},
-
-        {"timestamp": (base_time + timedelta(ms=15)).isoformat(), "level": "INFO",
-         "message": "Token validated for user:alice", "service": "auth-service",
-         "thread_id": "auth-pool-1", "correlation_id": correlation_id, "trace_id": trace_id},
-
-        {"timestamp": (base_time + timedelta(ms=20)).isoformat(), "level": "DEBUG",
-         "message": "Checking inventory for SKU-12345", "service": "inventory-service",
-         "thread_id": "inv-worker-3", "correlation_id": correlation_id, "trace_id": trace_id},
-
-        {"timestamp": (base_time + timedelta(ms=45)).isoformat(), "level": "INFO",
-         "message": "Inventory reserved: 2 units", "service": "inventory-service",
-         "thread_id": "inv-worker-3", "correlation_id": correlation_id, "trace_id": trace_id},
-
-        {"timestamp": (base_time + timedelta(ms=50)).isoformat(), "level": "INFO",
-         "message": "Processing payment $99.99", "service": "payment-service",
-         "thread_id": "payment-1", "correlation_id": correlation_id, "trace_id": trace_id},
-
-        {"timestamp": (base_time + timedelta(ms=200)).isoformat(), "level": "INFO",
-         "message": "Payment authorized: txn-789", "service": "payment-service",
-         "thread_id": "payment-1", "correlation_id": correlation_id, "trace_id": trace_id},
-
-        {"timestamp": (base_time + timedelta(ms=210)).isoformat(), "level": "INFO",
-         "message": "Order created: order-456", "service": "order-service",
-         "thread_id": "order-proc-2", "correlation_id": correlation_id, "trace_id": trace_id},
-
-        {"timestamp": (base_time + timedelta(ms=215)).isoformat(), "level": "INFO",
-         "message": "Request completed: 201 Created", "service": "api-gateway",
-         "thread_id": "http-1", "correlation_id": correlation_id, "trace_id": trace_id},
-    ])
+    logs.extend(
+        [
+            {
+                "timestamp": (base_time + timedelta(ms=0)).isoformat(),
+                "level": "INFO",
+                "message": "Received POST /api/orders",
+                "service": "api-gateway",
+                "thread_id": "http-1",
+                "correlation_id": correlation_id,
+                "trace_id": trace_id,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=5)).isoformat(),
+                "level": "DEBUG",
+                "message": "Validating JWT token",
+                "service": "auth-service",
+                "thread_id": "auth-pool-1",
+                "correlation_id": correlation_id,
+                "trace_id": trace_id,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=15)).isoformat(),
+                "level": "INFO",
+                "message": "Token validated for user:alice",
+                "service": "auth-service",
+                "thread_id": "auth-pool-1",
+                "correlation_id": correlation_id,
+                "trace_id": trace_id,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=20)).isoformat(),
+                "level": "DEBUG",
+                "message": "Checking inventory for SKU-12345",
+                "service": "inventory-service",
+                "thread_id": "inv-worker-3",
+                "correlation_id": correlation_id,
+                "trace_id": trace_id,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=45)).isoformat(),
+                "level": "INFO",
+                "message": "Inventory reserved: 2 units",
+                "service": "inventory-service",
+                "thread_id": "inv-worker-3",
+                "correlation_id": correlation_id,
+                "trace_id": trace_id,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=50)).isoformat(),
+                "level": "INFO",
+                "message": "Processing payment $99.99",
+                "service": "payment-service",
+                "thread_id": "payment-1",
+                "correlation_id": correlation_id,
+                "trace_id": trace_id,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=200)).isoformat(),
+                "level": "INFO",
+                "message": "Payment authorized: txn-789",
+                "service": "payment-service",
+                "thread_id": "payment-1",
+                "correlation_id": correlation_id,
+                "trace_id": trace_id,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=210)).isoformat(),
+                "level": "INFO",
+                "message": "Order created: order-456",
+                "service": "order-service",
+                "thread_id": "order-proc-2",
+                "correlation_id": correlation_id,
+                "trace_id": trace_id,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=215)).isoformat(),
+                "level": "INFO",
+                "message": "Request completed: 201 Created",
+                "service": "api-gateway",
+                "thread_id": "http-1",
+                "correlation_id": correlation_id,
+                "trace_id": trace_id,
+            },
+        ]
+    )
 
     # Request 2: Failed payment
     correlation_id2 = "req-002"
     trace_id2 = "trace-def456"
 
-    logs.extend([
-        {"timestamp": (base_time + timedelta(ms=100)).isoformat(), "level": "INFO",
-         "message": "Received POST /api/orders", "service": "api-gateway",
-         "thread_id": "http-2", "correlation_id": correlation_id2, "trace_id": trace_id2},
-
-        {"timestamp": (base_time + timedelta(ms=110)).isoformat(), "level": "INFO",
-         "message": "Token validated for user:bob", "service": "auth-service",
-         "thread_id": "auth-pool-2", "correlation_id": correlation_id2, "trace_id": trace_id2},
-
-        {"timestamp": (base_time + timedelta(ms=130)).isoformat(), "level": "INFO",
-         "message": "Inventory reserved: 1 unit", "service": "inventory-service",
-         "thread_id": "inv-worker-1", "correlation_id": correlation_id2, "trace_id": trace_id2},
-
-        {"timestamp": (base_time + timedelta(ms=140)).isoformat(), "level": "INFO",
-         "message": "Processing payment $49.99", "service": "payment-service",
-         "thread_id": "payment-2", "correlation_id": correlation_id2, "trace_id": trace_id2},
-
-        {"timestamp": (base_time + timedelta(ms=350)).isoformat(), "level": "ERROR",
-         "message": "Payment declined: insufficient funds", "service": "payment-service",
-         "thread_id": "payment-2", "correlation_id": correlation_id2, "trace_id": trace_id2},
-
-        {"timestamp": (base_time + timedelta(ms=355)).isoformat(), "level": "WARN",
-         "message": "Rolling back inventory reservation", "service": "inventory-service",
-         "thread_id": "inv-worker-1", "correlation_id": correlation_id2, "trace_id": trace_id2},
-
-        {"timestamp": (base_time + timedelta(ms=360)).isoformat(), "level": "INFO",
-         "message": "Request completed: 402 Payment Required", "service": "api-gateway",
-         "thread_id": "http-2", "correlation_id": correlation_id2, "trace_id": trace_id2},
-    ])
+    logs.extend(
+        [
+            {
+                "timestamp": (base_time + timedelta(ms=100)).isoformat(),
+                "level": "INFO",
+                "message": "Received POST /api/orders",
+                "service": "api-gateway",
+                "thread_id": "http-2",
+                "correlation_id": correlation_id2,
+                "trace_id": trace_id2,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=110)).isoformat(),
+                "level": "INFO",
+                "message": "Token validated for user:bob",
+                "service": "auth-service",
+                "thread_id": "auth-pool-2",
+                "correlation_id": correlation_id2,
+                "trace_id": trace_id2,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=130)).isoformat(),
+                "level": "INFO",
+                "message": "Inventory reserved: 1 unit",
+                "service": "inventory-service",
+                "thread_id": "inv-worker-1",
+                "correlation_id": correlation_id2,
+                "trace_id": trace_id2,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=140)).isoformat(),
+                "level": "INFO",
+                "message": "Processing payment $49.99",
+                "service": "payment-service",
+                "thread_id": "payment-2",
+                "correlation_id": correlation_id2,
+                "trace_id": trace_id2,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=350)).isoformat(),
+                "level": "ERROR",
+                "message": "Payment declined: insufficient funds",
+                "service": "payment-service",
+                "thread_id": "payment-2",
+                "correlation_id": correlation_id2,
+                "trace_id": trace_id2,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=355)).isoformat(),
+                "level": "WARN",
+                "message": "Rolling back inventory reservation",
+                "service": "inventory-service",
+                "thread_id": "inv-worker-1",
+                "correlation_id": correlation_id2,
+                "trace_id": trace_id2,
+            },
+            {
+                "timestamp": (base_time + timedelta(ms=360)).isoformat(),
+                "level": "INFO",
+                "message": "Request completed: 402 Payment Required",
+                "service": "api-gateway",
+                "thread_id": "http-2",
+                "correlation_id": correlation_id2,
+                "trace_id": trace_id2,
+            },
+        ]
+    )
 
     # Sort by timestamp (simulating collected logs)
-    logs.sort(key=lambda x: x['timestamp'])
+    logs.sort(key=lambda x: x["timestamp"])
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()
@@ -140,18 +230,30 @@ def _():
             f.write(json.dumps(log) + "\n")
 
     print(f"Created {len(logs)} log entries from 5 services")
-    print(f"Correlation IDs: req-001 (success), req-002 (failed)")
-    return Path, base_time, correlation_id, correlation_id2, log_file, logs, temp_dir, trace_id, trace_id2
+    print("Correlation IDs: req-001 (success), req-002 (failed)")
+    return (
+        Path,
+        base_time,
+        correlation_id,
+        correlation_id2,
+        log_file,
+        logs,
+        temp_dir,
+        trace_id,
+        trace_id2,
+    )
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Following a Thread
 
     A thread represents a single execution context. Use `follow_thread()`
     to get all logs from a specific thread, in chronological order.
-    """)
+    """
+    )
     return
 
 
@@ -165,48 +267,44 @@ def _():
 @app.cell
 def _(follow_thread, log_file):
     # Follow the payment-1 thread (successful payment)
-    timeline = follow_thread(
-        files=[str(log_file)],
-        thread_id="payment-1"
-    )
+    timeline = follow_thread(files=[str(log_file)], thread_id="payment-1")
 
-    print(f"=== Thread: payment-1 ===")
+    print("=== Thread: payment-1 ===")
     print(f"Total entries: {timeline['total_entries']}")
     print(f"Duration: {timeline.get('duration_ms', 'N/A')}ms\n")
 
-    for _entry in timeline['entries']:
-        _ts = _entry['timestamp'].split('T')[1][:12]
+    for _entry in timeline["entries"]:
+        _ts = _entry["timestamp"].split("T")[1][:12]
         print(f"[{_ts}] [{_entry['level']}] {_entry['message']}")
     return (timeline,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Following a Correlation ID
 
     Correlation IDs track a single request across all services and threads.
     This is essential for debugging distributed systems.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(follow_thread, log_file):
     # Follow the successful order request
-    request_timeline = follow_thread(
-        files=[str(log_file)],
-        correlation_id="req-001"
-    )
+    request_timeline = follow_thread(files=[str(log_file)], correlation_id="req-001")
 
-    print(f"=== Request: req-001 (Successful Order) ===")
+    print("=== Request: req-001 (Successful Order) ===")
     print(f"Total entries: {request_timeline['total_entries']}")
     print(f"Duration: {request_timeline.get('duration_ms', 'N/A')}ms")
     print(f"Unique spans: {len(request_timeline.get('unique_spans', []))}\n")
 
-    for _entry in request_timeline['entries']:
-        _ts = _entry['timestamp'].split('T')[1][:12]
-        _svc = _entry.get('service', 'unknown')
+    for _entry in request_timeline["entries"]:
+        _ts = _entry["timestamp"].split("T")[1][:12]
+        _svc = _entry.get("service", "unknown")
         print(f"[{_ts}] [{_svc:20}] [{_entry['level']:5}] {_entry['message']}")
     return (request_timeline,)
 
@@ -214,19 +312,16 @@ def _(follow_thread, log_file):
 @app.cell
 def _(follow_thread, log_file):
     # Follow the failed order request
-    failed_timeline = follow_thread(
-        files=[str(log_file)],
-        correlation_id="req-002"
-    )
+    failed_timeline = follow_thread(files=[str(log_file)], correlation_id="req-002")
 
-    print(f"=== Request: req-002 (Failed Order) ===")
+    print("=== Request: req-002 (Failed Order) ===")
     print(f"Total entries: {failed_timeline['total_entries']}")
     print(f"Duration: {failed_timeline.get('duration_ms', 'N/A')}ms\n")
 
-    for _entry in failed_timeline['entries']:
-        _ts = _entry['timestamp'].split('T')[1][:12]
-        _svc = _entry.get('service', 'unknown')
-        _level = _entry['level']
+    for _entry in failed_timeline["entries"]:
+        _ts = _entry["timestamp"].split("T")[1][:12]
+        _svc = _entry.get("service", "unknown")
+        _level = _entry["level"]
         # Highlight errors
         _marker = ">>>" if _level == "ERROR" else "   "
         print(f"{_marker} [{_ts}] [{_svc:20}] [{_level:5}] {_entry['message']}")
@@ -235,30 +330,29 @@ def _(follow_thread, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Following a Trace ID
 
     In OpenTelemetry-style systems, trace IDs connect all operations
     for a single distributed transaction.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(follow_thread, log_file):
     # Follow by trace ID
-    trace_timeline = follow_thread(
-        files=[str(log_file)],
-        trace_id="trace-abc123"
-    )
+    trace_timeline = follow_thread(files=[str(log_file)], trace_id="trace-abc123")
 
-    print(f"=== Trace: trace-abc123 ===")
+    print("=== Trace: trace-abc123 ===")
     print(f"Total entries: {trace_timeline['total_entries']}")
 
     # Group by service
     by_service = {}
-    for _entry in trace_timeline['entries']:
-        _svc = _entry.get('service', 'unknown')
+    for _entry in trace_timeline["entries"]:
+        _svc = _entry.get("service", "unknown")
         if _svc not in by_service:
             by_service[_svc] = []
         by_service[_svc].append(_entry)
@@ -271,12 +365,14 @@ def _(follow_thread, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Comparing Parallel Requests
 
     When debugging, you often want to compare a successful request
     with a failed one. Let's analyze the differences:
-    """)
+    """
+    )
     return
 
 
@@ -290,13 +386,15 @@ def _(failed_timeline, request_timeline):
     print(f"{'Metric':<25} {'Success (req-001)':<20} {'Failure (req-002)':<20}")
     print("-" * 65)
     print(f"{'Total entries':<25} {success['total_entries']:<20} {failure['total_entries']:<20}")
-    print(f"{'Duration (ms)':<25} {success.get('duration_ms', 'N/A'):<20} {failure.get('duration_ms', 'N/A'):<20}")
+    print(
+        f"{'Duration (ms)':<25} {success.get('duration_ms', 'N/A'):<20} {failure.get('duration_ms', 'N/A'):<20}"
+    )
 
     # Count by level
     def count_levels(timeline):
         counts = {}
-        for _e in timeline['entries']:
-            _lvl = _e['level']
+        for _e in timeline["entries"]:
+            _lvl = _e["level"]
             counts[_lvl] = counts.get(_lvl, 0) + 1
         return counts
 
@@ -304,7 +402,7 @@ def _(failed_timeline, request_timeline):
     failure_levels = count_levels(failure)
 
     print(f"\n{'Level Breakdown:':<25}")
-    for level in ['INFO', 'DEBUG', 'WARN', 'ERROR']:
+    for level in ["INFO", "DEBUG", "WARN", "ERROR"]:
         s_count = success_levels.get(level, 0)
         f_count = failure_levels.get(level, 0)
         print(f"  {level:<23} {s_count:<20} {f_count:<20}")
@@ -313,11 +411,13 @@ def _(failed_timeline, request_timeline):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Finding Where Things Went Wrong
 
     Let's pinpoint exactly where the failed request diverged:
-    """)
+    """
+    )
     return
 
 
@@ -328,8 +428,8 @@ def _(failed_timeline, request_timeline):
     # Get services visited in order
     def get_service_sequence(timeline):
         seen = []
-        for _e in timeline['entries']:
-            _s = _e.get('service', 'unknown')
+        for _e in timeline["entries"]:
+            _s = _e.get("service", "unknown")
             if not seen or seen[-1] != _s:
                 seen.append(_s)
         return seen
@@ -342,8 +442,8 @@ def _(failed_timeline, request_timeline):
 
     # Find first ERROR
     print("\n=== First Error ===")
-    for _entry in failed_timeline['entries']:
-        if _entry['level'] == 'ERROR':
+    for _entry in failed_timeline["entries"]:
+        if _entry["level"] == "ERROR":
             print(f"Service: {_entry.get('service')}")
             print(f"Thread: {_entry.get('thread_id')}")
             print(f"Message: {_entry['message']}")
@@ -354,7 +454,8 @@ def _(failed_timeline, request_timeline):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned how to track execution flows in Logler:
@@ -372,13 +473,15 @@ def _(mo):
     **Next Steps:**
     - **Tour 03**: Hierarchy visualization (tree and waterfall views)
     - **Tour 04**: Investigation sessions
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(temp_dir):
     import shutil
+
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
     return (shutil,)

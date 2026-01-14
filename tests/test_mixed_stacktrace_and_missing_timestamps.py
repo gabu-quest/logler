@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 
 def test_multiline_and_missing_timestamps(investigate_module, tmp_path):
     # Combine stack trace, missing timestamps, and syslog in one file
@@ -9,10 +7,10 @@ def test_multiline_and_missing_timestamps(investigate_module, tmp_path):
     lines = [
         "2024-01-01 00:00:00 ERROR main failed to start",
         "Traceback (most recent call last):",
-        "  File \"app.py\", line 10, in <module>",
-        "  File \"service.py\", line 5, in run",
+        '  File "app.py", line 10, in <module>',
+        '  File "service.py", line 5, in run',
         "RuntimeError: boom",
-        "level=info msg=\"logfmt without ts\"",
+        'level=info msg="logfmt without ts"',
         "<5>missing-ts-host app: still logs",
         "just text with WARN and thread=bg",
     ]

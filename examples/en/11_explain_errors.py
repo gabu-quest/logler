@@ -15,18 +15,14 @@ print("=" * 70)
 # Example 1: Connection pool exhausted
 print("\n🔴 Error 1: Connection pool exhausted")
 print("-" * 70)
-explanation = investigate.explain(
-    error_message="Connection pool exhausted",
-    context="production"
-)
+explanation = investigate.explain(error_message="Connection pool exhausted", context="production")
 print(explanation)
 
 # Example 2: Timeout
 print("\n\n🔴 Error 2: Database timeout")
 print("-" * 70)
 explanation = investigate.explain(
-    error_message="Database query timed out after 30 seconds",
-    context="production"
+    error_message="Database query timed out after 30 seconds", context="production"
 )
 print(explanation)
 
@@ -34,8 +30,7 @@ print(explanation)
 print("\n\n🔴 Error 3: Connection refused")
 print("-" * 70)
 explanation = investigate.explain(
-    error_message="Connection refused: http://api.service:8080",
-    context="production"
+    error_message="Connection refused: http://api.service:8080", context="production"
 )
 print(explanation)
 
@@ -43,8 +38,7 @@ print(explanation)
 print("\n\n🔴 Error 4: Out of memory")
 print("-" * 70)
 explanation = investigate.explain(
-    error_message="OutOfMemoryError: Java heap space",
-    context="production"
+    error_message="OutOfMemoryError: Java heap space", context="production"
 )
 print(explanation)
 
@@ -52,8 +46,7 @@ print(explanation)
 print("\n\n🔴 Error 5: Null reference")
 print("-" * 70)
 explanation = investigate.explain(
-    error_message="NullPointerException at UserService.java:42",
-    context="development"
+    error_message="NullPointerException at UserService.java:42", context="development"
 )
 print(explanation)
 
@@ -61,8 +54,7 @@ print(explanation)
 print("\n\n🔴 Error 6: Permission denied")
 print("-" * 70)
 explanation = investigate.explain(
-    error_message="Permission denied: /var/log/app.log",
-    context="production"
+    error_message="Permission denied: /var/log/app.log", context="production"
 )
 print(explanation)
 
@@ -72,20 +64,15 @@ print("-" * 70)
 
 # Search for an actual error
 results = investigate.search(
-    files=["examples/logs/production_incident.log"],
-    level="ERROR",
-    limit=1
+    files=["examples/logs/production_incident.log"], level="ERROR", limit=1
 )
 
-if results.get('results'):
-    error_entry = results['results'][0]['entry']
+if results.get("results"):
+    error_entry = results["results"][0]["entry"]
     print(f"Original error: {error_entry.get('message', 'N/A')}")
     print("\nExplanation:")
     print("-" * 70)
-    explanation = investigate.explain(
-        entry=error_entry,
-        context="production"
-    )
+    explanation = investigate.explain(entry=error_entry, context="production")
     print(explanation)
 
 print("\n\n" + "=" * 70)

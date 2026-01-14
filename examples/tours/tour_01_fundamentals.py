@@ -13,7 +13,8 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Fundamentals
 
     Welcome to Logler! This interactive notebook will teach you the fundamentals
@@ -27,18 +28,21 @@ def _(mo):
     5. Working with results
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up
 
     First, let's import Logler and check that the Rust backend is available.
     The Rust backend provides blazing-fast log parsing and indexing.
-    """)
+    """
+    )
     return
 
 
@@ -61,12 +65,14 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Creating Sample Logs
 
     For this tour, we'll create some sample JSON logs to work with.
     Logler supports multiple formats, but JSON logs are the richest.
-    """)
+    """
+    )
     return
 
 
@@ -100,14 +106,16 @@ def _():
     ]
 
     for _i, (_level, _message, _component) in enumerate(messages):
-        sample_logs.append({
-            "timestamp": (base_time + timedelta(seconds=_i * 10)).isoformat(),
-            "level": _level,
-            "message": _message,
-            "component": _component,
-            "thread_id": f"worker-{_i % 3}",
-            "correlation_id": f"req-{_i // 5:03d}",
-        })
+        sample_logs.append(
+            {
+                "timestamp": (base_time + timedelta(seconds=_i * 10)).isoformat(),
+                "level": _level,
+                "message": _message,
+                "component": _component,
+                "thread_id": f"worker-{_i % 3}",
+                "correlation_id": f"req-{_i // 5:03d}",
+            }
+        )
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()
@@ -123,12 +131,14 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Getting File Metadata
 
     Before searching, let's understand what's in our log file.
     The `get_metadata()` function provides useful information about the logs.
-    """)
+    """
+    )
     return
 
 
@@ -143,8 +153,8 @@ def _(get_metadata, log_file):
         print(f"Lines: {meta['lines']}")
         print(f"Format: {meta['format']}")
         print(f"Size: {meta['size_bytes']} bytes")
-        print(f"\nLog Levels:")
-        for _level, _count in meta.get('log_levels', {}).items():
+        print("\nLog Levels:")
+        for _level, _count in meta.get("log_levels", {}).items():
             print(f"  {_level}: {_count}")
         print(f"\nUnique Threads: {meta.get('unique_threads', 0)}")
         print(f"Unique Correlations: {meta.get('unique_correlation_ids', 0)}")
@@ -153,7 +163,8 @@ def _(get_metadata, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Basic Search
 
     Now let's search our logs! The `search()` function is the primary way
@@ -161,7 +172,8 @@ def _(mo):
     - Text query (searches message content)
     - Log level
     - Limit (max results)
-    """)
+    """
+    )
     return
 
 
@@ -173,20 +185,22 @@ def _(log_file, search):
     print(f"Found {results['total_matches']} matches for 'redis'")
     print(f"Search time: {results['search_time_ms']}ms\n")
 
-    for _r in results['results']:
-        _entry = _r['entry']
+    for _r in results["results"]:
+        _entry = _r["entry"]
         print(f"[{_entry['level']}] {_entry['message']}")
     return (results,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Filtering by Log Level
 
     Often you want to find just errors or warnings.
     Use the `level` parameter to filter:
-    """)
+    """
+    )
     return
 
 
@@ -196,8 +210,8 @@ def _(log_file, search):
     errors = search(files=[str(log_file)], level="ERROR", limit=10)
 
     print(f"Found {errors['total_matches']} ERROR entries:\n")
-    for _r in errors['results']:
-        _entry = _r['entry']
+    for _r in errors["results"]:
+        _entry = _r["entry"]
         print(f"[{_entry['timestamp']}] {_entry['message']}")
         print(f"  Component: {_entry.get('component', 'unknown')}")
         print()
@@ -210,20 +224,22 @@ def _(log_file, search):
     warnings = search(files=[str(log_file)], level="WARN", limit=10)
 
     print(f"Found {warnings['total_matches']} WARN entries:\n")
-    for _r in warnings['results']:
-        _entry = _r['entry']
+    for _r in warnings["results"]:
+        _entry = _r["entry"]
         print(f"[{_entry['level']}] {_entry['message']}")
     return (warnings,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Using the Investigator Class
 
     For more advanced operations, use the `Investigator` class.
     It keeps files loaded in memory for faster repeated queries.
-    """)
+    """
+    )
     return
 
 
@@ -248,19 +264,21 @@ def _(inv):
     inv_results = inv.search(query="database")
 
     print(f"Found {inv_results['total_matches']} matches for 'database'")
-    for _r in inv_results['results']:
+    for _r in inv_results["results"]:
         print(f"  {_r['entry']['message']}")
     return (inv_results,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. Context Around Results
 
     Sometimes you need to see what happened before and after a log entry.
     Use context lines to get surrounding entries:
-    """)
+    """
+    )
     return
 
 
@@ -268,28 +286,26 @@ def _(mo):
 def _(inv, log_file):
     # Get context around a specific line
     context = inv.get_context(
-        file=str(log_file),
-        line_number=8,  # The ERROR about redis
-        lines_before=2,
-        lines_after=2
+        file=str(log_file), line_number=8, lines_before=2, lines_after=2  # The ERROR about redis
     )
 
     print("=== Target Entry ===")
     print(f"[{context['target']['level']}] {context['target']['message']}")
 
     print("\n=== Context Before ===")
-    for _entry in context['context_before']:
+    for _entry in context["context_before"]:
         print(f"  [{_entry['level']}] {_entry['message']}")
 
     print("\n=== Context After ===")
-    for _entry in context['context_after']:
+    for _entry in context["context_after"]:
         print(f"  [{_entry['level']}] {_entry['message']}")
     return (context,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned the fundamentals of Logler:
@@ -304,7 +320,8 @@ def _(mo):
     - **Tour 03**: Hierarchy visualization
     - **Tour 04**: Investigation sessions
     - **Tour 05**: Pattern detection
-    """)
+    """
+    )
     return
 
 
@@ -312,6 +329,7 @@ def _(mo):
 def _(temp_dir):
     # Cleanup
     import shutil
+
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
     return (shutil,)

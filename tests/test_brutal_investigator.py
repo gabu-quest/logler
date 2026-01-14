@@ -6,11 +6,9 @@ real file operations, edge cases, and adversarial inputs.
 """
 
 import json
-import os
 import pytest
 import tempfile
 from pathlib import Path
-from datetime import datetime, timezone
 
 
 # Import with Rust backend check
@@ -29,25 +27,26 @@ except ImportError:
 
 
 pytestmark = pytest.mark.skipif(
-    not RUST_AVAILABLE,
-    reason="Rust backend required for investigator tests"
+    not RUST_AVAILABLE, reason="Rust backend required for investigator tests"
 )
 
 
 @pytest.fixture
 def temp_log_file():
     """Create a temporary log file with realistic content"""
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
         # Generate realistic log entries
         for i in range(100):
-            entry = json.dumps({
-                "timestamp": f"2024-01-15T10:{i // 60:02d}:{i % 60:02d}Z",
-                "level": ["INFO", "DEBUG", "WARN", "ERROR"][i % 4],
-                "message": f"Log message number {i}",
-                "thread_id": f"worker-{i % 5}",
-                "correlation_id": f"req-{i % 20}",
-                "service": "test-service"
-            })
+            entry = json.dumps(
+                {
+                    "timestamp": f"2024-01-15T10:{i // 60:02d}:{i % 60:02d}Z",
+                    "level": ["INFO", "DEBUG", "WARN", "ERROR"][i % 4],
+                    "message": f"Log message number {i}",
+                    "thread_id": f"worker-{i % 5}",
+                    "correlation_id": f"req-{i % 20}",
+                    "service": "test-service",
+                }
+            )
             f.write(entry + "\n")
         temp_path = f.name
 
@@ -60,16 +59,18 @@ def multi_log_files():
     """Create multiple log files for multi-file tests"""
     files = []
     for service in ["api", "worker", "db"]:
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(50):
-                entry = json.dumps({
-                    "timestamp": f"2024-01-15T10:{i:02d}:00Z",
-                    "level": "INFO" if i % 3 == 0 else "ERROR",
-                    "message": f"{service} message {i}",
-                    "thread_id": f"{service}-thread-{i % 3}",
-                    "correlation_id": f"req-{i % 10}",
-                    "service": service
-                })
+                entry = json.dumps(
+                    {
+                        "timestamp": f"2024-01-15T10:{i:02d}:00Z",
+                        "level": "INFO" if i % 3 == 0 else "ERROR",
+                        "message": f"{service} message {i}",
+                        "thread_id": f"{service}-thread-{i % 3}",
+                        "correlation_id": f"req-{i % 10}",
+                        "service": service,
+                    }
+                )
                 f.write(entry + "\n")
             files.append(f.name)
 
@@ -129,12 +130,7 @@ class TestSearchFunction:
 
     def test_search_with_context_lines(self, temp_log_file):
         """Search with context lines"""
-        result = search(
-            files=[temp_log_file],
-            query="number 50",
-            context_lines=5,
-            limit=5
-        )
+        result = search(files=[temp_log_file], query="number 50", context_lines=5, limit=5)
         # Should have context entries if matches found
         if result.get("results"):
             item = result["results"][0]
@@ -215,44 +211,24 @@ class TestGetContext:
 
     def test_context_middle_of_file(self, temp_log_file):
         """Get context from middle of file"""
-        result = get_context(
-            file=temp_log_file,
-            line_number=50,
-            lines_before=5,
-            lines_after=5
-        )
+        result = get_context(file=temp_log_file, line_number=50, lines_before=5, lines_after=5)
         assert "target" in result or "context_before" in result
 
     def test_context_start_of_file(self, temp_log_file):
         """Get context at start of file"""
-        result = get_context(
-            file=temp_log_file,
-            line_number=1,
-            lines_before=10,
-            lines_after=5
-        )
+        result = get_context(file=temp_log_file, line_number=1, lines_before=10, lines_after=5)
         # Should handle requesting lines before start of file
         assert isinstance(result, dict)
 
     def test_context_end_of_file(self, temp_log_file):
         """Get context at end of file"""
-        result = get_context(
-            file=temp_log_file,
-            line_number=100,
-            lines_before=5,
-            lines_after=10
-        )
+        result = get_context(file=temp_log_file, line_number=100, lines_before=5, lines_after=10)
         assert isinstance(result, dict)
 
     def test_context_line_zero(self, temp_log_file):
         """Get context at line 0"""
         try:
-            result = get_context(
-                file=temp_log_file,
-                line_number=0,
-                lines_before=5,
-                lines_after=5
-            )
+            result = get_context(file=temp_log_file, line_number=0, lines_before=5, lines_after=5)
             assert isinstance(result, dict)
         except (ValueError, IndexError, RuntimeError):
             pass  # Acceptable to reject line 0
@@ -260,12 +236,7 @@ class TestGetContext:
     def test_context_negative_line(self, temp_log_file):
         """Get context at negative line"""
         try:
-            result = get_context(
-                file=temp_log_file,
-                line_number=-1,
-                lines_before=5,
-                lines_after=5
-            )
+            result = get_context(file=temp_log_file, line_number=-1, lines_before=5, lines_after=5)
             assert isinstance(result, dict)
         except (ValueError, IndexError, RuntimeError, OverflowError):
             pass  # Acceptable to reject negative
@@ -274,10 +245,7 @@ class TestGetContext:
         """Get context past end of file"""
         try:
             result = get_context(
-                file=temp_log_file,
-                line_number=99999,
-                lines_before=5,
-                lines_after=5
+                file=temp_log_file, line_number=99999, lines_before=5, lines_after=5
             )
             # Should handle gracefully
             assert isinstance(result, dict)
@@ -291,7 +259,7 @@ class TestFindPatterns:
     @pytest.fixture
     def repetitive_log_file(self):
         """Create file with repetitive patterns"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             # Create patterns that should be detected
             for i in range(100):
                 if i % 10 == 0:
@@ -303,11 +271,9 @@ class TestFindPatterns:
                 else:
                     msg = f"Unique message {i}"
 
-                entry = json.dumps({
-                    "timestamp": f"2024-01-15T10:{i:02d}:00Z",
-                    "level": "INFO",
-                    "message": msg
-                })
+                entry = json.dumps(
+                    {"timestamp": f"2024-01-15T10:{i:02d}:00Z", "level": "INFO", "message": msg}
+                )
                 f.write(entry + "\n")
             temp_path = f.name
 
@@ -387,7 +353,7 @@ class TestEmptyAndEdgeCaseFiles:
 
     def test_empty_log_file(self):
         """Handle empty log file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             temp_path = f.name
 
         try:
@@ -398,7 +364,7 @@ class TestEmptyAndEdgeCaseFiles:
 
     def test_single_line_file(self):
         """Handle single-line file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write('{"message": "only line", "level": "INFO"}\n')
             temp_path = f.name
 
@@ -410,7 +376,7 @@ class TestEmptyAndEdgeCaseFiles:
 
     def test_non_json_log_file(self):
         """Handle plain text log file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(50):
                 f.write(f"2024-01-15 10:{i:02d}:00 INFO Plain text message {i}\n")
             temp_path = f.name
@@ -423,7 +389,7 @@ class TestEmptyAndEdgeCaseFiles:
 
     def test_mixed_format_file(self):
         """Handle file with mixed JSON and plain text"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write('{"message": "JSON line", "level": "INFO"}\n')
             f.write("2024-01-15 10:00:00 ERROR Plain text line\n")
             f.write('{"message": "Another JSON", "level": "DEBUG"}\n')
@@ -438,10 +404,10 @@ class TestEmptyAndEdgeCaseFiles:
 
     def test_malformed_json_in_file(self):
         """Handle file with malformed JSON entries"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write('{"message": "good"}\n')
             f.write('{"message": "truncated\n')
-            f.write('not json at all\n')
+            f.write("not json at all\n")
             f.write('{"message": "also good"}\n')
             temp_path = f.name
 
@@ -458,14 +424,16 @@ class TestLargeScale:
 
     def test_large_file_search(self):
         """Search in large file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(10000):
-                entry = json.dumps({
-                    "timestamp": f"2024-01-15T10:00:{i % 60:02d}Z",
-                    "level": "INFO" if i % 100 != 0 else "ERROR",
-                    "message": f"Message {i}",
-                    "thread_id": f"worker-{i % 10}"
-                })
+                entry = json.dumps(
+                    {
+                        "timestamp": f"2024-01-15T10:00:{i % 60:02d}Z",
+                        "level": "INFO" if i % 100 != 0 else "ERROR",
+                        "message": f"Message {i}",
+                        "thread_id": f"worker-{i % 10}",
+                    }
+                )
                 f.write(entry + "\n")
             temp_path = f.name
 
@@ -479,12 +447,9 @@ class TestLargeScale:
         """Search across many files"""
         files = []
         for i in range(20):
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
                 for j in range(100):
-                    entry = json.dumps({
-                        "message": f"File {i} message {j}",
-                        "level": "INFO"
-                    })
+                    entry = json.dumps({"message": f"File {i} message {j}", "level": "INFO"})
                     f.write(entry + "\n")
                 files.append(f.name)
 
@@ -564,7 +529,7 @@ class TestInvestigationSession:
         session_with_file.search(query="test2")
         session_with_file.add_note("Important finding")
 
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
             save_path = f.name
 
         try:
@@ -593,7 +558,7 @@ class TestInvestigationSession:
 
     def test_session_load_invalid_json(self, session_with_file):
         """Load from invalid JSON file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
             f.write("this is not json {{{")
             bad_path = f.name
 
@@ -610,12 +575,12 @@ class TestSpecialCharacterHandling:
     @pytest.fixture
     def special_char_file(self):
         """File with special characters"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             entries = [
                 {"message": "Path: /usr/local/bin", "level": "INFO"},
                 {"message": "Query: SELECT * FROM users WHERE id=1", "level": "DEBUG"},
                 {"message": "Regex: ^[a-z]+$", "level": "INFO"},
-                {"message": "JSON: {\"key\": \"value\"}", "level": "INFO"},
+                {"message": 'JSON: {"key": "value"}', "level": "INFO"},
                 {"message": "Unicode: 日本語テスト 🎉", "level": "INFO"},
                 {"message": "Newline escaped: line1\\nline2", "level": "INFO"},
                 {"message": "Tab: col1\tcol2\tcol3", "level": "INFO"},

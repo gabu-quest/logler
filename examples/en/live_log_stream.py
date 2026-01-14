@@ -49,7 +49,9 @@ def main():
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOG_PATH.open("w", encoding="utf-8") as f:
         print(f"Writing live log lines to {LOG_PATH} (Ctrl+C to stop)...")
-        print("Start the UI in another shell: uv run logler serve --auto-port examples/logs/live_follow_demo.log")
+        print(
+            "Start the UI in another shell: uv run logler serve --auto-port examples/logs/live_follow_demo.log"
+        )
         print("Then open the browser and enable follow/tail to watch updates.")
 
         def stop(_signo, _frame):

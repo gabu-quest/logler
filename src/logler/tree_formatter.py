@@ -18,6 +18,7 @@ try:
     from rich.text import Text
     from rich.tree import Tree as RichTree
     from rich import box
+
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -54,9 +55,13 @@ def format_tree(
         print(tree)
     """
     if use_colors and RICH_AVAILABLE:
-        return _format_rich_tree(hierarchy, mode, show_duration, show_errors, show_confidence, max_depth)
+        return _format_rich_tree(
+            hierarchy, mode, show_duration, show_errors, show_confidence, max_depth
+        )
     else:
-        return _format_ascii_tree(hierarchy, mode, show_duration, show_errors, show_confidence, max_depth)
+        return _format_ascii_tree(
+            hierarchy, mode, show_duration, show_errors, show_confidence, max_depth
+        )
 
 
 def _format_ascii_tree(
@@ -78,18 +83,20 @@ def _format_ascii_tree(
     lines.append(f"Max depth: {hierarchy.get('max_depth', 0)}")
     lines.append(f"Detection: {hierarchy.get('detection_method', 'Unknown')}")
 
-    total_duration = hierarchy.get('total_duration_ms')
+    total_duration = hierarchy.get("total_duration_ms")
     if total_duration and show_duration:
         lines.append(f"Total duration: {_format_duration(total_duration)}")
 
     # Bottleneck
-    bottleneck = hierarchy.get('bottleneck')
+    bottleneck = hierarchy.get("bottleneck")
     if bottleneck:
         lines.append("")
-        lines.append(f"⚠️  BOTTLENECK: {bottleneck.get('node_id')} ({_format_duration(bottleneck.get('duration_ms', 0))}, {bottleneck.get('percentage', 0):.1f}%)")
+        lines.append(
+            f"⚠️  BOTTLENECK: {bottleneck.get('node_id')} ({_format_duration(bottleneck.get('duration_ms', 0))}, {bottleneck.get('percentage', 0):.1f}%)"
+        )
 
     # Errors
-    error_nodes = hierarchy.get('error_nodes', [])
+    error_nodes = hierarchy.get("error_nodes", [])
     if error_nodes and show_errors:
         lines.append("")
         lines.append(f"❌ {len(error_nodes)} node(s) with errors")
@@ -99,11 +106,20 @@ def _format_ascii_tree(
     lines.append("")
 
     # Tree
-    roots = hierarchy.get('roots', [])
+    roots = hierarchy.get("roots", [])
     for i, root in enumerate(roots):
         is_last_root = i == len(roots) - 1
         _append_node_ascii(
-            root, lines, "", is_last_root, mode, show_duration, show_errors, show_confidence, max_depth, 0
+            root,
+            lines,
+            "",
+            is_last_root,
+            mode,
+            show_duration,
+            show_errors,
+            show_confidence,
+            max_depth,
+            0,
         )
 
     lines.append("")
@@ -132,12 +148,12 @@ def _append_node_ascii(
     connector = "└── " if is_last else "├── "
 
     # Node ID and type - prefer 'name' over 'id' for display
-    node_id = node.get('name') or node.get('id', 'unknown')
-    node_type = node.get('node_type', 'Unknown')
+    node_id = node.get("name") or node.get("id", "unknown")
+    node_type = node.get("node_type", "Unknown")
 
     # Error marker
     error_marker = ""
-    if show_errors and node.get('error_count', 0) > 0:
+    if show_errors and node.get("error_count", 0) > 0:
         error_marker = f"❌ [{node.get('error_count')} errors] "
 
     # Build node line
@@ -151,19 +167,19 @@ def _append_node_ascii(
         metadata.append(f"entries={node.get('entry_count', 0)}")
 
         if show_duration:
-            duration_ms = node.get('duration_ms')
+            duration_ms = node.get("duration_ms")
             if duration_ms is not None:
                 metadata.append(f"duration={_format_duration(duration_ms)}")
 
         if show_confidence:
-            confidence = node.get('confidence', 0.0)
+            confidence = node.get("confidence", 0.0)
             metadata.append(f"confidence={confidence:.2f}")
 
     elif mode == "compact":
         # Compact mode: just entry count and duration
         metadata.append(f"{node.get('entry_count', 0)} entries")
         if show_duration:
-            duration_ms = node.get('duration_ms')
+            duration_ms = node.get("duration_ms")
             if duration_ms is not None:
                 metadata.append(_format_duration(duration_ms))
 
@@ -175,31 +191,38 @@ def _append_node_ascii(
     # Full mode: show additional details
     if mode == "full":
         child_prefix = prefix + ("    " if is_last else "│   ")
-        level_counts = node.get('level_counts', {})
+        level_counts = node.get("level_counts", {})
         if level_counts:
             level_str = ", ".join([f"{level}: {count}" for level, count in level_counts.items()])
             lines.append(f"{child_prefix}  Levels: {level_str}")
 
-        evidence = node.get('relationship_evidence', [])
+        evidence = node.get("relationship_evidence", [])
         if evidence and show_confidence:
             for ev in evidence[:2]:  # Show first 2
                 lines.append(f"{child_prefix}  📋 {ev}")
 
     # Process children
-    children = node.get('children', [])
+    children = node.get("children", [])
     if children:
         # Sort children by start time if available
         sorted_children = sorted(
-            children,
-            key=lambda c: c.get('start_time') or '9999-12-31T23:59:59Z'
+            children, key=lambda c: c.get("start_time") or "9999-12-31T23:59:59Z"
         )
 
         child_prefix = prefix + ("    " if is_last else "│   ")
         for i, child in enumerate(sorted_children):
             is_last_child = i == len(sorted_children) - 1
             _append_node_ascii(
-                child, lines, child_prefix, is_last_child,
-                mode, show_duration, show_errors, show_confidence, max_depth, current_depth + 1
+                child,
+                lines,
+                child_prefix,
+                is_last_child,
+                mode,
+                show_duration,
+                show_errors,
+                show_confidence,
+                max_depth,
+                current_depth + 1,
             )
 
 
@@ -225,7 +248,7 @@ def _format_rich_tree(
     header.append(f" ({hierarchy.get('total_nodes', 0)} nodes, ", style="dim")
     header.append(f"max depth: {hierarchy.get('max_depth', 0)}", style="dim")
     if show_duration:
-        total_duration = hierarchy.get('total_duration_ms')
+        total_duration = hierarchy.get("total_duration_ms")
         if total_duration:
             header.append(f", {_format_duration(total_duration)}", style="yellow")
     header.append(")", style="dim")
@@ -233,27 +256,32 @@ def _format_rich_tree(
     tree = RichTree(header)
 
     # Add bottleneck warning
-    bottleneck = hierarchy.get('bottleneck')
+    bottleneck = hierarchy.get("bottleneck")
     if bottleneck:
         warning = Text()
         warning.append("⚠️  BOTTLENECK: ", style="bold yellow")
-        warning.append(bottleneck.get('node_id', ''), style="red")
-        warning.append(f" ({_format_duration(bottleneck.get('duration_ms', 0))}, {bottleneck.get('percentage', 0):.1f}%)", style="yellow")
+        warning.append(bottleneck.get("node_id", ""), style="red")
+        warning.append(
+            f" ({_format_duration(bottleneck.get('duration_ms', 0))}, {bottleneck.get('percentage', 0):.1f}%)",
+            style="yellow",
+        )
         tree.add(warning)
 
     # Add error summary
-    error_nodes = hierarchy.get('error_nodes', [])
+    error_nodes = hierarchy.get("error_nodes", [])
     if error_nodes and show_errors:
         error_text = Text()
         error_text.append(f"❌ {len(error_nodes)} node(s) with errors", style="bold red")
         tree.add(error_text)
 
     # Add roots
-    roots = hierarchy.get('roots', [])
+    roots = hierarchy.get("roots", [])
     for root in roots:
         root_node = _create_rich_node(root, mode, show_duration, show_errors, show_confidence)
         root_tree = tree.add(root_node)
-        _add_rich_children(root_tree, root, mode, show_duration, show_errors, show_confidence, max_depth, 0)
+        _add_rich_children(
+            root_tree, root, mode, show_duration, show_errors, show_confidence, max_depth, 0
+        )
 
     # Render to string
     output = StringIO()
@@ -275,35 +303,35 @@ def _create_rich_node(
     text = Text()
 
     # Error marker
-    if show_errors and node.get('error_count', 0) > 0:
+    if show_errors and node.get("error_count", 0) > 0:
         text.append("❌ ", style="bold red")
 
     # Node ID
-    node_id = node.get('id', 'unknown')
+    node_id = node.get("id", "unknown")
     text.append(node_id, style="bold green")
 
     # Metadata
     metadata = []
 
     if mode == "detailed" or mode == "full":
-        node_type = node.get('node_type', 'Unknown')
+        node_type = node.get("node_type", "Unknown")
         metadata.append(f"type={node_type}")
         metadata.append(f"entries={node.get('entry_count', 0)}")
 
         if show_duration:
-            duration_ms = node.get('duration_ms')
+            duration_ms = node.get("duration_ms")
             if duration_ms is not None:
                 metadata.append(f"duration={_format_duration(duration_ms)}")
 
         if show_confidence:
-            confidence = node.get('confidence', 0.0)
+            confidence = node.get("confidence", 0.0)
             color = "green" if confidence >= 0.9 else "yellow" if confidence >= 0.6 else "red"
             metadata.append(f"confidence={confidence:.2f}")
 
     elif mode == "compact":
         metadata.append(f"{node.get('entry_count', 0)} entries")
         if show_duration:
-            duration_ms = node.get('duration_ms')
+            duration_ms = node.get("duration_ms")
             if duration_ms is not None:
                 metadata.append(_format_duration(duration_ms))
 
@@ -313,7 +341,7 @@ def _create_rich_node(
         text.append(")", style="dim")
 
     # Error count
-    if show_errors and node.get('error_count', 0) > 0:
+    if show_errors and node.get("error_count", 0) > 0:
         text.append(f" [{node.get('error_count')} errors]", style="bold red")
 
     return text
@@ -333,15 +361,12 @@ def _add_rich_children(
     if max_depth is not None and current_depth >= max_depth:
         return
 
-    children = node.get('children', [])
+    children = node.get("children", [])
     if not children:
         return
 
     # Sort children by start time
-    sorted_children = sorted(
-        children,
-        key=lambda c: c.get('start_time') or '9999-12-31T23:59:59Z'
-    )
+    sorted_children = sorted(children, key=lambda c: c.get("start_time") or "9999-12-31T23:59:59Z")
 
     for child in sorted_children:
         child_text = _create_rich_node(child, mode, show_duration, show_errors, show_confidence)
@@ -349,7 +374,7 @@ def _add_rich_children(
 
         # Add detailed info in full mode
         if mode == "full":
-            level_counts = child.get('level_counts', {})
+            level_counts = child.get("level_counts", {})
             if level_counts:
                 level_text = Text()
                 level_text.append("Levels: ", style="dim")
@@ -360,7 +385,7 @@ def _add_rich_children(
                 level_text.append(", ".join(level_parts), style=color)
                 child_tree.add(level_text)
 
-            evidence = child.get('relationship_evidence', [])
+            evidence = child.get("relationship_evidence", [])
             if evidence and show_confidence:
                 for ev in evidence[:2]:
                     ev_text = Text()
@@ -368,7 +393,16 @@ def _add_rich_children(
                     ev_text.append(ev, style="dim italic")
                     child_tree.add(ev_text)
 
-        _add_rich_children(child_tree, child, mode, show_duration, show_errors, show_confidence, max_depth, current_depth + 1)
+        _add_rich_children(
+            child_tree,
+            child,
+            mode,
+            show_duration,
+            show_errors,
+            show_confidence,
+            max_depth,
+            current_depth + 1,
+        )
 
 
 def _format_duration(ms: Optional[int]) -> str:
@@ -451,7 +485,7 @@ def format_waterfall(
     lines = []
 
     # Calculate total duration and time bounds
-    total_duration = hierarchy.get('total_duration_ms', 0)
+    total_duration = hierarchy.get("total_duration_ms", 0)
     if total_duration == 0:
         return "No timing information available"
 
@@ -463,24 +497,24 @@ def format_waterfall(
     lines.append("┌" + "─" * (effective_width - 2) + "┐")
     header = f"Timeline: {hierarchy.get('detection_method', 'Hierarchy')} ({_format_duration(total_duration)})"
     if len(header) > effective_width - 4:
-        header = header[:effective_width - 7] + "..."
+        header = header[: effective_width - 7] + "..."
     lines.append(f"│ {header:<{effective_width-4}} │")
     lines.append("├" + "─" * (effective_width - 2) + "┤")
 
     # Collect all nodes in order
     nodes_flat = []
-    roots = hierarchy.get('roots', [])
+    roots = hierarchy.get("roots", [])
     for root in roots:
         _collect_nodes_flat(root, nodes_flat, 0)
 
     # Find earliest start time
     earliest = None
     for node_info in nodes_flat:
-        node = node_info['node']
-        start_str = node.get('start_time')
+        node = node_info["node"]
+        start_str = node.get("start_time")
         if start_str:
             try:
-                start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+                start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
                 if earliest is None or start_time < earliest:
                     earliest = start_time
             except (ValueError, TypeError):
@@ -494,18 +528,18 @@ def format_waterfall(
     bar_width = max(1, effective_width - label_width - 12)  # Ensure positive bar width
 
     for node_info in nodes_flat:
-        node = node_info['node']
-        depth = node_info['depth']
+        node = node_info["node"]
+        depth = node_info["depth"]
 
-        node_id = node.get('id', 'unknown')
-        start_str = node.get('start_time')
-        duration_ms = node.get('duration_ms', 0)
+        node_id = node.get("id", "unknown")
+        start_str = node.get("start_time")
+        duration_ms = node.get("duration_ms", 0)
 
         if not start_str or duration_ms == 0:
             continue
 
         try:
-            start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+            start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
             offset_ms = int((start_time - earliest).total_seconds() * 1000)
         except (ValueError, TypeError):
             continue  # Skip nodes with invalid timestamps
@@ -525,12 +559,12 @@ def format_waterfall(
 
         label = f"{indent}{node_id}"
         if len(label) > label_width:
-            label = label[:label_width-3] + "..."
+            label = label[: label_width - 3] + "..."
         label = label.ljust(label_width)
 
         # Build bar
         bar = " " * bar_start
-        error_marker = "❌" if show_errors and node.get('error_count', 0) > 0 else ""
+        error_marker = "❌" if show_errors and node.get("error_count", 0) > 0 else ""
         bar += "█" * bar_length
         bar += error_marker
 
@@ -540,7 +574,7 @@ def format_waterfall(
         line = f"│ {label} {bar:<{bar_width}} {duration_label:>7}│"
         # Ensure line fits within effective_width
         if len(line) > effective_width:
-            line = line[:effective_width-1] + "│"
+            line = line[: effective_width - 1] + "│"
         elif len(line) < effective_width:
             line = line[:-1] + " " * (effective_width - len(line)) + "│"
         lines.append(line)
@@ -549,12 +583,12 @@ def format_waterfall(
     lines.append("└" + "─" * (effective_width - 2) + "┘")
 
     # Add bottleneck info (constrained to effective_width)
-    bottleneck = hierarchy.get('bottleneck')
+    bottleneck = hierarchy.get("bottleneck")
     if bottleneck:
         lines.append("")
         bn_text = f"Bottleneck: {bottleneck.get('node_id')} ({_format_duration(bottleneck.get('duration_ms', 0))}, {bottleneck.get('percentage', 0):.1f}%)"
         if len(bn_text) > effective_width - 4:  # Leave room for emoji
-            bn_text = bn_text[:effective_width - 7] + "..."
+            bn_text = bn_text[: effective_width - 7] + "..."
         lines.append(f"⚠️  {bn_text}")
 
     return "\n".join(lines)
@@ -562,8 +596,8 @@ def format_waterfall(
 
 def _collect_nodes_flat(node: Dict[str, Any], result: List[Dict], depth: int):
     """Flatten hierarchy to list with depth info"""
-    result.append({'node': node, 'depth': depth})
-    for child in node.get('children', []):
+    result.append({"node": node, "depth": depth})
+    for child in node.get("children", []):
         _collect_nodes_flat(child, result, depth + 1)
 
 
@@ -628,67 +662,64 @@ def format_flamegraph(
         # │                             │ db-query (100ms) │ cache-update (250ms)                 │
         # └─────────────────────────────┴──────────────────┴──────────────────────────────────────┘
     """
-    if not hierarchy or not hierarchy.get('roots'):
+    if not hierarchy or not hierarchy.get("roots"):
         return "No hierarchy data"
 
-    total_duration = hierarchy.get('total_duration_ms', 0)
+    total_duration = hierarchy.get("total_duration_ms", 0)
     if total_duration <= 0:
         # Calculate from roots
-        total_duration = sum(
-            root.get('duration_ms', 0) or 0
-            for root in hierarchy.get('roots', [])
-        )
+        total_duration = sum(root.get("duration_ms", 0) or 0 for root in hierarchy.get("roots", []))
     if total_duration <= 0:
         total_duration = 1  # Avoid division by zero
 
     lines = []
     colors = [
-        '\033[44m',   # Blue
-        '\033[42m',   # Green
-        '\033[43m',   # Yellow
-        '\033[45m',   # Magenta
-        '\033[46m',   # Cyan
-        '\033[41m',   # Red (for errors)
+        "\033[44m",  # Blue
+        "\033[42m",  # Green
+        "\033[43m",  # Yellow
+        "\033[45m",  # Magenta
+        "\033[46m",  # Cyan
+        "\033[41m",  # Red (for errors)
     ]
-    reset = '\033[0m'
+    reset = "\033[0m"
 
     def get_color(depth: int, has_error: bool) -> str:
         if not use_colors:
-            return ''
+            return ""
         if has_error:
             return colors[5]  # Red for errors
         return colors[depth % 5]
 
     def format_duration(ms: Optional[float]) -> str:
         if ms is None or ms <= 0:
-            return ''
+            return ""
         if ms < 1000:
-            return f'{ms:.0f}ms'
-        return f'{ms/1000:.2f}s'
+            return f"{ms:.0f}ms"
+        return f"{ms/1000:.2f}s"
 
     # Build layers by depth
-    max_depth = hierarchy.get('max_depth', 0)
+    max_depth = hierarchy.get("max_depth", 0)
     layers: List[List[Dict[str, Any]]] = [[] for _ in range(max_depth + 1)]
 
     def collect_by_depth(node: Dict[str, Any], offset: float = 0):
-        depth = node.get('depth', 0)
-        duration = node.get('duration_ms', 0) or 0
+        depth = node.get("depth", 0)
+        duration = node.get("duration_ms", 0) or 0
         node_info = {
-            'id': node.get('id', 'unknown'),
-            'duration': duration,
-            'offset': offset,
-            'has_error': node.get('error_count', 0) > 0,
-            'is_bottleneck': node.get('id') == hierarchy.get('bottleneck', {}).get('node_id'),
+            "id": node.get("id", "unknown"),
+            "duration": duration,
+            "offset": offset,
+            "has_error": node.get("error_count", 0) > 0,
+            "is_bottleneck": node.get("id") == hierarchy.get("bottleneck", {}).get("node_id"),
         }
         layers[depth].append(node_info)
 
         child_offset = offset
-        for child in node.get('children', []):
+        for child in node.get("children", []):
             collect_by_depth(child, child_offset)
-            child_offset += child.get('duration_ms', 0) or 0
+            child_offset += child.get("duration_ms", 0) or 0
 
     # Collect all nodes
-    for root in hierarchy.get('roots', []):
+    for root in hierarchy.get("roots", []):
         collect_by_depth(root)
 
     # Header
@@ -707,23 +738,23 @@ def format_flamegraph(
 
         for node in layer:
             # Calculate width proportional to duration
-            proportion = node['duration'] / total_duration if total_duration > 0 else 0
+            proportion = node["duration"] / total_duration if total_duration > 0 else 0
             span_width = max(min_width, int(proportion * (width - 2)))
 
             # Truncate label if needed
-            label = node['id']
-            duration_str = format_duration(node['duration'])
+            label = node["id"]
+            duration_str = format_duration(node["duration"])
             full_label = f"{label} ({duration_str})" if duration_str else label
 
             if len(full_label) > span_width - 2:
-                full_label = full_label[:span_width - 4] + '..'
+                full_label = full_label[: span_width - 4] + ".."
 
             # Create the span block
-            color = get_color(depth, node['has_error'])
-            end_color = reset if use_colors else ''
+            color = get_color(depth, node["has_error"])
+            end_color = reset if use_colors else ""
 
             # Bottleneck indicator
-            if node['is_bottleneck']:
+            if node["is_bottleneck"]:
                 full_label = f"⚠ {full_label}"
 
             # Center the label
@@ -739,7 +770,7 @@ def format_flamegraph(
             if depth == 0:
                 lines.append("┌" + "─" * (width - 2) + "┐")
 
-            lines.append(''.join(layer_line))
+            lines.append("".join(layer_line))
 
             # Add separator if there's a next layer
             if depth < len(layers) - 1 and layers[depth + 1]:
@@ -755,7 +786,7 @@ def format_flamegraph(
     lines.append("  ⚠ = Bottleneck   Red = Error")
     lines.append("  Width proportional to duration")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def print_flamegraph(

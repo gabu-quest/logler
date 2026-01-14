@@ -7,11 +7,8 @@ from pathlib import Path
 from typing import Optional
 from rich.console import Console
 from rich.table import Table
-from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
-from rich.syntax import Syntax
-from datetime import datetime
 
 from .parser import LogParser, LogEntry
 
@@ -32,7 +29,9 @@ class TerminalViewer:
     }
 
     def __init__(self, use_colors: bool = True):
-        self.console = Console(force_terminal=use_colors, color_system="auto" if use_colors else None)
+        self.console = Console(
+            force_terminal=use_colors, color_system="auto" if use_colors else None
+        )
         self.parser = LogParser()
 
     async def view_file(
@@ -55,14 +54,11 @@ class TerminalViewer:
         self.console.print(f"[dim]{path.absolute()}[/dim]\n")
 
         # Read file
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             all_lines = f.readlines()
 
         # Parse entries
-        entries = [
-            self.parser.parse_line(i + 1, line.rstrip())
-            for i, line in enumerate(all_lines)
-        ]
+        entries = [self.parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(all_lines)]
 
         # Apply filters
         entries = self._apply_filters(entries, level_filter, pattern, thread_filter)
@@ -73,7 +69,9 @@ class TerminalViewer:
 
         # Display entries
         if follow:
-            await self._follow_mode(path, entries[-lines:] if lines else entries, level_filter, pattern, thread_filter)
+            await self._follow_mode(
+                path, entries[-lines:] if lines else entries, level_filter, pattern, thread_filter
+            )
         else:
             self._display_entries(entries)
 
@@ -169,7 +167,7 @@ class TerminalViewer:
         self.console.print("\n[bold green]📡 Following log file... (Ctrl+C to stop)[/bold green]\n")
 
         # Track file position
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             f.seek(0, 2)  # Go to end
             line_number = len(initial_entries)
 
@@ -239,9 +237,7 @@ class TerminalViewer:
 
         for entry in thread_entries[:10]:  # Show first 10
             level_color = self.LEVEL_COLORS.get(entry.level, "white")
-            panel_content.append(
-                f"[{level_color}]●[/{level_color}] {entry.message[:80]}"
-            )
+            panel_content.append(f"[{level_color}]●[/{level_color}] {entry.message[:80]}")
 
         if len(thread_entries) > 10:
             panel_content.append(f"[dim]... and {len(thread_entries) - 10} more[/dim]")

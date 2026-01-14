@@ -5,9 +5,8 @@ File watching with regex pattern matching.
 import asyncio
 import fnmatch
 from pathlib import Path
-from typing import Optional
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileCreatedEvent
+from watchdog.events import FileSystemEventHandler
 
 from rich.console import Console
 

@@ -12,6 +12,7 @@ from enum import Enum
 
 class LogLevel(str, Enum):
     """Log levels."""
+
     TRACE = "TRACE"
     DEBUG = "DEBUG"
     INFO = "INFO"
@@ -26,6 +27,7 @@ class LogLevel(str, Enum):
 @dataclass
 class LogEntry:
     """Parsed log entry."""
+
     line_number: int
     raw: str
     timestamp: Optional[datetime] = None
@@ -50,18 +52,18 @@ class LogParser:
     # Regex patterns
     PATTERNS = {
         "timestamp": re.compile(
-            r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?'
+            r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
         ),
         "log_level": re.compile(
-            r'\b(TRACE|DEBUG|INFO|INFORMATION|WARN|WARNING|ERROR|ERR|FATAL|CRITICAL|CRIT)\b',
-            re.IGNORECASE
+            r"\b(TRACE|DEBUG|INFO|INFORMATION|WARN|WARNING|ERROR|ERR|FATAL|CRITICAL|CRIT)\b",
+            re.IGNORECASE,
         ),
-        "thread_id": re.compile(r'(?:thread[=:\s]+|tid[=:\s]+|\[)([a-zA-Z0-9_-]+)(?:\])?'),
+        "thread_id": re.compile(r"(?:thread[=:\s]+|tid[=:\s]+|\[)([a-zA-Z0-9_-]+)(?:\])?"),
         "correlation_id": re.compile(
-            r'(?:correlation[_-]?id|request[_-]?id|req[_-]?id)[=:\s]+([a-zA-Z0-9_-]+)'
+            r"(?:correlation[_-]?id|request[_-]?id|req[_-]?id)[=:\s]+([a-zA-Z0-9_-]+)"
         ),
-        "trace_id": re.compile(r'(?:trace[_-]?id|traceId)[=:\s]+([a-fA-F0-9]{16,32})'),
-        "span_id": re.compile(r'(?:span[_-]?id|spanId)[=:\s]+([a-fA-F0-9]{8,16})'),
+        "trace_id": re.compile(r"(?:trace[_-]?id|traceId)[=:\s]+([a-fA-F0-9]{16,32})"),
+        "span_id": re.compile(r"(?:span[_-]?id|spanId)[=:\s]+([a-fA-F0-9]{8,16})"),
     }
 
     def parse_line(self, line_number: int, raw: str) -> LogEntry:
@@ -69,7 +71,7 @@ class LogParser:
         entry = LogEntry(line_number=line_number, raw=raw)
 
         # Try JSON first
-        if raw.strip().startswith('{'):
+        if raw.strip().startswith("{"):
             try:
                 data = json.loads(raw.strip())
                 return self._parse_json(line_number, raw, data)
@@ -88,7 +90,7 @@ class LogParser:
             if ts_field in data:
                 try:
                     ts_str = str(data[ts_field])
-                    entry.timestamp = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                    entry.timestamp = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                 except (ValueError, AttributeError):
                     pass
                 break
@@ -131,13 +133,34 @@ class LogParser:
 
         # Store other fields
         skip_fields = {
-            "timestamp", "time", "ts", "@timestamp", "datetime",
-            "level", "severity", "loglevel", "lvl",
-            "message", "msg", "text", "content",
-            "thread", "thread_id", "threadId", "tid",
-            "correlation_id", "correlationId", "request_id", "requestId",
-            "trace_id", "traceId", "span_id", "spanId",
-            "service", "service_name", "serviceName",
+            "timestamp",
+            "time",
+            "ts",
+            "@timestamp",
+            "datetime",
+            "level",
+            "severity",
+            "loglevel",
+            "lvl",
+            "message",
+            "msg",
+            "text",
+            "content",
+            "thread",
+            "thread_id",
+            "threadId",
+            "tid",
+            "correlation_id",
+            "correlationId",
+            "request_id",
+            "requestId",
+            "trace_id",
+            "traceId",
+            "span_id",
+            "spanId",
+            "service",
+            "service_name",
+            "serviceName",
         }
         entry.fields = {k: v for k, v in data.items() if k not in skip_fields}
 
@@ -152,7 +175,9 @@ class LogParser:
         if ts_match:
             try:
                 ts_str = ts_match.group(0)
-                entry.timestamp = datetime.fromisoformat(ts_str.replace(' ', 'T').replace('Z', '+00:00'))
+                entry.timestamp = datetime.fromisoformat(
+                    ts_str.replace(" ", "T").replace("Z", "+00:00")
+                )
             except ValueError:
                 pass
 

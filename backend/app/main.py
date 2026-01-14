@@ -54,10 +54,7 @@ async def health():
         except Exception:
             backend_status = "unreachable"
 
-    return {
-        "status": "healthy",
-        "backend": backend_status
-    }
+    return {"status": "healthy", "backend": backend_status}
 
 
 @app.post("/api/files/open")
@@ -66,9 +63,7 @@ async def open_file(req: OpenFileRequest):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
-                f"{RUST_BACKEND}/api/files/open",
-                json={"path": req.path},
-                timeout=30.0
+                f"{RUST_BACKEND}/api/files/open", json={"path": req.path}, timeout=30.0
             )
             response.raise_for_status()
             return response.json()
@@ -84,7 +79,7 @@ async def get_logs(file_id: str, offset: int = 0, limit: int = 100):
             response = await client.get(
                 f"{RUST_BACKEND}/api/logs",
                 params={"file_id": file_id, "offset": offset, "limit": limit},
-                timeout=30.0
+                timeout=30.0,
             )
             response.raise_for_status()
             return response.json()
@@ -98,9 +93,7 @@ async def search_logs(req: SearchRequest):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
-                f"{RUST_BACKEND}/api/logs/search",
-                json=req.dict(),
-                timeout=30.0
+                f"{RUST_BACKEND}/api/logs/search", json=req.dict(), timeout=30.0
             )
             response.raise_for_status()
             return response.json()
@@ -114,9 +107,7 @@ async def filter_logs(req: FilterRequest):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
-                f"{RUST_BACKEND}/api/logs/filter",
-                json=req.dict(exclude_none=True),
-                timeout=30.0
+                f"{RUST_BACKEND}/api/logs/filter", json=req.dict(exclude_none=True), timeout=30.0
             )
             response.raise_for_status()
             return response.json()
@@ -130,9 +121,7 @@ async def get_stats(file_id: str):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
-                f"{RUST_BACKEND}/api/logs/stats",
-                params={"file_id": file_id},
-                timeout=30.0
+                f"{RUST_BACKEND}/api/logs/stats", params={"file_id": file_id}, timeout=30.0
             )
             response.raise_for_status()
             return response.json()
@@ -145,10 +134,7 @@ async def get_threads():
     """Get all thread contexts"""
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(
-                f"{RUST_BACKEND}/api/threads",
-                timeout=30.0
-            )
+            response = await client.get(f"{RUST_BACKEND}/api/threads", timeout=30.0)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPError as e:
@@ -160,10 +146,7 @@ async def get_traces():
     """Get all trace contexts"""
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(
-                f"{RUST_BACKEND}/api/traces",
-                timeout=30.0
-            )
+            response = await client.get(f"{RUST_BACKEND}/api/traces", timeout=30.0)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPError as e:
@@ -175,10 +158,7 @@ async def get_correlations():
     """Get all correlation IDs"""
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(
-                f"{RUST_BACKEND}/api/correlations",
-                timeout=30.0
-            )
+            response = await client.get(f"{RUST_BACKEND}/api/correlations", timeout=30.0)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPError as e:
@@ -191,8 +171,7 @@ async def log_entry_partial(entry_id: str, request: Request):
     """Return a single log entry as HTML"""
     # This would fetch the entry and return formatted HTML
     return templates.TemplateResponse(
-        "partials/log_entry.html",
-        {"request": request, "entry_id": entry_id}
+        "partials/log_entry.html", {"request": request, "entry_id": entry_id}
     )
 
 
@@ -201,16 +180,12 @@ async def thread_view_partial(thread_id: str, request: Request):
     """Return thread view as HTML"""
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(
-                f"{RUST_BACKEND}/api/threads/{thread_id}",
-                timeout=30.0
-            )
+            response = await client.get(f"{RUST_BACKEND}/api/threads/{thread_id}", timeout=30.0)
             response.raise_for_status()
             thread_data = response.json()
 
             return templates.TemplateResponse(
-                "partials/thread_view.html",
-                {"request": request, "thread": thread_data}
+                "partials/thread_view.html", {"request": request, "thread": thread_data}
             )
         except httpx.HTTPError:
             raise HTTPException(status_code=404, detail="Thread not found")
@@ -221,16 +196,12 @@ async def trace_view_partial(trace_id: str, request: Request):
     """Return trace view as HTML"""
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(
-                f"{RUST_BACKEND}/api/traces/{trace_id}",
-                timeout=30.0
-            )
+            response = await client.get(f"{RUST_BACKEND}/api/traces/{trace_id}", timeout=30.0)
             response.raise_for_status()
             trace_data = response.json()
 
             return templates.TemplateResponse(
-                "partials/trace_view.html",
-                {"request": request, "trace": trace_data}
+                "partials/trace_view.html", {"request": request, "trace": trace_data}
             )
         except httpx.HTTPError:
             raise HTTPException(status_code=404, detail="Trace not found")
@@ -238,4 +209,5 @@ async def trace_view_partial(trace_id: str, request: Request):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

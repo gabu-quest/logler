@@ -30,7 +30,7 @@ mock_hierarchy = {
                             "level_counts": {"DEBUG": 1, "INFO": 1},
                             "depth": 2,
                             "confidence": 1.0,
-                            "relationship_evidence": ["Explicit parent_span_id: span-auth"]
+                            "relationship_evidence": ["Explicit parent_span_id: span-auth"],
                         }
                     ],
                     "entry_ids": [],
@@ -42,7 +42,7 @@ mock_hierarchy = {
                     "level_counts": {"INFO": 2, "DEBUG": 2},
                     "depth": 1,
                     "confidence": 1.0,
-                    "relationship_evidence": ["Explicit parent_span_id: span-root"]
+                    "relationship_evidence": ["Explicit parent_span_id: span-root"],
                 },
                 {
                     "id": "span-db-query",
@@ -59,7 +59,7 @@ mock_hierarchy = {
                     "level_counts": {"INFO": 2, "DEBUG": 1, "WARN": 1},
                     "depth": 1,
                     "confidence": 1.0,
-                    "relationship_evidence": ["Explicit parent_span_id: span-root"]
+                    "relationship_evidence": ["Explicit parent_span_id: span-root"],
                 },
                 {
                     "id": "span-ext-api",
@@ -82,7 +82,7 @@ mock_hierarchy = {
                             "level_counts": {"DEBUG": 1, "INFO": 1},
                             "depth": 2,
                             "confidence": 1.0,
-                            "relationship_evidence": ["Explicit parent_span_id: span-ext-api"]
+                            "relationship_evidence": ["Explicit parent_span_id: span-ext-api"],
                         },
                         {
                             "id": "span-ext-api-parse",
@@ -99,8 +99,8 @@ mock_hierarchy = {
                             "level_counts": {"INFO": 2},
                             "depth": 2,
                             "confidence": 1.0,
-                            "relationship_evidence": ["Explicit parent_span_id: span-ext-api"]
-                        }
+                            "relationship_evidence": ["Explicit parent_span_id: span-ext-api"],
+                        },
                     ],
                     "entry_ids": [],
                     "start_time": "2024-01-15T10:00:01.600Z",
@@ -111,8 +111,8 @@ mock_hierarchy = {
                     "level_counts": {"INFO": 4, "DEBUG": 2},
                     "depth": 1,
                     "confidence": 1.0,
-                    "relationship_evidence": ["Explicit parent_span_id: span-root"]
-                }
+                    "relationship_evidence": ["Explicit parent_span_id: span-root"],
+                },
             ],
             "entry_ids": [],
             "start_time": "2024-01-15T10:00:00.000Z",
@@ -123,29 +123,25 @@ mock_hierarchy = {
             "level_counts": {"INFO": 15, "DEBUG": 3, "WARN": 1},
             "depth": 0,
             "confidence": 1.0,
-            "relationship_evidence": []
+            "relationship_evidence": [],
         }
     ],
     "total_nodes": 7,
     "max_depth": 2,
     "total_duration_ms": 3150,
     "concurrent_count": 2,
-    "bottleneck": {
-        "node_id": "span-db-query",
-        "duration_ms": 1320,
-        "percentage": 41.9,
-        "depth": 1
-    },
+    "bottleneck": {"node_id": "span-db-query", "duration_ms": 1320, "percentage": 41.9, "depth": 1},
     "error_nodes": [],
-    "detection_method": "ExplicitParentId"
+    "detection_method": "ExplicitParentId",
 }
 
 # Test tree formatter
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from logler.tree_formatter import format_tree, format_waterfall, print_tree, print_waterfall
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+from logler.tree_formatter import format_tree, format_waterfall
 from logler.investigate import get_hierarchy_summary
 
 print("=" * 80)

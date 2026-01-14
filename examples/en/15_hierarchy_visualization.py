@@ -40,7 +40,7 @@ SAMPLE_LOGS = """
 
 def main():
     # Create temporary log file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
         f.write(SAMPLE_LOGS)
         log_file = f.name
 
@@ -63,7 +63,7 @@ def main():
             root_identifier="req-001",  # Can use correlation_id, trace_id, or span_id
             use_naming_patterns=True,
             use_temporal_inference=True,
-            min_confidence=0.0
+            min_confidence=0.0,
         )
 
         print(f"Total nodes: {hierarchy.get('total_nodes', 0)}")
@@ -71,11 +71,13 @@ def main():
         print(f"Detection method: {hierarchy.get('detection_method', 'Unknown')}")
         print(f"Total duration: {hierarchy.get('total_duration_ms', 0)}ms")
 
-        if hierarchy.get('bottleneck'):
-            bn = hierarchy['bottleneck']
-            print(f"Bottleneck: {bn.get('node_id')} ({bn.get('duration_ms')}ms, {bn.get('percentage_of_total', 0):.1f}%)")
+        if hierarchy.get("bottleneck"):
+            bn = hierarchy["bottleneck"]
+            print(
+                f"Bottleneck: {bn.get('node_id')} ({bn.get('duration_ms')}ms, {bn.get('percentage_of_total', 0):.1f}%)"
+            )
 
-        if hierarchy.get('error_nodes'):
+        if hierarchy.get("error_nodes"):
             print(f"Error nodes: {', '.join(hierarchy['error_nodes'])}")
 
         print()
@@ -94,7 +96,9 @@ def main():
         print("3. TREE VIEW (Detailed Mode)")
         print("=" * 80)
         print()
-        tree_detailed = format_tree(hierarchy, mode="detailed", show_duration=True, show_errors=True, show_confidence=True)
+        tree_detailed = format_tree(
+            hierarchy, mode="detailed", show_duration=True, show_errors=True, show_confidence=True
+        )
         print(tree_detailed)
         print()
 
@@ -129,18 +133,22 @@ def main():
         error_analysis = investigate.analyze_error_flow(hierarchy)
 
         print("Root Causes:")
-        for i, cause in enumerate(error_analysis.get('root_causes', [])[:3], 1):
-            print(f"  {i}. {cause.get('node_id')} (confidence: {cause.get('confidence', 0)*100:.0f}%)")
-            if cause.get('path'):
+        for i, cause in enumerate(error_analysis.get("root_causes", [])[:3], 1):
+            print(
+                f"  {i}. {cause.get('node_id')} (confidence: {cause.get('confidence', 0)*100:.0f}%)"
+            )
+            if cause.get("path"):
                 print(f"     Path: {' -> '.join(cause['path'])}")
 
         print()
         print("Propagation Chains:")
-        for i, chain in enumerate(error_analysis.get('propagation_chains', [])[:3], 1):
-            print(f"  Chain {i}: {chain.get('root_cause')} -> {chain.get('total_affected')} affected nodes")
+        for i, chain in enumerate(error_analysis.get("propagation_chains", [])[:3], 1):
+            print(
+                f"  Chain {i}: {chain.get('root_cause')} -> {chain.get('total_affected')} affected nodes"
+            )
 
         print()
-        impact = error_analysis.get('impact_summary', {})
+        impact = error_analysis.get("impact_summary", {})
         print("Impact Summary:")
         print(f"  Total affected nodes: {impact.get('total_affected_nodes', 0)}")
         print(f"  Affected percentage: {impact.get('affected_percentage', 0):.1f}%")
@@ -148,7 +156,7 @@ def main():
 
         print()
         print("Recommendations:")
-        for rec in error_analysis.get('recommendations', [])[:5]:
+        for rec in error_analysis.get("recommendations", [])[:5]:
             print(f"  - {rec}")
 
         print()
@@ -171,18 +179,20 @@ def main():
         perf_analysis = investigate.analyze_hierarchy_performance(hierarchy)
 
         print("Critical Path:")
-        for node in perf_analysis.get('critical_path', [])[:5]:
-            print(f"  - {node.get('id')}: {node.get('duration_ms')}ms ({node.get('percentage', 0):.1f}%)")
+        for node in perf_analysis.get("critical_path", [])[:5]:
+            print(
+                f"  - {node.get('id')}: {node.get('duration_ms')}ms ({node.get('percentage', 0):.1f}%)"
+            )
 
         print()
         print("Parallelization Opportunities:")
-        for opp in perf_analysis.get('parallelization_opportunities', [])[:3]:
+        for opp in perf_analysis.get("parallelization_opportunities", [])[:3]:
             print(f"  - Depth {opp.get('depth')}: {', '.join(opp.get('nodes', []))}")
             print(f"    Potential savings: {opp.get('potential_savings_ms', 0):.0f}ms")
 
         print()
         print("Optimization Suggestions:")
-        for sug in perf_analysis.get('optimization_suggestions', [])[:5]:
+        for sug in perf_analysis.get("optimization_suggestions", [])[:5]:
             print(f"  - {sug}")
 
         print()

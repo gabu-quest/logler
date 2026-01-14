@@ -54,9 +54,9 @@ dev = [
 logler = "logler.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/logler"
-Documentation = "https://github.com/yourusername/logler#readme"
-Repository = "https://github.com/yourusername/logler"
+Homepage = "https://github.com/gabu-quest/logler"
+Documentation = "https://github.com/gabu-quest/logler#readme"
+Repository = "https://github.com/gabu-quest/logler"
 
 [tool.setuptools.packages.find]
 where = ["src"]

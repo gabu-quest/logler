@@ -29,7 +29,7 @@ FILES = {
     "worker": BASE / "worker.log",
 }
 CADENCE = {
-    "api": 0.8,      # seconds between writes
+    "api": 0.8,  # seconds between writes
     "search": 1.3,
     "worker": 1.0,
 }

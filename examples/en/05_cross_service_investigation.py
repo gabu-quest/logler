@@ -18,7 +18,9 @@ print("Cross-Service Investigation Demo")
 print("=" * 70)
 
 meta = investigate.get_metadata([LOG_FILE])[0]
-print(f"Lines: {meta['lines']} | Window: {meta['time_range']['start']} → {meta['time_range']['end']}")
+print(
+    f"Lines: {meta['lines']} | Window: {meta['time_range']['start']} → {meta['time_range']['end']}"
+)
 
 timeline = investigate.cross_service_timeline(
     files={"stack": [LOG_FILE]},
@@ -41,7 +43,7 @@ for evt in events[:15]:
     entry = evt["entry"]
     lvl = entry.get("level", "INFO")
     msg = (entry.get("message") or "")[:60]
-    marker = { "ERROR": "❌", "FATAL": "💀", "WARN": "⚠️" }.get(lvl, "·")
+    marker = {"ERROR": "❌", "FATAL": "💀", "WARN": "⚠️"}.get(lvl, "·")
     print(f"{svc:<18} {rel:>6} {lvl:<6} {marker} {msg}")
 
 print("\n🚨 Hotspots")
@@ -63,11 +65,19 @@ for evt in events:
 for svc, svc_events in by_service.items():
     errors = sum(1 for e in svc_events if e["entry"].get("level") in ("ERROR", "FATAL"))
     warns = sum(1 for e in svc_events if e["entry"].get("level") == "WARN")
-    span = (svc_events[-1]["relative_time_ms"] - svc_events[0]["relative_time_ms"]) if len(svc_events) > 1 else 0
+    span = (
+        (svc_events[-1]["relative_time_ms"] - svc_events[0]["relative_time_ms"])
+        if len(svc_events) > 1
+        else 0
+    )
     badge = "🔴" if errors else "🟡" if warns else "🟢"
-    print(f"{badge} {svc:<18} {len(svc_events):2d} events | errors={errors}, warn={warns}, span={span}ms")
+    print(
+        f"{badge} {svc:<18} {len(svc_events):2d} events | errors={errors}, warn={warns}, span={span}ms"
+    )
 
 print("\nTakeaways:")
 print("  • The inventory-service timeout is the first fault, everything downstream degrades.")
-print("  • order-service shields the user with partial data, which propagates to api-gateway as 206.")
+print(
+    "  • order-service shields the user with partial data, which propagates to api-gateway as 206."
+)
 print("  • cross_service_timeline keeps the call tree coherent even from a single merged log file.")

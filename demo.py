@@ -24,42 +24,38 @@ print()
 # 2. Find Error Patterns (5 seconds)
 print("🔍 Finding Error Patterns...")
 patterns = investigate.find_patterns([LOG_FILE], min_occurrences=2)
-if patterns['patterns']:
-    p = patterns['patterns'][0]
+if patterns["patterns"]:
+    p = patterns["patterns"][0]
     print(f"   Top issue: '{p['pattern'][:50]}...'")
     print(f"   Occurred {p['occurrences']} times")
 print()
 
 # 3. Search for Specific Errors (5 seconds)
 print("⚠️  Searching for Database Errors...")
-results = investigate.search(
-    files=[LOG_FILE],
-    query="database",
-    level="ERROR",
-    limit=3
-)
+results = investigate.search(files=[LOG_FILE], query="database", level="ERROR", limit=3)
 print(f"   Found {results['total_matches']} errors in {results['search_time_ms']}ms")
-for i, result in enumerate(results['results'][:2], 1):
-    entry = result['entry']
+for i, result in enumerate(results["results"][:2], 1):
+    entry = result["entry"]
     print(f"   {i}. Line {entry['line_number']}: {entry['message'][:45]}...")
 print()
 
 # 4. Follow a Failed Request (10 seconds)
 print("🧵 Following Failed Request Timeline...")
-first_error = results['results'][0]['entry']
-if first_error.get('correlation_id'):
+first_error = results["results"][0]["entry"]
+if first_error.get("correlation_id"):
     timeline = investigate.follow_thread(
-        files=[LOG_FILE],
-        correlation_id=first_error['correlation_id']
+        files=[LOG_FILE], correlation_id=first_error["correlation_id"]
     )
     print(f"   Request took {timeline['duration_ms']}ms")
     print(f"   {timeline['total_entries']} log entries")
     print()
     print("   Timeline:")
-    for entry in timeline['entries'][:3]:
-        level_emoji = {"INFO": "ℹ️", "ERROR": "❌", "FATAL": "💀", "WARN": "⚠️"}.get(entry['level'], "📝")
+    for entry in timeline["entries"][:3]:
+        level_emoji = {"INFO": "ℹ️", "ERROR": "❌", "FATAL": "💀", "WARN": "⚠️"}.get(
+            entry["level"], "📝"
+        )
         print(f"   {level_emoji} {entry['message'][:50]}")
-    if timeline['total_entries'] > 3:
+    if timeline["total_entries"] > 3:
         print(f"   ... and {timeline['total_entries'] - 3} more entries")
 print()
 

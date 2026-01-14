@@ -107,7 +107,9 @@ durations = inv.sql_query(
     """
 )
 for row in durations:
-    print(f"{row['correlation_id']}: {row['errors']} errors / {row['total_logs']} logs, {row['duration_ms']}ms window")
+    print(
+        f"{row['correlation_id']}: {row['errors']} errors / {row['total_logs']} logs, {row['duration_ms']}ms window"
+    )
 print()
 
 circuits = inv.sql_query(

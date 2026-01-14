@@ -9,7 +9,6 @@ import os
 import pytest
 import tempfile
 import threading
-import time
 from pathlib import Path
 from logler.log_reader import LogReader
 
@@ -19,7 +18,7 @@ class TestFileEdgeCases:
 
     def test_empty_file(self):
         """Empty file with zero bytes"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             temp_path = f.name
 
         try:
@@ -32,7 +31,7 @@ class TestFileEdgeCases:
 
     def test_file_with_only_newlines(self):
         """File with only newline characters"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("\n\n\n\n\n")
             temp_path = f.name
 
@@ -46,7 +45,7 @@ class TestFileEdgeCases:
 
     def test_file_without_trailing_newline(self):
         """File without trailing newline"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("Line 1\nLine 2\nLine 3 no newline")
             temp_path = f.name
 
@@ -60,7 +59,7 @@ class TestFileEdgeCases:
 
     def test_file_single_line_no_newline(self):
         """Single line without newline"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("Single line no newline")
             temp_path = f.name
 
@@ -74,7 +73,7 @@ class TestFileEdgeCases:
 
     def test_file_with_windows_line_endings(self):
         """Windows CRLF line endings"""
-        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".log") as f:
             f.write(b"Line 1\r\nLine 2\r\nLine 3\r\n")
             temp_path = f.name
 
@@ -89,7 +88,7 @@ class TestFileEdgeCases:
 
     def test_file_with_old_mac_line_endings(self):
         """Old Mac CR-only line endings"""
-        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".log") as f:
             f.write(b"Line 1\rLine 2\rLine 3\r")
             temp_path = f.name
 
@@ -103,7 +102,7 @@ class TestFileEdgeCases:
 
     def test_file_with_mixed_line_endings(self):
         """Mixed line endings in same file"""
-        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".log") as f:
             f.write(b"Unix line\nWindows line\r\nOld mac line\rAnother unix\n")
             temp_path = f.name
 
@@ -117,7 +116,7 @@ class TestFileEdgeCases:
 
     def test_file_with_bom(self):
         """UTF-8 file with BOM"""
-        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".log") as f:
             f.write(b"\xef\xbb\xbfINFO First line with BOM\nINFO Second line\n")
             temp_path = f.name
 
@@ -146,7 +145,7 @@ class TestLargeFileHandling:
 
     def test_10k_lines(self):
         """10,000 lines"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(10000):
                 f.write(f"2024-01-01T00:00:00Z INFO Line {i}: {'x' * 100}\n")
             temp_path = f.name
@@ -169,7 +168,7 @@ class TestLargeFileHandling:
 
     def test_100k_lines(self):
         """100,000 lines"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(100000):
                 f.write(f"Line {i}\n")
             temp_path = f.name
@@ -187,7 +186,7 @@ class TestLargeFileHandling:
 
     def test_lines_with_varying_lengths(self):
         """Lines with wildly varying lengths"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(1000):
                 # Length varies from 1 to 5000 characters
                 length = (i % 500) * 10 + 1
@@ -207,7 +206,7 @@ class TestLargeFileHandling:
 
     def test_very_long_single_line(self):
         """Single line that's 1MB"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("INFO " + "x" * (1024 * 1024) + "\n")
             f.write("INFO Normal line\n")
             temp_path = f.name
@@ -227,7 +226,7 @@ class TestSearchEdgeCases:
     @pytest.fixture
     def search_file(self):
         """Create a file for search tests"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("INFO Normal message\n")
             f.write("ERROR Something failed\n")
             f.write("INFO Special chars: $^.*+?{}[]|()\\\n")
@@ -316,7 +315,7 @@ class TestReverseReading:
 
     def test_reverse_empty_file(self):
         """Reverse read empty file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             temp_path = f.name
 
         try:
@@ -328,7 +327,7 @@ class TestReverseReading:
 
     def test_reverse_single_line(self):
         """Reverse read single line file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("Only line\n")
             temp_path = f.name
 
@@ -342,7 +341,7 @@ class TestReverseReading:
 
     def test_reverse_preserves_order(self):
         """Reverse read preserves reverse order"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(100):
                 f.write(f"Line {i}\n")
             temp_path = f.name
@@ -358,7 +357,7 @@ class TestReverseReading:
 
     def test_reverse_with_start_line(self):
         """Reverse read starting from specific line"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(10):
                 f.write(f"Line {i}\n")
             temp_path = f.name
@@ -378,7 +377,7 @@ class TestTailFunctionality:
 
     def test_tail_empty_file(self):
         """Tail empty file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             temp_path = f.name
 
         try:
@@ -390,7 +389,7 @@ class TestTailFunctionality:
 
     def test_tail_more_than_exists(self):
         """Tail more lines than exist"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("Line 1\nLine 2\nLine 3\n")
             temp_path = f.name
 
@@ -403,7 +402,7 @@ class TestTailFunctionality:
 
     def test_tail_zero_lines(self):
         """Tail zero lines - implementation may treat as 'all lines'"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("Line 1\nLine 2\nLine 3\n")
             temp_path = f.name
 
@@ -418,7 +417,7 @@ class TestTailFunctionality:
 
     def test_tail_negative_lines(self):
         """Tail negative lines (should handle gracefully)"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("Line 1\nLine 2\nLine 3\n")
             temp_path = f.name
 
@@ -439,7 +438,7 @@ class TestFileInfo:
 
     def test_file_info_normal(self):
         """Normal file info"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             f.write("Some content\n" * 100)
             temp_path = f.name
 
@@ -454,7 +453,7 @@ class TestFileInfo:
 
     def test_file_info_empty_file(self):
         """File info for empty file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             temp_path = f.name
 
         try:
@@ -504,7 +503,7 @@ class TestConcurrentAccess:
 
     def test_multiple_readers_same_file(self):
         """Multiple readers on same file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(1000):
                 f.write(f"Line {i}\n")
             temp_path = f.name
@@ -530,7 +529,7 @@ class TestConcurrentAccess:
 
     def test_read_while_counting(self):
         """Read and count simultaneously"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(1000):
                 f.write(f"Line {i}\n")
             temp_path = f.name
@@ -540,10 +539,10 @@ class TestConcurrentAccess:
             results = {}
 
             def do_read():
-                results['read'] = len(list(reader.read_lines()))
+                results["read"] = len(list(reader.read_lines()))
 
             def do_count():
-                results['count'] = reader.count_lines()
+                results["count"] = reader.count_lines()
 
             t1 = threading.Thread(target=do_read)
             t2 = threading.Thread(target=do_count)
@@ -553,8 +552,8 @@ class TestConcurrentAccess:
             t1.join()
             t2.join()
 
-            assert results['read'] == 1000
-            assert results['count'] == 1000
+            assert results["read"] == 1000
+            assert results["count"] == 1000
         finally:
             Path(temp_path).unlink()
 
@@ -564,7 +563,7 @@ class TestBinaryContent:
 
     def test_pure_binary_file(self):
         """Pure binary file (random bytes)"""
-        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".log") as f:
             f.write(os.urandom(1000))
             temp_path = f.name
 
@@ -582,7 +581,7 @@ class TestBinaryContent:
 
     def test_text_with_some_binary(self):
         """Text file with some binary bytes"""
-        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".log") as f:
             f.write(b"INFO Normal line\n")
             f.write(b"ERROR Line with binary: \x00\x01\x02\x03\n")
             f.write(b"INFO Another normal line\n")
@@ -605,8 +604,7 @@ class TestSpecialFilenames:
     def test_filename_with_spaces(self):
         """Filename with spaces"""
         with tempfile.NamedTemporaryFile(
-            mode='w', delete=False, suffix='.log',
-            prefix='test file with spaces '
+            mode="w", delete=False, suffix=".log", prefix="test file with spaces "
         ) as f:
             f.write("Line 1\nLine 2\n")
             temp_path = f.name
@@ -621,8 +619,7 @@ class TestSpecialFilenames:
     def test_filename_with_unicode(self):
         """Filename with unicode characters"""
         with tempfile.NamedTemporaryFile(
-            mode='w', delete=False, suffix='.log',
-            prefix='test_日本語_'
+            mode="w", delete=False, suffix=".log", prefix="test_日本語_"
         ) as f:
             f.write("Line 1\nLine 2\n")
             temp_path = f.name
@@ -641,7 +638,7 @@ class TestStartLineEdgeCases:
     @pytest.fixture
     def numbered_file(self):
         """Create a file with numbered lines"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for i in range(100):
                 f.write(f"Line {i}\n")
             temp_path = f.name
@@ -699,7 +696,7 @@ class TestMemoryEfficiency:
     def test_stream_large_file(self):
         """Verify streaming doesn't load entire file"""
         # Create a 10MB file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.log') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             line = "INFO " + "x" * 990 + "\n"  # ~1000 bytes per line
             for _ in range(10000):  # 10MB
                 f.write(line)
