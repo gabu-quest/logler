@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "logler"
-version = "1.0.5"
+version = "1.0.6"
 description = "Beautiful local log viewer with thread tracking and real-time updates"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -69,7 +69,7 @@ logler = ["web/templates/**/*", "web/static/**/*"]
 manifest-path = "crates/logler-py/Cargo.toml"
 python-source = "src"
 python-packages = ["logler"]
-features = ["sql"]
+# features passed via CLI in CI (sql not supported on Windows)
 include = ["LICENSE", "README.md"]
 
 [tool.black]
