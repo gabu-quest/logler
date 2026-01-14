@@ -1,3 +1,5 @@
+#![allow(non_local_definitions)]
+
 use logler_core::*;
 use pyo3::prelude::*;
 use regex::Regex;

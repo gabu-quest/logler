@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
             // Apply level filter if specified
             let filtered: Vec<_> = if let Some(level_str) = level {
-                let target_level = logler_core::types::LogLevel::from_str(&level_str)
+                let target_level = logler_core::types::LogLevel::parse(&level_str)
                     .filter(|lvl| *lvl != logler_core::types::LogLevel::Unknown)
                     .ok_or_else(|| anyhow!("Unknown log level: {}", level_str))?;
                 entries

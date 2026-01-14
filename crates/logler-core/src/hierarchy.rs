@@ -130,6 +130,7 @@ pub struct HierarchyBuilder {
     entries_by_id: HashMap<Uuid, LogEntry>,
 
     /// Detected naming patterns
+    #[allow(dead_code)]
     naming_patterns: Vec<NamingPattern>,
 
     /// Configuration for hierarchy detection
@@ -137,17 +138,19 @@ pub struct HierarchyBuilder {
 }
 
 /// Pattern for detecting parent-child relationships from names
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct NamingPattern {
     pattern_type: PatternType,
     regex: regex::Regex,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 enum PatternType {
-    DotSeparated,   // worker-1.task-a
-    ColonSeparated, // main:subtask-1
-    DashSeparated,  // req-123-auth
+    Dot,   // worker-1.task-a
+    Colon, // main:subtask-1
+    Dash,  // req-123-auth
 }
 
 /// Configuration for hierarchy detection
@@ -209,7 +212,7 @@ impl HierarchyBuilder {
         if let Some(span_id) = &entry.span_id {
             self.span_entries
                 .entry(span_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(entry_id);
 
             // Record explicit parent relationship
@@ -223,7 +226,7 @@ impl HierarchyBuilder {
         if let Some(thread_id) = &entry.thread_id {
             self.thread_entries
                 .entry(thread_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(entry_id);
         }
     }
@@ -339,7 +342,7 @@ impl HierarchyBuilder {
                 format!("entry:{}", entry.id)
             };
 
-            groups.entry(key).or_insert_with(Vec::new).push(entry);
+            groups.entry(key).or_default().push(entry);
         }
 
         groups
@@ -425,7 +428,7 @@ impl HierarchyBuilder {
                         format!("entry:{}", entry.id)
                     };
 
-                    children.entry(key).or_insert_with(Vec::new).push(entry);
+                    children.entry(key).or_default().push(entry);
                 }
             }
         }
@@ -463,7 +466,7 @@ impl HierarchyBuilder {
                     {
                         if self.is_child_by_naming(parent_id, child_id) {
                             let key = format!("thread:{}", child_id);
-                            children.entry(key).or_insert_with(Vec::new).push(entry);
+                            children.entry(key).or_default().push(entry);
                         }
                     }
                 }
@@ -539,7 +542,7 @@ impl HierarchyBuilder {
         end: &Option<DateTime<Utc>>,
     ) -> Option<i64> {
         match (start, end) {
-            (Some(s), Some(e)) => Some((e.timestamp_millis() - s.timestamp_millis())),
+            (Some(s), Some(e)) => Some(e.timestamp_millis() - s.timestamp_millis()),
             _ => None,
         }
     }
@@ -569,7 +572,7 @@ impl HierarchyBuilder {
     /// Calculate confidence and evidence for relationship
     fn calculate_confidence(
         &self,
-        entries: &[&LogEntry],
+        _entries: &[&LogEntry],
         parent_id: &Option<String>,
     ) -> (f64, Vec<String>) {
         let mut evidence = Vec::new();
@@ -622,15 +625,18 @@ impl HierarchyBuilder {
 
     /// Calculate maximum depth recursively
     fn calculate_max_depth(&self, node: &SpanNode) -> usize {
-        if node.children.is_empty() {
-            node.depth
-        } else {
-            node.children
-                .iter()
-                .map(|child| self.calculate_max_depth(child))
-                .max()
-                .unwrap_or(node.depth)
+        fn max_depth(node: &SpanNode) -> usize {
+            if node.children.is_empty() {
+                node.depth
+            } else {
+                node.children
+                    .iter()
+                    .map(max_depth)
+                    .max()
+                    .unwrap_or(node.depth)
+            }
         }
+        max_depth(node)
     }
 
     /// Count concurrent spans
@@ -729,17 +735,17 @@ impl HierarchyBuilder {
         vec![
             // worker-1.task-a
             NamingPattern {
-                pattern_type: PatternType::DotSeparated,
+                pattern_type: PatternType::Dot,
                 regex: regex::Regex::new(r"^([^.]+)\.(.+)$").unwrap(),
             },
             // main:subtask-1
             NamingPattern {
-                pattern_type: PatternType::ColonSeparated,
+                pattern_type: PatternType::Colon,
                 regex: regex::Regex::new(r"^([^:]+):(.+)$").unwrap(),
             },
             // req-123-auth
             NamingPattern {
-                pattern_type: PatternType::DashSeparated,
+                pattern_type: PatternType::Dash,
                 regex: regex::Regex::new(r"^(.+)-([^-]+)$").unwrap(),
             },
         ]

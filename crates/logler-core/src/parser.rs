@@ -358,7 +358,7 @@ impl LogParser {
         }
 
         if let Some(Value::String(level)) = fields.get("level").or_else(|| fields.get("lvl")) {
-            entry.level = LogLevel::from_str(level);
+            entry.level = LogLevel::parse(level);
         } else {
             entry.level = Some(LogLevel::Unknown);
         }
@@ -404,9 +404,7 @@ impl LogParser {
         entry.timestamp = caps
             .name("timestamp")
             .and_then(|m| self.parse_timestamp_flex(m.as_str()));
-        entry.level = caps
-            .name("level")
-            .and_then(|m| LogLevel::from_str(m.as_str()));
+        entry.level = caps.name("level").and_then(|m| LogLevel::parse(m.as_str()));
         entry.thread_id = caps
             .name("thread")
             .or_else(|| caps.name("thread_id"))
@@ -470,7 +468,7 @@ impl LogParser {
         for field in &["level", "severity", "log_level"] {
             if let Some(value) = obj.get(*field) {
                 if let Some(s) = value.as_str() {
-                    return LogLevel::from_str(s);
+                    return LogLevel::parse(s);
                 }
             }
         }
@@ -524,7 +522,7 @@ impl LogParser {
     fn extract_level(&self, text: &str) -> Option<LogLevel> {
         let re = LOG_LEVEL_RE.get()?;
         let cap = re.find(text)?;
-        LogLevel::from_str(cap.as_str())
+        LogLevel::parse(cap.as_str())
     }
 
     fn extract_thread_id(&self, text: &str) -> Option<String> {

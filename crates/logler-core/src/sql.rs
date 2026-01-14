@@ -70,24 +70,17 @@ impl SqlEngine {
 
         // DuckDB expects the statement to be executed before column metadata can be read.
         // Pull the statement reference from the rows handle to inspect columns safely.
-        let (column_count, column_names) = if let Some(stmt_ref) = rows.as_ref() {
-            let count = stmt_ref.column_count();
-            let names = stmt_ref
-                .column_names()
-                .into_iter()
-                .map(String::from)
-                .collect();
-            (count, names)
+        let column_names: Vec<String> = if let Some(stmt_ref) = rows.as_ref() {
+            stmt_ref.column_names()
         } else {
-            (0, Vec::new())
+            Vec::new()
         };
 
         let mut results: Vec<serde_json::Value> = Vec::new();
 
         while let Some(row) = rows.next()? {
             let mut obj = serde_json::Map::new();
-            for i in 0..column_count {
-                let col_name = &column_names[i];
+            for (i, col_name) in column_names.iter().enumerate() {
                 let value: serde_json::Value = match row.get_ref(i)? {
                     duckdb::types::ValueRef::Null => serde_json::Value::Null,
                     duckdb::types::ValueRef::Boolean(b) => serde_json::Value::Bool(b),
@@ -150,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_sql_query() {
-        let mut engine = SqlEngine::new().unwrap();
+        let engine = SqlEngine::new().unwrap();
 
         // Create test table
         engine
