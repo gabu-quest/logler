@@ -56,7 +56,13 @@ jobs:
         run: pip install maturin
 
       - name: Build wheel
-        run: maturin build --release ${{ matrix.features && format('--features {0}', matrix.features) || '' }} --target ${{ matrix.target }}
+        run: |
+          if [ -n "${{ matrix.features }}" ]; then
+            maturin build --release --features ${{ matrix.features }} --target ${{ matrix.target }}
+          else
+            maturin build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
