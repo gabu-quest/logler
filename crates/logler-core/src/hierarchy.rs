@@ -145,9 +145,9 @@ struct NamingPattern {
 
 #[derive(Debug, Clone, Copy)]
 enum PatternType {
-    DotSeparated,    // worker-1.task-a
-    ColonSeparated,  // main:subtask-1
-    DashSeparated,   // req-123-auth
+    DotSeparated,   // worker-1.task-a
+    ColonSeparated, // main:subtask-1
+    DashSeparated,  // req-123-auth
 }
 
 /// Configuration for hierarchy detection
@@ -214,7 +214,8 @@ impl HierarchyBuilder {
 
             // Record explicit parent relationship
             if let Some(parent_span_id) = &entry.parent_span_id {
-                self.span_parents.insert(span_id.clone(), parent_span_id.clone());
+                self.span_parents
+                    .insert(span_id.clone(), parent_span_id.clone());
             }
         }
 
@@ -254,7 +255,11 @@ impl HierarchyBuilder {
 
         // Calculate hierarchy statistics
         let total_nodes = all_node_ids.len();
-        let max_depth = roots.iter().map(|r| self.calculate_max_depth(r)).max().unwrap_or(0);
+        let max_depth = roots
+            .iter()
+            .map(|r| self.calculate_max_depth(r))
+            .max()
+            .unwrap_or(0);
 
         let total_duration_ms = self.calculate_total_duration(&root_entries);
         let concurrent_count = self.count_concurrent_spans(&roots);
@@ -316,7 +321,10 @@ impl HierarchyBuilder {
     }
 
     /// Group entries by their hierarchical relationships
-    fn group_entries_by_hierarchy<'a>(&self, entries: &[&'a LogEntry]) -> HashMap<String, Vec<&'a LogEntry>> {
+    fn group_entries_by_hierarchy<'a>(
+        &self,
+        entries: &[&'a LogEntry],
+    ) -> HashMap<String, Vec<&'a LogEntry>> {
         let mut groups: HashMap<String, Vec<&'a LogEntry>> = HashMap::new();
 
         for entry in entries {
@@ -368,7 +376,9 @@ impl HierarchyBuilder {
         let child_entries = self.find_children(entries);
 
         for (child_key, child_entry_list) in child_entries {
-            if let Some(child_node) = self.build_node(&child_key, &child_entry_list, depth + 1, all_nodes) {
+            if let Some(child_node) =
+                self.build_node(&child_key, &child_entry_list, depth + 1, all_nodes)
+            {
                 children.push(child_node);
             }
         }
@@ -429,18 +439,25 @@ impl HierarchyBuilder {
     }
 
     /// Infer children from naming patterns (worker-1 → worker-1.task-a)
-    fn infer_children_from_naming(&self, parent_entries: &[&LogEntry]) -> HashMap<String, Vec<&LogEntry>> {
+    fn infer_children_from_naming(
+        &self,
+        parent_entries: &[&LogEntry],
+    ) -> HashMap<String, Vec<&LogEntry>> {
         let mut children: HashMap<String, Vec<&LogEntry>> = HashMap::new();
 
         for parent in parent_entries {
-            let parent_id = parent.thread_id.as_ref()
+            let parent_id = parent
+                .thread_id
+                .as_ref()
                 .or(parent.correlation_id.as_ref())
                 .or(parent.span_id.as_ref());
 
             if let Some(parent_id) = parent_id {
                 // Look for entries with IDs that start with parent_id
                 for entry in self.entries_by_id.values() {
-                    if let Some(child_id) = entry.thread_id.as_ref()
+                    if let Some(child_id) = entry
+                        .thread_id
+                        .as_ref()
                         .or(entry.correlation_id.as_ref())
                         .or(entry.span_id.as_ref())
                     {
@@ -500,11 +517,11 @@ impl HierarchyBuilder {
     }
 
     /// Calculate time range for entries
-    fn calculate_time_range(&self, entries: &[&LogEntry]) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>) {
-        let timestamps: Vec<DateTime<Utc>> = entries
-            .iter()
-            .filter_map(|e| e.timestamp)
-            .collect();
+    fn calculate_time_range(
+        &self,
+        entries: &[&LogEntry],
+    ) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>) {
+        let timestamps: Vec<DateTime<Utc>> = entries.iter().filter_map(|e| e.timestamp).collect();
 
         if timestamps.is_empty() {
             (None, None)
@@ -516,7 +533,11 @@ impl HierarchyBuilder {
     }
 
     /// Calculate duration between two timestamps
-    fn calculate_duration(&self, start: &Option<DateTime<Utc>>, end: &Option<DateTime<Utc>>) -> Option<i64> {
+    fn calculate_duration(
+        &self,
+        start: &Option<DateTime<Utc>>,
+        end: &Option<DateTime<Utc>>,
+    ) -> Option<i64> {
         match (start, end) {
             (Some(s), Some(e)) => Some((e.timestamp_millis() - s.timestamp_millis())),
             _ => None,
@@ -546,7 +567,11 @@ impl HierarchyBuilder {
     }
 
     /// Calculate confidence and evidence for relationship
-    fn calculate_confidence(&self, entries: &[&LogEntry], parent_id: &Option<String>) -> (f64, Vec<String>) {
+    fn calculate_confidence(
+        &self,
+        entries: &[&LogEntry],
+        parent_id: &Option<String>,
+    ) -> (f64, Vec<String>) {
         let mut evidence = Vec::new();
         let mut confidence: f64 = 0.0;
 
@@ -637,7 +662,11 @@ impl HierarchyBuilder {
         let mut bottleneck: Option<(String, Option<String>, i64)> = None;
         let mut total_duration = 0i64;
 
-        fn find_slowest(node: &SpanNode, current_slowest: &mut Option<(String, Option<String>, i64)>, total: &mut i64) {
+        fn find_slowest(
+            node: &SpanNode,
+            current_slowest: &mut Option<(String, Option<String>, i64)>,
+            total: &mut i64,
+        ) {
             if let Some(duration) = node.duration_ms {
                 *total += duration;
 

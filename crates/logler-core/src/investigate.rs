@@ -515,8 +515,9 @@ impl Investigator {
 
         // Build the hierarchy
         // Return empty hierarchy if no match found (instead of error)
-        Ok(builder.build(root_identifier).unwrap_or_else(|| {
-            crate::hierarchy::ThreadHierarchy {
+        Ok(builder
+            .build(root_identifier)
+            .unwrap_or_else(|| crate::hierarchy::ThreadHierarchy {
                 roots: vec![],
                 total_nodes: 0,
                 max_depth: 0,
@@ -525,8 +526,7 @@ impl Investigator {
                 bottleneck: None,
                 error_nodes: vec![],
                 detection_method: crate::hierarchy::DetectionMethod::Explicit,
-            }
-        }))
+            }))
     }
 }
 

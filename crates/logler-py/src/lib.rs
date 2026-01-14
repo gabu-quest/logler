@@ -1,6 +1,6 @@
 use logler_core::*;
-use regex::Regex;
 use pyo3::prelude::*;
+use regex::Regex;
 use std::path::PathBuf;
 
 /// Python wrapper for Investigator
