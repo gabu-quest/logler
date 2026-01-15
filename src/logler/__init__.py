@@ -2,7 +2,7 @@
 Logler - Beautiful local log viewer with thread tracking and real-time updates.
 """
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 __author__ = "Logler Contributors"
 
 from .parser import LogParser, LogEntry
