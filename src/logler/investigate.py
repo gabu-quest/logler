@@ -1942,7 +1942,20 @@ class Investigator:
         """Search loaded files."""
         filters = {"levels": []}
         if level:
-            filters["levels"] = [level.upper()]
+            level_map = {
+                "trace": "Trace",
+                "debug": "Debug",
+                "info": "Info",
+                "warn": "Warn",
+                "warning": "Warn",
+                "error": "Error",
+                "fatal": "Fatal",
+                "critical": "Fatal",
+            }
+            normalized_level = level_map.get(level.lower())
+            if not normalized_level:
+                raise ValueError(f"Unknown log level: {level}")
+            filters["levels"] = [normalized_level]
         if thread_id:
             filters["thread_id"] = thread_id
         if correlation_id:

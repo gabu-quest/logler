@@ -17,7 +17,10 @@ examples/
 │   ├── tour_08_comparison.py         # Comparison and diffing
 │   ├── tour_09_tracing_exports.py    # Jaeger/Zipkin exports
 │   ├── tour_10_sampling.py           # Smart sampling strategies
-│   └── tour_11_ai_insights.py        # AI-powered insights
+│   ├── tour_11_ai_insights.py        # AI-powered insights
+│   ├── tour_12_multi_file_interleaving.py  # Multi-service log tracing (NEW!)
+│   ├── tour_13_live_watching.py      # Real-time log streaming (NEW!)
+│   └── tour_14_performance.py        # Scale benchmarks (NEW!)
 ├── en/              # English examples
 │   ├── 01_production_incident_investigation.py
 │   ├── 02_advanced_sql_analysis.py
@@ -76,8 +79,19 @@ uv run marimo edit examples/tours/tour_01_fundamentals.py
 | 09 | Tracing Exports | Export to Jaeger and Zipkin formats |
 | 10 | Sampling | Smart sampling strategies (diverse, errors-focused, etc.) |
 | 11 | AI Insights | analyze_with_insights, explain, suggest_next_action |
+| **12** | **Multi-File** | **Load 5+ services, cross-service timeline, distributed tracing** |
+| **13** | **Live Watching** | **Real-time tailing, anomaly detection, streaming** |
+| **14** | **Performance** | **10K+ entries, benchmarks, token efficiency comparison** |
 
 Each tour is self-contained with sample data - no external files needed.
+
+### Godlike Tours (12-14)
+
+These tours showcase logler's true power:
+
+- **Tour 12**: Load logs from 5 microservices, trace a single request across ALL of them, build distributed hierarchies
+- **Tour 13**: Watch logs stream in real-time, detect error spikes as they happen
+- **Tour 14**: Benchmark 10,000 entries - see sub-millisecond search times and token savings
 
 ## 🎯 Examples by Category
 
