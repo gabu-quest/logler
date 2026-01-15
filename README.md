@@ -2,8 +2,16 @@
 
 **Beautiful local log viewer with thread tracking and real-time updates**
 
-[![PyPI version](https://badge.fury.io/py/logler.svg)](https://badge.fury.io/py/logler)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI version](https://img.shields.io/pypi/v/logler.svg?logo=pypi&logoColor=white)](https://pypi.org/project/logler/)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/logler.svg?logo=pypi&logoColor=white)](https://pypi.org/project/logler/)
+[![Python 3.9+](https://img.shields.io/pypi/pyversions/logler.svg?logo=python&logoColor=white)](https://pypi.org/project/logler/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/gabu-quest/logler/pypi.yml?logo=github&label=build)](https://github.com/gabu-quest/logler/actions)
+[![Rust](https://img.shields.io/badge/rust-%23000000.svg?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://pypi.org/project/logler/)
+[![GitHub stars](https://img.shields.io/github/stars/gabu-quest/logler?style=social)](https://github.com/gabu-quest/logler)
 
 A modern, feature-rich log viewer that makes debugging a pleasure. View logs in your terminal with beautiful colors or start a web interface with WebSocket support for real-time updates.
 
