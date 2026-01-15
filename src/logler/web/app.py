@@ -36,12 +36,31 @@ def _ensure_within_root(path: Path) -> Path:
     raise HTTPException(status_code=403, detail="Requested path is outside the configured log root")
 
 
+def _sanitize_glob_pattern(pattern: str) -> str:
+    """Remove path traversal sequences from glob patterns."""
+    import re as _re
+
+    # Remove any ../ or ..\ sequences that could escape the root
+    # Use a loop to handle multiple consecutive traversal attempts like ../../
+    while ".." in pattern:
+        old_pattern = pattern
+        pattern = _re.sub(r"\.\.[\\/]", "", pattern)
+        pattern = _re.sub(r"[\\/]\.\.", "", pattern)
+        pattern = _re.sub(r"^\.\.", "", pattern)  # Leading ..
+        if pattern == old_pattern:
+            break  # No more changes possible
+    return pattern
+
+
 def _glob_within_root(pattern: str) -> List[Path]:
     """
     Run a glob pattern scoped to LOG_ROOT, returning file paths only.
     """
     if not pattern:
         return []
+
+    # Sanitize the pattern to prevent path traversal
+    pattern = _sanitize_glob_pattern(pattern)
 
     # Normalize relative patterns to LOG_ROOT
     raw_pattern = pattern
@@ -168,14 +187,14 @@ def _rust_filter(
 ) -> Optional[List[Dict[str, Any]]]:
     try:
         import logler_rs  # type: ignore
-    except Exception:
+    except ImportError:
         return None
 
     try:
         from ..cache import get_cached_investigator
 
         inv = get_cached_investigator(files)
-    except Exception:
+    except (ImportError, AttributeError, TypeError):
         inv = logler_rs.PyInvestigator()
         inv.load_files(files)
 
@@ -226,7 +245,8 @@ def _rust_filter(
         if track:
             _track_entries(entries)
         return entries
-    except Exception:
+    except (json.JSONDecodeError, KeyError, ValueError, AttributeError, RuntimeError):
+        # Rust filter failed - fall back to Python implementation
         return None
 
 
@@ -646,7 +666,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 await follow_file(websocket, file_path, current_filters, drop_count)
 
     except WebSocketDisconnect:
-        websocket_clients.remove(websocket)
+        pass  # Normal disconnect
+    finally:
+        if websocket in websocket_clients:
+            websocket_clients.remove(websocket)
 
 
 async def follow_file(
@@ -667,7 +690,8 @@ async def follow_file(
     with open(path, "r") as f:
         f.seek(0, 2)
         position = f.tell()
-        line_number = sum(1 for _ in open(path))
+    with open(path, "r") as f:
+        line_number = sum(1 for _ in f)
 
     # Follow file
     try:

@@ -35,6 +35,8 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from collections import defaultdict
 
+from .safe_regex import try_compile
+
 try:
     import logler_rs
 
@@ -50,7 +52,7 @@ except ImportError:
         else:
             RUST_AVAILABLE = False
             warnings.warn("Rust backend not available. Using Python fallback.", stacklevel=2)
-    except Exception:
+    except (ImportError, AttributeError, OSError):
         RUST_AVAILABLE = False
         warnings.warn("Rust backend not available. Using Python fallback.", stacklevel=2)
 
@@ -98,9 +100,8 @@ def _apply_custom_regex_to_results(result: Dict[str, Any], pattern: Optional[str
     """Apply a user-provided regex to fill missing fields like timestamp/level."""
     if not pattern:
         return
-    try:
-        regex = re.compile(pattern)
-    except re.error:
+    regex = try_compile(pattern)
+    if regex is None:
         return
 
     for item in result.get("results", []) or []:
