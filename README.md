@@ -116,7 +116,7 @@ summary = investigate.get_hierarchy_summary(hierarchy)
 print(summary)  # Shows tree structure, errors, bottlenecks
 
 # Visualize in CLI
-from tree_formatter import print_tree, print_waterfall
+from logler.tree_formatter import print_tree, print_waterfall
 print_tree(hierarchy, mode="detailed", show_duration=True)
 print_waterfall(hierarchy, width=100)  # Waterfall timeline showing parallel operations
 ```
@@ -183,7 +183,7 @@ logler investigate app.log --output summary       # Token-efficient output
 
 # 🌳 NEW: Hierarchical Thread Visualization
 logler investigate app.log --correlation req-123 --hierarchy         # Show thread hierarchy tree
-logler investigate app.log --trace trace-abc123 --hierarchy --waterfall  # Show waterfall timeline
+logler investigate app.log --correlation trace-abc123 --hierarchy --waterfall  # Show waterfall timeline
 logler investigate app.log --correlation req-123 --hierarchy --flamegraph # Show flamegraph view
 logler investigate app.log --hierarchy --show-error-flow             # Analyze error propagation
 logler investigate app.log --thread worker-1 --hierarchy --max-depth 3   # Limit hierarchy depth
