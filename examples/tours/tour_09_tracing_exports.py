@@ -57,84 +57,67 @@ def _():
     base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
     logs = []
 
-    # E-commerce checkout flow
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=0)).isoformat(),
-            "level": "INFO",
-            "message": "Checkout started",
-            "trace_id": "trace-export-001",
-            "span_id": "span-checkout",
-            "parent_span_id": None,
-            "service": "checkout-service",
-            "duration_ms": 1500,
-        }
-    )
+    def _add_span_events(
+        span_id,
+        parent_span_id,
+        service,
+        message,
+        offset_ms,
+        duration_ms,
+        level="INFO",
+        emit_end=True,
+    ):
+        logs.append(
+            {
+                "timestamp": (base_time + timedelta(milliseconds=offset_ms)).isoformat(),
+                "level": level,
+                "message": message,
+                "trace_id": "trace-export-001",
+                "span_id": span_id,
+                "parent_span_id": parent_span_id,
+                "service": service,
+                "duration_ms": duration_ms,
+            }
+        )
+        if emit_end:
+            logs.append(
+                {
+                    "timestamp": (
+                        base_time + timedelta(milliseconds=offset_ms + duration_ms)
+                    ).isoformat(),
+                    "level": level,
+                    "message": f"{message} completed ({duration_ms}ms)",
+                    "trace_id": "trace-export-001",
+                    "span_id": span_id,
+                    "parent_span_id": parent_span_id,
+                    "service": service,
+                    "duration_ms": duration_ms,
+                }
+            )
 
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=10)).isoformat(),
-            "level": "INFO",
-            "message": "Validating cart",
-            "trace_id": "trace-export-001",
-            "span_id": "span-cart",
-            "parent_span_id": "span-checkout",
-            "service": "cart-service",
-            "duration_ms": 200,
-        }
-    )
+    span_defs = [
+        ("span-checkout", None, "checkout-service", "Checkout started", 0, 1500, "INFO", True),
+        ("span-cart", "span-checkout", "cart-service", "Validating cart", 10, 200, "INFO", True),
+        ("span-payment", "span-checkout", "payment-service", "Processing payment", 220, 800, "INFO", True),
+        ("span-gateway", "span-payment", "stripe-gateway", "Calling payment gateway", 230, 600, "INFO", True),
+        ("span-order", "span-checkout", "order-service", "Creating order", 1050, 300, "INFO", True),
+        ("span-notify", "span-checkout", "notification-service", "Sending confirmation", 1360, 100, "INFO", True),
+    ]
 
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=220)).isoformat(),
-            "level": "INFO",
-            "message": "Processing payment",
-            "trace_id": "trace-export-001",
-            "span_id": "span-payment",
-            "parent_span_id": "span-checkout",
-            "service": "payment-service",
-            "duration_ms": 800,
-        }
-    )
+    for _span in span_defs:
+        _add_span_events(*_span)
 
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=230)).isoformat(),
-            "level": "INFO",
-            "message": "Calling payment gateway",
-            "trace_id": "trace-export-001",
-            "span_id": "span-gateway",
-            "parent_span_id": "span-payment",
-            "service": "stripe-gateway",
-            "duration_ms": 600,
-        }
-    )
-
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=1050)).isoformat(),
-            "level": "INFO",
-            "message": "Creating order",
-            "trace_id": "trace-export-001",
-            "span_id": "span-order",
-            "parent_span_id": "span-checkout",
-            "service": "order-service",
-            "duration_ms": 300,
-        }
-    )
-
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=1360)).isoformat(),
-            "level": "INFO",
-            "message": "Sending confirmation",
-            "trace_id": "trace-export-001",
-            "span_id": "span-notify",
-            "parent_span_id": "span-checkout",
-            "service": "notification-service",
-            "duration_ms": 100,
-        }
-    )
+    for _idx, _step in enumerate(["tax-calc", "shipping-rate"]):
+        _add_span_events(
+            f"span-{_step}",
+            "span-checkout",
+            "pricing-service",
+            f"Calculating {_step.replace('-', ' ')}",
+            80 + _idx * 40,
+            90 + _idx * 20,
+            "INFO",
+            True,
+        )
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()

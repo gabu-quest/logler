@@ -56,158 +56,79 @@ def _():
     base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
     logs = []
 
-    # Root span - API request
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=0)).isoformat(),
-            "level": "INFO",
-            "message": "HTTP GET /api/dashboard",
-            "trace_id": "trace-001",
-            "span_id": "span-root",
-            "parent_span_id": None,
-            "service": "api-gateway",
-            "duration_ms": 450,
-        }
-    )
+    def _add_span_events(
+        span_id,
+        parent_span_id,
+        service,
+        message,
+        offset_ms,
+        duration_ms,
+        level="INFO",
+        emit_end=True,
+    ):
+        logs.append(
+            {
+                "timestamp": (base_time + timedelta(milliseconds=offset_ms)).isoformat(),
+                "level": level,
+                "message": message,
+                "trace_id": "trace-001",
+                "span_id": span_id,
+                "parent_span_id": parent_span_id,
+                "service": service,
+                "duration_ms": duration_ms,
+            }
+        )
+        if emit_end:
+            logs.append(
+                {
+                    "timestamp": (
+                        base_time + timedelta(milliseconds=offset_ms + duration_ms)
+                    ).isoformat(),
+                    "level": level,
+                    "message": f"{message} completed ({duration_ms}ms)",
+                    "trace_id": "trace-001",
+                    "span_id": span_id,
+                    "parent_span_id": parent_span_id,
+                    "service": service,
+                    "duration_ms": duration_ms,
+                }
+            )
 
-    # Child: Auth check
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=5)).isoformat(),
-            "level": "INFO",
-            "message": "Authenticating request",
-            "trace_id": "trace-001",
-            "span_id": "span-auth",
-            "parent_span_id": "span-root",
-            "service": "auth-service",
-            "duration_ms": 25,
-        }
-    )
+    span_defs = [
+        ("span-root", None, "api-gateway", "HTTP GET /api/dashboard", 0, 450, "INFO", False),
+        ("span-auth", "span-root", "auth-service", "Authenticating request", 5, 25, "INFO", True),
+        ("span-user", "span-root", "user-service", "Fetching user profile", 35, 90, "INFO", True),
+        ("span-user-db", "span-user", "postgres", "SELECT * FROM users WHERE id = 123", 40, 45, "DEBUG", True),
+        ("span-user-cache", "span-user", "redis", "Cache HIT: user:123:preferences", 90, 8, "DEBUG", True),
+        ("span-metrics", "span-root", "metrics-service", "Fetching dashboard metrics", 35, 200, "INFO", True),
+        (
+            "span-metrics-agg",
+            "span-metrics",
+            "clickhouse",
+            "Aggregating metrics (slow query)",
+            40,
+            180,
+            "WARN",
+            True,
+        ),
+        ("span-notif", "span-root", "notification-service", "Fetching notifications", 240, 60, "INFO", True),
+        ("span-render", "span-root", "api-gateway", "Rendering dashboard response", 320, 130, "INFO", True),
+    ]
 
-    # Child: Fetch user data (parallel with fetch metrics)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=35)).isoformat(),
-            "level": "INFO",
-            "message": "Fetching user profile",
-            "trace_id": "trace-001",
-            "span_id": "span-user",
-            "parent_span_id": "span-root",
-            "service": "user-service",
-            "duration_ms": 80,
-        }
-    )
+    for _span in span_defs:
+        _add_span_events(*_span)
 
-    # Grandchild: Database query under user fetch
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=40)).isoformat(),
-            "level": "DEBUG",
-            "message": "SELECT * FROM users WHERE id = 123",
-            "trace_id": "trace-001",
-            "span_id": "span-user-db",
-            "parent_span_id": "span-user",
-            "service": "postgres",
-            "duration_ms": 45,
-        }
-    )
-
-    # Grandchild: Cache lookup under user fetch
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=90)).isoformat(),
-            "level": "DEBUG",
-            "message": "Cache HIT: user:123:preferences",
-            "trace_id": "trace-001",
-            "span_id": "span-user-cache",
-            "parent_span_id": "span-user",
-            "service": "redis",
-            "duration_ms": 5,
-        }
-    )
-
-    # Child: Fetch metrics (parallel with user data)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=35)).isoformat(),
-            "level": "INFO",
-            "message": "Fetching dashboard metrics",
-            "trace_id": "trace-001",
-            "span_id": "span-metrics",
-            "parent_span_id": "span-root",
-            "service": "metrics-service",
-            "duration_ms": 200,
-        }
-    )
-
-    # Grandchild: Slow aggregation (BOTTLENECK)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=40)).isoformat(),
-            "level": "WARN",
-            "message": "Aggregating metrics (slow query)",
-            "trace_id": "trace-001",
-            "span_id": "span-metrics-agg",
-            "parent_span_id": "span-metrics",
-            "service": "clickhouse",
-            "duration_ms": 180,
-        }
-    )
-
-    # Child: Fetch notifications
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=240)).isoformat(),
-            "level": "INFO",
-            "message": "Fetching notifications",
-            "trace_id": "trace-001",
-            "span_id": "span-notif",
-            "parent_span_id": "span-root",
-            "service": "notification-service",
-            "duration_ms": 60,
-        }
-    )
-
-    # Grandchild: Notification DB
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=245)).isoformat(),
-            "level": "DEBUG",
-            "message": "SELECT * FROM notifications WHERE user_id = 123",
-            "trace_id": "trace-001",
-            "span_id": "span-notif-db",
-            "parent_span_id": "span-notif",
-            "service": "postgres",
-            "duration_ms": 35,
-        }
-    )
-
-    # Child: Render response
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=320)).isoformat(),
-            "level": "INFO",
-            "message": "Rendering dashboard response",
-            "trace_id": "trace-001",
-            "span_id": "span-render",
-            "parent_span_id": "span-root",
-            "service": "api-gateway",
-            "duration_ms": 25,
-        }
-    )
-
-    # Final response
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=450)).isoformat(),
-            "level": "INFO",
-            "message": "Response sent: 200 OK (450ms)",
-            "trace_id": "trace-001",
-            "span_id": "span-root",
-            "parent_span_id": None,
-            "service": "api-gateway",
-        }
-    )
+    for _idx, _table in enumerate(["notifications", "mentions"]):
+        _add_span_events(
+            f"span-notif-db-{_idx + 1}",
+            "span-notif",
+            "postgres",
+            f"SELECT * FROM {_table} WHERE user_id = 123",
+            245 + _idx * 20,
+            35 + _idx * 10,
+            "DEBUG",
+            True,
+        )
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()
@@ -236,8 +157,8 @@ def _(mo):
 
 @app.cell
 def _():
-    from logler.investigate import Investigator
-    from logler.tree_formatter import format_tree, format_waterfall, get_hierarchy_summary
+    from logler.investigate import Investigator, get_hierarchy_summary
+    from logler.tree_formatter import format_tree, format_waterfall
 
     return Investigator, format_tree, format_waterfall, get_hierarchy_summary
 
@@ -250,6 +171,9 @@ def _(Investigator, log_file):
 
     # Build hierarchy for trace-001
     hierarchy = inv.build_hierarchy("trace-001")
+    hier_bottleneck = hierarchy.get("bottleneck")
+    if hier_bottleneck and "percentage" not in hier_bottleneck:
+        hier_bottleneck["percentage"] = hier_bottleneck.get("percentage_of_total", 0)
 
     print("=== Hierarchy Built ===")
     print(f"Total nodes: {hierarchy['total_nodes']}")

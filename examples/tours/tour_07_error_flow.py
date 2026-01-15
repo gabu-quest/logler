@@ -57,122 +57,88 @@ def _():
     base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
     logs = []
 
-    # Root span - API request
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=0)).isoformat(),
-            "level": "INFO",
-            "message": "HTTP GET /api/products",
+    def _add_span(
+        span_id,
+        parent_span_id,
+        service,
+        message,
+        offset_ms,
+        duration_ms,
+        level="INFO",
+        error=None,
+    ):
+        entry = {
+            "timestamp": (base_time + timedelta(milliseconds=offset_ms)).isoformat(),
+            "level": level,
+            "message": message,
             "trace_id": "trace-error-001",
-            "span_id": "span-root",
-            "parent_span_id": None,
-            "service": "api-gateway",
-            "duration_ms": 5000,
+            "span_id": span_id,
+            "parent_span_id": parent_span_id,
+            "service": service,
+            "duration_ms": duration_ms,
         }
-    )
+        if error:
+            entry["error"] = error
+        logs.append(entry)
 
-    # Product service
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=10)).isoformat(),
-            "level": "INFO",
-            "message": "Fetching product catalog",
-            "trace_id": "trace-error-001",
-            "span_id": "span-products",
-            "parent_span_id": "span-root",
-            "service": "product-service",
-            "duration_ms": 4500,
-        }
-    )
+    span_defs = [
+        ("span-root", None, "api-gateway", "HTTP GET /api/products", 0, 5000, "INFO", None),
+        ("span-products", "span-root", "product-service", "Fetching product catalog", 10, 4500, "INFO", None),
+        (
+            "span-db",
+            "span-products",
+            "postgres",
+            "Database connection timeout after 3000ms",
+            20,
+            3000,
+            "ERROR",
+            "ConnectionTimeout",
+        ),
+        (
+            "span-cache",
+            "span-products",
+            "redis",
+            "Cache miss and DB unavailable",
+            3100,
+            100,
+            "ERROR",
+            "CacheMiss",
+        ),
+        (
+            "span-products-error",
+            "span-products",
+            "product-service",
+            "Failed to fetch products: data source unavailable",
+            3200,
+            200,
+            "ERROR",
+            "DataSourceError",
+        ),
+        (
+            "span-recs",
+            "span-root",
+            "recommendation-service",
+            "Fetching recommendations",
+            50,
+            500,
+            "INFO",
+            None,
+        ),
+        ("span-ml", "span-recs", "ml-service", "ML model timeout", 60, 400, "ERROR", "ModelTimeout"),
+        (
+            "span-root-error",
+            "span-root",
+            "api-gateway",
+            "Request failed: multiple downstream errors",
+            4900,
+            100,
+            "ERROR",
+            "DownstreamError",
+        ),
+    ]
 
-    # Database query - ROOT CAUSE
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=20)).isoformat(),
-            "level": "ERROR",
-            "message": "Database connection timeout after 3000ms",
-            "trace_id": "trace-error-001",
-            "span_id": "span-db",
-            "parent_span_id": "span-products",
-            "service": "postgres",
-            "duration_ms": 3000,
-            "error": "ConnectionTimeout",
-        }
-    )
-
-    # Cache fallback - also fails
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=3100)).isoformat(),
-            "level": "ERROR",
-            "message": "Cache miss and DB unavailable",
-            "trace_id": "trace-error-001",
-            "span_id": "span-cache",
-            "parent_span_id": "span-products",
-            "service": "redis",
-            "duration_ms": 100,
-            "error": "CacheMiss",
-        }
-    )
-
-    # Product service propagates error
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=3200)).isoformat(),
-            "level": "ERROR",
-            "message": "Failed to fetch products: data source unavailable",
-            "trace_id": "trace-error-001",
-            "span_id": "span-products",
-            "parent_span_id": "span-root",
-            "service": "product-service",
-            "duration_ms": 4500,
-            "error": "DataSourceError",
-        }
-    )
-
-    # Recommendation service - separate failure
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=50)).isoformat(),
-            "level": "INFO",
-            "message": "Fetching recommendations",
-            "trace_id": "trace-error-001",
-            "span_id": "span-recs",
-            "parent_span_id": "span-root",
-            "service": "recommendation-service",
-            "duration_ms": 500,
-        }
-    )
-
-    # ML model call
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=60)).isoformat(),
-            "level": "ERROR",
-            "message": "ML model timeout",
-            "trace_id": "trace-error-001",
-            "span_id": "span-ml",
-            "parent_span_id": "span-recs",
-            "service": "ml-service",
-            "duration_ms": 400,
-            "error": "ModelTimeout",
-        }
-    )
-
-    # API gateway sees multiple failures
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=4900)).isoformat(),
-            "level": "ERROR",
-            "message": "Request failed: multiple downstream errors",
-            "trace_id": "trace-error-001",
-            "span_id": "span-root",
-            "parent_span_id": None,
-            "service": "api-gateway",
-            "duration_ms": 5000,
-            "error": "DownstreamError",
-        }
-    )
+    for _span in span_defs:
+        _add_span(*_span)
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()

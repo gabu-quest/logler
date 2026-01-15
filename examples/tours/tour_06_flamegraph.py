@@ -57,131 +57,69 @@ def _():
     base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
     logs = []
 
-    # Root span - API request (total 800ms)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=0)).isoformat(),
-            "level": "INFO",
-            "message": "HTTP POST /api/checkout",
-            "trace_id": "trace-perf-001",
-            "span_id": "span-root",
-            "parent_span_id": None,
-            "service": "api-gateway",
-            "duration_ms": 800,
-        }
-    )
+    def _add_span_events(
+        span_id,
+        parent_span_id,
+        service,
+        message,
+        offset_ms,
+        duration_ms,
+        level="INFO",
+        emit_end=True,
+    ):
+        logs.append(
+            {
+                "timestamp": (base_time + timedelta(milliseconds=offset_ms)).isoformat(),
+                "level": level,
+                "message": message,
+                "trace_id": "trace-perf-001",
+                "span_id": span_id,
+                "parent_span_id": parent_span_id,
+                "service": service,
+                "duration_ms": duration_ms,
+            }
+        )
+        if emit_end:
+            logs.append(
+                {
+                    "timestamp": (
+                        base_time + timedelta(milliseconds=offset_ms + duration_ms)
+                    ).isoformat(),
+                    "level": level,
+                    "message": f"{message} completed ({duration_ms}ms)",
+                    "trace_id": "trace-perf-001",
+                    "span_id": span_id,
+                    "parent_span_id": parent_span_id,
+                    "service": service,
+                    "duration_ms": duration_ms,
+                }
+            )
 
-    # Auth check (fast: 20ms)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=5)).isoformat(),
-            "level": "INFO",
-            "message": "Validating auth token",
-            "trace_id": "trace-perf-001",
-            "span_id": "span-auth",
-            "parent_span_id": "span-root",
-            "service": "auth-service",
-            "duration_ms": 20,
-        }
-    )
+    span_defs = [
+        ("span-root", None, "api-gateway", "HTTP POST /api/checkout", 0, 900, "INFO", False),
+        ("span-auth", "span-root", "auth-service", "Validating auth token", 5, 20, "INFO", True),
+        ("span-inventory", "span-root", "inventory-service", "Checking inventory", 30, 120, "INFO", True),
+        ("span-payment", "span-root", "payment-service", "Processing payment", 170, 540, "INFO", True),
+        ("span-stripe", "span-payment", "stripe-gateway", "Calling Stripe API", 190, 420, "INFO", True),
+        ("span-fraud", "span-payment", "fraud-service", "Running fraud detection", 640, 60, "DEBUG", True),
+        ("span-order", "span-root", "order-service", "Creating order record", 740, 90, "INFO", True),
+        ("span-notify", "span-root", "notification-service", "Sending confirmation email", 850, 50, "INFO", True),
+    ]
 
-    # Inventory check (medium: 100ms)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=30)).isoformat(),
-            "level": "INFO",
-            "message": "Checking inventory",
-            "trace_id": "trace-perf-001",
-            "span_id": "span-inventory",
-            "parent_span_id": "span-root",
-            "service": "inventory-service",
-            "duration_ms": 100,
-        }
-    )
+    for _span in span_defs:
+        _add_span_events(*_span)
 
-    # Database query under inventory (50ms)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=35)).isoformat(),
-            "level": "DEBUG",
-            "message": "SELECT stock FROM inventory",
-            "trace_id": "trace-perf-001",
-            "span_id": "span-inv-db",
-            "parent_span_id": "span-inventory",
-            "service": "postgres",
-            "duration_ms": 50,
-        }
-    )
-
-    # Payment processing (SLOW: 500ms - BOTTLENECK)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=150)).isoformat(),
-            "level": "INFO",
-            "message": "Processing payment",
-            "trace_id": "trace-perf-001",
-            "span_id": "span-payment",
-            "parent_span_id": "span-root",
-            "service": "payment-service",
-            "duration_ms": 500,
-        }
-    )
-
-    # Payment gateway call (SLOW: 400ms)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=160)).isoformat(),
-            "level": "INFO",
-            "message": "Calling Stripe API",
-            "trace_id": "trace-perf-001",
-            "span_id": "span-stripe",
-            "parent_span_id": "span-payment",
-            "service": "stripe-gateway",
-            "duration_ms": 400,
-        }
-    )
-
-    # Fraud check (50ms)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=580)).isoformat(),
-            "level": "DEBUG",
-            "message": "Running fraud detection",
-            "trace_id": "trace-perf-001",
-            "span_id": "span-fraud",
-            "parent_span_id": "span-payment",
-            "service": "fraud-service",
-            "duration_ms": 50,
-        }
-    )
-
-    # Order creation (fast: 80ms)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=680)).isoformat(),
-            "level": "INFO",
-            "message": "Creating order record",
-            "trace_id": "trace-perf-001",
-            "span_id": "span-order",
-            "parent_span_id": "span-root",
-            "service": "order-service",
-            "duration_ms": 80,
-        }
-    )
-
-    # Notification (fast: 30ms)
-    logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=770)).isoformat(),
-            "level": "INFO",
-            "message": "Sending confirmation email",
-            "trace_id": "trace-perf-001",
-            "span_id": "span-notify",
-            "parent_span_id": "span-root",
-            "service": "notification-service",
-            "duration_ms": 30,
-        }
-    )
+    for _idx, _region in enumerate(["us-east", "eu-west", "ap-south"]):
+        _add_span_events(
+            f"span-inv-db-{_idx + 1}",
+            "span-inventory",
+            "postgres",
+            f"SELECT stock FROM inventory_{_region}",
+            35 + _idx * 12,
+            40 + _idx * 8,
+            "DEBUG",
+            True,
+        )
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()
@@ -191,8 +129,8 @@ def _():
             _f.write(json.dumps(_log) + "\n")
 
     print(f"Created {len(logs)} log entries with performance data")
-    print("Total request duration: 800ms")
-    print("Expected bottleneck: payment-service (500ms)")
+    print("Total request duration: 900ms")
+    print("Expected bottleneck: payment-service (540ms)")
     return Path, base_time, log_file, logs, temp_dir
 
 
@@ -220,17 +158,32 @@ def _():
 def _(follow_thread_hierarchy, log_file):
     # Build hierarchy for the trace
     hierarchy = follow_thread_hierarchy(files=[str(log_file)], root_identifier="trace-perf-001")
+    bottleneck = hierarchy.get("bottleneck")
+    if bottleneck and "percentage" not in bottleneck:
+        bottleneck["percentage"] = bottleneck.get("percentage_of_total", 0)
 
     print("=== Hierarchy Stats ===")
     print(f"Total nodes: {hierarchy['total_nodes']}")
     print(f"Max depth: {hierarchy['max_depth']}")
-    print(f"Total duration: {hierarchy.get('total_duration_ms', 0)}ms")
+    hier_total_duration = hierarchy.get("total_duration_ms", 0)
+    print(f"Total duration: {hier_total_duration}ms")
 
     bottleneck = hierarchy.get("bottleneck")
     if bottleneck:
-        print(f"\nBottleneck: {bottleneck['node_id']}")
-        print(f"  Duration: {bottleneck['duration_ms']}ms")
-        print(f"  Percentage: {bottleneck['percentage']:.1f}%")
+        hier_total_duration = hierarchy.get("total_duration_ms", 0) or 0
+        duration_ms = bottleneck.get("duration_ms", 0) or 0
+        bottleneck_percentage = bottleneck.get("percentage")
+        if bottleneck_percentage is None:
+            bottleneck_percentage = bottleneck.get("percentage_of_total")
+        if bottleneck_percentage is None and hier_total_duration:
+            bottleneck_percentage = (duration_ms / hier_total_duration) * 100
+        if bottleneck_percentage is not None:
+            bottleneck["percentage"] = bottleneck_percentage
+
+        print(f"\nBottleneck: {bottleneck.get('node_id')}")
+        print(f"  Duration: {duration_ms}ms")
+        if bottleneck_percentage is not None:
+            print(f"  Percentage: {bottleneck_percentage:.1f}%")
     return bottleneck, hierarchy
 
 
@@ -272,35 +225,34 @@ def _(hierarchy):
     print("=== Flamegraph Interpretation ===\n")
 
     # Analyze the hierarchy
-    total_duration = hierarchy.get("total_duration_ms", 0)
+    analysis_total_duration = hierarchy.get("total_duration_ms", 0)
     bottleneck_info = hierarchy.get("bottleneck", {})
 
     print("WIDTH = TIME SPENT")
     print("-" * 40)
 
-    # Collect all nodes with durations
-    _nodes_by_duration = []
-
-    def _collect_durations(node, depth=0):
-        _duration = node.get("duration_ms", 0)
-        if _duration and total_duration > 0:
-            _pct = (_duration / total_duration) * 100
-            _nodes_by_duration.append(
-                {
-                    "id": node.get("id", "unknown"),
+    # Collect all nodes with durations (deduplicate by node id)
+    nodes_by_id = {}
+    stack = [(_root, 0) for _root in hierarchy.get("roots", [])]
+    while stack:
+        _node, _depth = stack.pop()
+        _duration = _node.get("duration_ms", 0)
+        if _duration and analysis_total_duration > 0:
+            _pct = (_duration / analysis_total_duration) * 100
+            node_id = _node.get("id", "unknown")
+            existing = nodes_by_id.get(node_id)
+            if not existing or _duration > existing["duration"]:
+                nodes_by_id[node_id] = {
+                    "id": node_id,
                     "duration": _duration,
                     "percentage": _pct,
-                    "depth": depth,
+                    "depth": _depth,
                 }
-            )
-        for _child in node.get("children", []):
-            _collect_durations(_child, depth + 1)
-
-    for _root in hierarchy.get("roots", []):
-        _collect_durations(_root)
+        for _child in _node.get("children", []):
+            stack.append((_child, _depth + 1))
 
     # Sort by duration
-    _nodes_by_duration.sort(key=lambda x: -x["duration"])
+    _nodes_by_duration = sorted(nodes_by_id.values(), key=lambda x: -x["duration"])
 
     print("\nTime spent by node (sorted):")
     for _n in _nodes_by_duration[:5]:
@@ -308,12 +260,22 @@ def _(hierarchy):
         print(f"  {_n['id']:<25} {_bar:<20} {_n['duration']:>4}ms ({_n['percentage']:.0f}%)")
 
     if bottleneck_info:
+        analysis_bottleneck_pct = bottleneck_info.get("percentage")
+        if analysis_bottleneck_pct is None:
+            analysis_bottleneck_pct = bottleneck_info.get("percentage_of_total")
+        if analysis_bottleneck_pct is None and analysis_total_duration:
+            analysis_bottleneck_pct = (
+                bottleneck_info.get("duration_ms", 0) / analysis_total_duration
+            ) * 100
+        if analysis_bottleneck_pct is None:
+            analysis_bottleneck_pct = 0
+
         print("\n⚠️  BOTTLENECK IDENTIFIED:")
         print(
-            f"   {bottleneck_info.get('node_id')} takes {bottleneck_info.get('percentage', 0):.0f}% of total time"
+            f"   {bottleneck_info.get('node_id')} takes {analysis_bottleneck_pct:.0f}% of total time"
         )
         print("   This is where optimization efforts should focus!")
-    return bottleneck_info, total_duration
+    return bottleneck_info, analysis_total_duration
 
 
 @app.cell

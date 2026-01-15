@@ -1,20 +1,18 @@
 import marimo
 
-__generated_with = "0.10.0"
+__generated_with = "0.18.4"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _():
     import marimo as mo
-
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Logler Tour: Fundamentals
 
     Welcome to Logler! This interactive notebook will teach you the fundamentals
@@ -28,21 +26,18 @@ def _(mo):
     5. Working with results
 
     Let's dive in!
-    """
-    )
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 1. Setting Up
 
     First, let's import Logler and check that the Rust backend is available.
     The Rust backend provides blazing-fast log parsing and indexing.
-    """
-    )
+    """)
     return
 
 
@@ -60,19 +55,17 @@ def _():
         print("Ready to process logs at maximum speed!")
     else:
         print("Warning: Rust backend not available, some features may be limited")
-    return Investigator, RUST_AVAILABLE, get_metadata, search
+    return Investigator, get_metadata, search
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 2. Creating Sample Logs
 
     For this tour, we'll create some sample JSON logs to work with.
     Logler supports multiple formats, but JSON logs are the richest.
-    """
-    )
+    """)
     return
 
 
@@ -83,39 +76,140 @@ def _():
     from pathlib import Path
     from datetime import datetime, timezone, timedelta
 
-    # Create sample logs
+    # Create sample logs with a realistic request mix
     base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
     sample_logs = []
+    routes = ["/api/users", "/api/orders", "/api/search", "/api/reports"]
+    users = ["alice", "bob", "carol", "dave", "erin"]
+    methods = ["GET", "POST"]
 
-    messages = [
-        ("INFO", "Application starting up", "main"),
-        ("DEBUG", "Loading configuration from /etc/app/config.yaml", "config"),
-        ("INFO", "Connected to database", "db"),
-        ("DEBUG", "Executing query: SELECT * FROM users", "db"),
-        ("INFO", "User alice@example.com logged in", "auth"),
-        ("WARN", "Rate limit approaching for API endpoint /api/users", "api"),
-        ("INFO", "Processing batch job #1234", "worker"),
-        ("ERROR", "Failed to connect to redis: connection refused", "cache"),
-        ("INFO", "Retrying redis connection in 5s", "cache"),
-        ("INFO", "Redis connection established", "cache"),
-        ("DEBUG", "Cache hit for key: user:123", "cache"),
-        ("INFO", "Request completed in 45ms", "api"),
-        ("WARN", "Slow query detected: 250ms", "db"),
-        ("ERROR", "Unhandled exception in request handler", "api"),
-        ("INFO", "Application shutting down gracefully", "main"),
-    ]
-
-    for _i, (_level, _message, _component) in enumerate(messages):
+    def _add_log(ts, level, message, component, thread_id, correlation_id):
         sample_logs.append(
             {
-                "timestamp": (base_time + timedelta(seconds=_i * 10)).isoformat(),
-                "level": _level,
-                "message": _message,
-                "component": _component,
-                "thread_id": f"worker-{_i % 3}",
-                "correlation_id": f"req-{_i // 5:03d}",
+                "timestamp": ts.isoformat(),
+                "level": level,
+                "message": message,
+                "component": component,
+                "thread_id": thread_id,
+                "correlation_id": correlation_id,
             }
         )
+
+    request_count = 24
+    for _i in range(request_count):
+        correlation_id = f"req-{_i:03d}"
+        thread_id = f"worker-{_i % 4}"
+        route = routes[_i % len(routes)]
+        method = methods[_i % len(methods)]
+        user = users[_i % len(users)]
+        start = base_time + timedelta(seconds=_i * 4)
+
+        _add_log(start, "INFO", f"{method} {route} started", "api", thread_id, correlation_id)
+        _add_log(
+            start + timedelta(milliseconds=15),
+            "DEBUG",
+            f"JWT validated for user:{user}",
+            "auth",
+            thread_id,
+            correlation_id,
+        )
+
+        query_ms = 40 + (_i % 5) * 20
+        _add_log(
+            start + timedelta(milliseconds=40),
+            "INFO",
+            "Database query: SELECT * FROM users",
+            "db",
+            thread_id,
+            correlation_id,
+        )
+
+        if _i % 7 == 0:
+            slow_ms = query_ms + 220
+            _add_log(
+                start + timedelta(milliseconds=55),
+                "WARN",
+                f"Slow query detected: {slow_ms}ms",
+                "db",
+                thread_id,
+                correlation_id,
+            )
+
+        cache_result = "HIT" if _i % 4 else "MISS"
+        _add_log(
+            start + timedelta(milliseconds=80),
+            "DEBUG",
+            f"Cache {cache_result} for key user:{100 + _i}",
+            "cache",
+            thread_id,
+            correlation_id,
+        )
+
+        if _i % 9 == 0:
+            _add_log(
+                start + timedelta(milliseconds=85),
+                "ERROR",
+                "Failed to connect to redis: connection refused",
+                "cache",
+                thread_id,
+                correlation_id,
+            )
+            _add_log(
+                start + timedelta(milliseconds=90),
+                "INFO",
+                "Retrying redis connection in 5s",
+                "cache",
+                thread_id,
+                correlation_id,
+            )
+            _add_log(
+                start + timedelta(milliseconds=120),
+                "INFO",
+                "Redis connection established",
+                "cache",
+                thread_id,
+                correlation_id,
+            )
+
+        if _i == 13:
+            _add_log(
+                start + timedelta(milliseconds=140),
+                "ERROR",
+                "Unhandled exception in request handler",
+                "api",
+                thread_id,
+                correlation_id,
+            )
+
+        duration_ms = 120 + (_i % 6) * 30 + (120 if _i % 7 == 0 else 0)
+        _add_log(
+            start + timedelta(milliseconds=duration_ms),
+            "INFO",
+            f"Request completed in {duration_ms}ms",
+            "api",
+            thread_id,
+            correlation_id,
+        )
+
+    for _i in range(6):
+        heartbeat_time = base_time + timedelta(seconds=request_count * 4 + _i * 10)
+        _add_log(
+            heartbeat_time,
+            "INFO",
+            f"Worker heartbeat {_i}",
+            "worker",
+            f"worker-{_i % 2}",
+            f"job-{_i:03d}",
+        )
+        if _i == 3:
+            _add_log(
+                heartbeat_time + timedelta(milliseconds=500),
+                "WARN",
+                "Queue depth high: 142 pending jobs",
+                "worker",
+                f"worker-{_i % 2}",
+                f"job-{_i:03d}",
+            )
 
     # Write to temp file
     temp_dir = tempfile.mkdtemp()
@@ -126,19 +220,17 @@ def _():
 
     print(f"Created {len(sample_logs)} sample log entries")
     print(f"Log file: {log_file}")
-    return Path, base_time, json, log_file, sample_logs, temp_dir, tempfile
+    return log_file, temp_dir
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 3. Getting File Metadata
 
     Before searching, let's understand what's in our log file.
     The `get_metadata()` function provides useful information about the logs.
-    """
-    )
+    """)
     return
 
 
@@ -158,13 +250,12 @@ def _(get_metadata, log_file):
             print(f"  {_level}: {_count}")
         print(f"\nUnique Threads: {meta.get('unique_threads', 0)}")
         print(f"Unique Correlations: {meta.get('unique_correlation_ids', 0)}")
-    return (metadata,)
+    return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 4. Basic Search
 
     Now let's search our logs! The `search()` function is the primary way
@@ -172,8 +263,7 @@ def _(mo):
     - Text query (searches message content)
     - Log level
     - Limit (max results)
-    """
-    )
+    """)
     return
 
 
@@ -188,58 +278,62 @@ def _(log_file, search):
     for _r in results["results"]:
         _entry = _r["entry"]
         print(f"[{_entry['level']}] {_entry['message']}")
-    return (results,)
+    return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 5. Filtering by Log Level
 
     Often you want to find just errors or warnings.
-    Use the `level` parameter to filter:
-    """
-    )
+    `search()` accepts one level at a time, so we'll run two quick
+    searches and combine the results.
+    """)
     return
 
 
 @app.cell
 def _(log_file, search):
     # Find all ERROR logs
-    errors = search(files=[str(log_file)], level="ERROR", limit=10)
+    error_only_results = search(files=[str(log_file)], level="ERROR", limit=10)
 
-    print(f"Found {errors['total_matches']} ERROR entries:\n")
-    for _r in errors["results"]:
+    print(f"Found {error_only_results['total_matches']} ERROR entries:\n")
+    for _r in error_only_results["results"]:
         _entry = _r["entry"]
+        component = _entry.get("fields", {}).get("component") or _entry.get("service_name")
         print(f"[{_entry['timestamp']}] {_entry['message']}")
-        print(f"  Component: {_entry.get('component', 'unknown')}")
+        print(f"  Component: {component or 'unknown'}")
         print()
-    return (errors,)
+    return
 
 
 @app.cell
 def _(log_file, search):
     # Find all WARN and ERROR logs
-    warnings = search(files=[str(log_file)], level="WARN", limit=10)
+    warn_results = search(files=[str(log_file)], level="WARN", limit=50)
+    error_level_results = search(files=[str(log_file)], level="ERROR", limit=50)
 
-    print(f"Found {warnings['total_matches']} WARN entries:\n")
-    for _r in warnings["results"]:
+    combined = warn_results["results"] + error_level_results["results"]
+    combined.sort(key=lambda _r: _r["entry"]["timestamp"])
+
+    print(
+        f"Found {warn_results['total_matches']} WARN entries and {error_level_results['total_matches']} ERROR entries:\n"
+    )
+    for _r in combined[:10]:
         _entry = _r["entry"]
         print(f"[{_entry['level']}] {_entry['message']}")
-    return (warnings,)
+    return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 6. Using the Investigator Class
 
     For more advanced operations, use the `Investigator` class.
     It keeps files loaded in memory for faster repeated queries.
-    """
-    )
+    """)
     return
 
 
@@ -255,7 +349,7 @@ def _(Investigator, log_file):
     # Get metadata through the investigator
     inv_metadata = inv.get_metadata()
     print(f"Total lines indexed: {inv_metadata[0]['lines']}")
-    return inv, inv_metadata
+    return (inv,)
 
 
 @app.cell
@@ -266,27 +360,35 @@ def _(inv):
     print(f"Found {inv_results['total_matches']} matches for 'database'")
     for _r in inv_results["results"]:
         print(f"  {_r['entry']['message']}")
-    return (inv_results,)
+    return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 7. Context Around Results
 
     Sometimes you need to see what happened before and after a log entry.
     Use context lines to get surrounding entries:
-    """
-    )
+    """)
     return
 
 
 @app.cell
 def _(inv, log_file):
-    # Get context around a specific line
+    # Find a log line with a redis error and grab context around it
+    redis_line = None
+    with open(log_file, "r") as _f:
+        for _idx, _line in enumerate(_f, start=1):
+            if "redis" in _line:
+                redis_line = _idx
+                break
+
     context = inv.get_context(
-        file=str(log_file), line_number=8, lines_before=2, lines_after=2  # The ERROR about redis
+        file=str(log_file),
+        line_number=redis_line or 1,
+        lines_before=2,
+        lines_after=2,
     )
 
     print("=== Target Entry ===")
@@ -299,13 +401,12 @@ def _(inv, log_file):
     print("\n=== Context After ===")
     for _entry in context["context_after"]:
         print(f"  [{_entry['level']}] {_entry['message']}")
-    return (context,)
+    return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## Summary
 
     You've learned the fundamentals of Logler:
@@ -320,8 +421,7 @@ def _(mo):
     - **Tour 03**: Hierarchy visualization
     - **Tour 04**: Investigation sessions
     - **Tour 05**: Pattern detection
-    """
-    )
+    """)
     return
 
 
@@ -332,7 +432,7 @@ def _(temp_dir):
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
-    return (shutil,)
+    return
 
 
 if __name__ == "__main__":

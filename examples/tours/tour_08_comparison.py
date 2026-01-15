@@ -57,128 +57,97 @@ def _():
 
     base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
 
+    base_steps = [
+        ("span-root", None, "api", "HTTP GET /api/users", 0, 220),
+        ("span-db", "span-root", "postgres", "Database query", 12, 60),
+        ("span-cache", "span-root", "redis", "Cache lookup", 80, 15),
+        ("span-format", "span-root", "api", "Response formatting", 110, 25),
+    ]
+
+    def _emit_trace(trace_id, base_offset_ms, duration_overrides, cache_warning=False):
+        trace_logs = []
+        for span_id, parent, service, message, offset_ms, base_duration in base_steps:
+            duration = duration_overrides.get(span_id, base_duration)
+            is_cache = span_id == "span-cache"
+            level = "WARN" if cache_warning and is_cache else "INFO"
+            start_message = message if level == "INFO" else "Cache miss"
+            end_message = (
+                f"{start_message} completed ({duration}ms)"
+                if level == "INFO"
+                else f"{start_message} resolved ({duration}ms)"
+            )
+            start_ts = base_time + timedelta(milliseconds=base_offset_ms + offset_ms)
+            end_ts = start_ts + timedelta(milliseconds=duration)
+            trace_logs.append(
+                {
+                    "timestamp": start_ts.isoformat(),
+                    "level": level,
+                    "message": start_message,
+                    "trace_id": trace_id,
+                    "span_id": span_id,
+                    "parent_span_id": parent,
+                    "service": service,
+                    "duration_ms": duration,
+                }
+            )
+            trace_logs.append(
+                {
+                    "timestamp": end_ts.isoformat(),
+                    "level": level,
+                    "message": end_message,
+                    "trace_id": trace_id,
+                    "span_id": span_id,
+                    "parent_span_id": parent,
+                    "service": service,
+                    "duration_ms": duration,
+                }
+            )
+        return trace_logs
+
     # BEFORE deployment - fast version
-    before_logs = []
-
-    before_logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=0)).isoformat(),
-            "level": "INFO",
-            "message": "HTTP GET /api/users",
-            "trace_id": "trace-before",
-            "span_id": "span-root",
-            "parent_span_id": None,
-            "service": "api",
-            "duration_ms": 200,
-        }
-    )
-
-    before_logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=10)).isoformat(),
-            "level": "INFO",
-            "message": "Database query",
-            "trace_id": "trace-before",
-            "span_id": "span-db",
-            "parent_span_id": "span-root",
-            "service": "postgres",
-            "duration_ms": 50,
-        }
-    )
-
-    before_logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=70)).isoformat(),
-            "level": "INFO",
-            "message": "Cache lookup",
-            "trace_id": "trace-before",
-            "span_id": "span-cache",
-            "parent_span_id": "span-root",
-            "service": "redis",
-            "duration_ms": 10,
-        }
-    )
-
-    before_logs.append(
-        {
-            "timestamp": (base_time + timedelta(ms=90)).isoformat(),
-            "level": "INFO",
-            "message": "Response formatting",
-            "trace_id": "trace-before",
-            "span_id": "span-format",
-            "parent_span_id": "span-root",
-            "service": "api",
-            "duration_ms": 20,
-        }
-    )
+    before_durations = {
+        "span-root": 220,
+        "span-db": 60,
+        "span-cache": 15,
+        "span-format": 25,
+    }
+    before_logs = _emit_trace("trace-before", 0, before_durations)
 
     # AFTER deployment - slow version (regression!)
-    after_logs = []
-
-    after_logs.append(
-        {
-            "timestamp": (base_time + timedelta(seconds=60, ms=0)).isoformat(),
-            "level": "INFO",
-            "message": "HTTP GET /api/users",
-            "trace_id": "trace-after",
-            "span_id": "span-root",
-            "parent_span_id": None,
-            "service": "api",
-            "duration_ms": 800,  # 4x slower!
-        }
-    )
-
-    after_logs.append(
-        {
-            "timestamp": (base_time + timedelta(seconds=60, ms=10)).isoformat(),
-            "level": "INFO",
-            "message": "Database query",
-            "trace_id": "trace-after",
-            "span_id": "span-db",
-            "parent_span_id": "span-root",
-            "service": "postgres",
-            "duration_ms": 400,  # 8x slower! (regression here)
-        }
-    )
-
-    after_logs.append(
-        {
-            "timestamp": (base_time + timedelta(seconds=60, ms=420)).isoformat(),
-            "level": "WARN",
-            "message": "Cache miss",
-            "trace_id": "trace-after",
-            "span_id": "span-cache",
-            "parent_span_id": "span-root",
-            "service": "redis",
-            "duration_ms": 15,
-        }
-    )
-
-    after_logs.append(
-        {
-            "timestamp": (base_time + timedelta(seconds=60, ms=450)).isoformat(),
-            "level": "INFO",
-            "message": "Response formatting",
-            "trace_id": "trace-after",
-            "span_id": "span-format",
-            "parent_span_id": "span-root",
-            "service": "api",
-            "duration_ms": 25,
-        }
-    )
+    after_durations = {
+        "span-root": 820,  # ~4x slower
+        "span-db": 420,  # regression here
+        "span-cache": 20,
+        "span-format": 30,
+    }
+    after_logs = _emit_trace("trace-after", 60_000, after_durations, cache_warning=True)
 
     # New span added after deployment
-    after_logs.append(
-        {
-            "timestamp": (base_time + timedelta(seconds=60, ms=480)).isoformat(),
-            "level": "INFO",
-            "message": "Audit logging",
-            "trace_id": "trace-after",
-            "span_id": "span-audit",
-            "parent_span_id": "span-root",
-            "service": "audit-service",
-            "duration_ms": 100,
-        }
+    audit_start = base_time + timedelta(milliseconds=60_480)
+    audit_end = audit_start + timedelta(milliseconds=100)
+    after_logs.extend(
+        [
+            {
+                "timestamp": audit_start.isoformat(),
+                "level": "INFO",
+                "message": "Audit logging",
+                "trace_id": "trace-after",
+                "span_id": "span-audit",
+                "parent_span_id": "span-root",
+                "service": "audit-service",
+                "duration_ms": 100,
+            },
+            {
+                "timestamp": audit_end.isoformat(),
+                "level": "INFO",
+                "message": "Audit logging completed (100ms)",
+                "trace_id": "trace-after",
+                "span_id": "span-audit",
+                "parent_span_id": "span-root",
+                "service": "audit-service",
+                "duration_ms": 100,
+            },
+        ]
     )
 
     # Write files
@@ -194,9 +163,9 @@ def _():
         for _log in after_logs:
             _f.write(json.dumps(_log) + "\n")
 
-    print(f"Created before.log: {len(before_logs)} entries, 200ms total")
-    print(f"Created after.log: {len(after_logs)} entries, 800ms total")
-    print("\nRegression: Database query went from 50ms to 400ms!")
+    print(f"Created before.log: {len(before_logs)} entries, 220ms total")
+    print(f"Created after.log: {len(after_logs)} entries, 820ms total")
+    print("\nRegression: Database query went from 60ms to 420ms!")
     return Path, after_file, after_logs, base_time, before_file, before_logs, temp_dir
 
 
@@ -357,65 +326,61 @@ def _():
     _base = _datetime(2024, 1, 15, 10, 0, 0, tzinfo=_tz.utc)
     _compare_logs = []
 
-    # Successful request (req-success)
-    _compare_logs.extend(
-        [
+    def _emit_request(correlation_id, offset_ms, cache_hit=True, db_timeout=False):
+        _compare_logs.append(
             {
-                "timestamp": (_base + _td(ms=0)).isoformat(),
+                "timestamp": (_base + _td(milliseconds=offset_ms)).isoformat(),
                 "level": "INFO",
                 "message": "Request started",
-                "correlation_id": "req-success",
-            },
+                "correlation_id": correlation_id,
+            }
+        )
+        _compare_logs.append(
             {
-                "timestamp": (_base + _td(ms=10)).isoformat(),
-                "level": "INFO",
-                "message": "Cache hit",
-                "correlation_id": "req-success",
-            },
+                "timestamp": (_base + _td(milliseconds=offset_ms + 10)).isoformat(),
+                "level": "INFO" if cache_hit else "WARN",
+                "message": "Cache hit" if cache_hit else "Cache miss",
+                "correlation_id": correlation_id,
+            }
+        )
+        _compare_logs.append(
             {
-                "timestamp": (_base + _td(ms=20)).isoformat(),
-                "level": "INFO",
-                "message": "Response sent",
-                "correlation_id": "req-success",
-            },
-        ]
-    )
-
-    # Failed request (req-failed)
-    _compare_logs.extend(
-        [
-            {
-                "timestamp": (_base + _td(ms=100)).isoformat(),
-                "level": "INFO",
-                "message": "Request started",
-                "correlation_id": "req-failed",
-            },
-            {
-                "timestamp": (_base + _td(ms=110)).isoformat(),
-                "level": "WARN",
-                "message": "Cache miss",
-                "correlation_id": "req-failed",
-            },
-            {
-                "timestamp": (_base + _td(ms=120)).isoformat(),
+                "timestamp": (_base + _td(milliseconds=offset_ms + 20)).isoformat(),
                 "level": "INFO",
                 "message": "Database query",
-                "correlation_id": "req-failed",
-            },
-            {
-                "timestamp": (_base + _td(ms=500)).isoformat(),
-                "level": "ERROR",
-                "message": "Database timeout",
-                "correlation_id": "req-failed",
-            },
-            {
-                "timestamp": (_base + _td(ms=510)).isoformat(),
-                "level": "ERROR",
-                "message": "Request failed",
-                "correlation_id": "req-failed",
-            },
-        ]
-    )
+                "correlation_id": correlation_id,
+            }
+        )
+
+        if db_timeout:
+            _compare_logs.append(
+                {
+                    "timestamp": (_base + _td(milliseconds=offset_ms + 420)).isoformat(),
+                    "level": "ERROR",
+                    "message": "Database timeout",
+                    "correlation_id": correlation_id,
+                }
+            )
+            _compare_logs.append(
+                {
+                    "timestamp": (_base + _td(milliseconds=offset_ms + 430)).isoformat(),
+                    "level": "ERROR",
+                    "message": "Request failed",
+                    "correlation_id": correlation_id,
+                }
+            )
+        else:
+            _compare_logs.append(
+                {
+                    "timestamp": (_base + _td(milliseconds=offset_ms + 60)).isoformat(),
+                    "level": "INFO",
+                    "message": "Response sent",
+                    "correlation_id": correlation_id,
+                }
+            )
+
+    _emit_request("req-success", 0, cache_hit=True, db_timeout=False)
+    _emit_request("req-failed", 100, cache_hit=False, db_timeout=True)
 
     _compare_dir = _tempfile.mkdtemp()
     compare_file = _Path(_compare_dir) / "compare.log"
