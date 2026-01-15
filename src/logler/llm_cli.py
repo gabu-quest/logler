@@ -18,6 +18,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from collections import defaultdict
 
+from .safe_regex import safe_compile, RegexTimeoutError, RegexPatternTooLongError
+
 # Exit codes
 EXIT_SUCCESS = 0  # Success with results
 EXIT_NO_RESULTS = 1  # Success but no results found
@@ -808,8 +810,8 @@ def verify_pattern(
             _error_json(f"No files found matching: {files}")
 
         try:
-            regex = re.compile(pattern)
-        except re.error as e:
+            regex = safe_compile(pattern)
+        except (re.error, RegexTimeoutError, RegexPatternTooLongError) as e:
             _error_json(f"Invalid regex pattern: {e}")
 
         parser = LogParser()
@@ -950,8 +952,8 @@ def emit(
         query_regex = None
         if query:
             try:
-                query_regex = re.compile(query, re.IGNORECASE)
-            except re.error as e:
+                query_regex = safe_compile(query, re.IGNORECASE)
+            except (re.error, RegexTimeoutError, RegexPatternTooLongError) as e:
                 _error_json(f"Invalid regex pattern: {e}")
 
         for file_path in file_list:
