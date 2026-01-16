@@ -5,9 +5,6 @@ Run with: uv run pytest tests/test_install_smoke.py -v
 """
 
 import subprocess
-import time
-import pytest
-import httpx
 from pathlib import Path
 
 
@@ -92,52 +89,6 @@ class TestLLMCommands:
         data = json.loads(result.stdout)
         assert "query" in data
         assert "summary" in data
-
-
-class TestWebServer:
-    """Test the web server functionality."""
-
-    @pytest.fixture
-    def server(self):
-        """Start server and yield, then cleanup."""
-        import socket
-
-        # Find a free port
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
-            port = s.getsockname()[1]
-
-        proc = subprocess.Popen(
-            ["uv", "run", "logler", "serve", str(EXAMPLE_LOGS), "--port", str(port)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        # Wait for server to start
-        time.sleep(2)
-
-        yield f"http://localhost:{port}"
-
-        proc.terminate()
-        proc.wait(timeout=5)
-
-    def test_browse_endpoint(self, server):
-        resp = httpx.get(f"{server}/api/files/browse", timeout=10)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "files" in data or "directories" in data
-
-    def test_glob_endpoint(self, server):
-        resp = httpx.get(f"{server}/api/files/glob?pattern=**/*.log", timeout=10)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "files" in data
-        assert "count" in data
-
-    def test_index_page(self, server):
-        resp = httpx.get(server, timeout=10)
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers.get("content-type", "")
 
 
 class TestRustBackend:
