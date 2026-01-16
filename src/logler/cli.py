@@ -2,16 +2,12 @@
 Command-line interface for Logler.
 """
 
+import asyncio
 import click
 import sys
-from pathlib import Path
 from typing import Optional
-import asyncio
-import socket
-from contextlib import closing
 
 from .terminal import TerminalViewer
-from .web.app import run_server
 from .llm_cli import llm as llm_group
 
 
@@ -26,56 +22,6 @@ def main(ctx):
     """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
-
-
-def _find_open_port(host: str, start_port: int, max_tries: int = 20) -> int:
-    """Find the next available port starting from start_port."""
-    for candidate in range(start_port, start_port + max_tries):
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                sock.bind((host, candidate))
-                return candidate
-            except OSError:
-                continue
-    raise RuntimeError(f"No open port found in range {start_port}-{start_port + max_tries - 1}")
-
-
-@main.command()
-@click.option("--host", default="0.0.0.0", help="Host to bind to")
-@click.option("--port", default=7607, help="Port to bind to (default 7607 ~ 'LOGL')")
-@click.option(
-    "--auto-port/--no-auto-port",
-    default=True,
-    help="Pick the next free port if the chosen one is busy",
-)
-@click.option("--open", "-o", is_flag=True, help="Open browser automatically")
-@click.argument("files", nargs=-1, type=click.Path(exists=True))
-def serve(host: str, port: int, auto_port: bool, open: bool, files: tuple):
-    """
-    Start the web server interface.
-
-    Examples:
-        logler serve                    # Start with file picker
-        logler serve app.log            # Start with specific file
-        logler serve *.log              # Start with multiple files
-    """
-    if auto_port:
-        chosen_port = _find_open_port(host, port)
-        if chosen_port != port:
-            click.echo(f"⚠️  Port {port} busy, using {chosen_port} instead")
-        port = chosen_port
-
-    click.echo(f"🚀 Starting Logler web server on http://{host}:{port}")
-
-    file_paths = [str(Path(f).absolute()) for f in files] if files else []
-
-    if open:
-        import webbrowser
-
-        webbrowser.open(f"http://localhost:{port}")
-
-    asyncio.run(run_server(host, port, file_paths))
 
 
 @main.command()
