@@ -2,7 +2,7 @@
 Helper to ensure the Rust backend is installed.
 
 Attempts to import `logler_rs`; if missing, runs `maturin develop` against
-`crates/logler-py/Cargo.toml` with the `sql` feature enabled.
+`crates/logler-py/Cargo.toml`.
 """
 
 from __future__ import annotations
@@ -33,8 +33,6 @@ def ensure_rust_backend(auto_install: bool = True) -> bool:
         "--release",
         "-m",
         str(repo_root / "crates" / "logler-py" / "Cargo.toml"),
-        "--features",
-        "sql",
     ]
     try:
         subprocess.run(
