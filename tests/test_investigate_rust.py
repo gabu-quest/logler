@@ -8,6 +8,12 @@ import pytest
 HUGE_LOG = Path("examples/logs/huge/massive_incident.log")
 SAMPLE_CORRELATION = "req-0001"
 
+# Skip tests if huge log file doesn't exist (gitignored, not in CI)
+requires_huge_log = pytest.mark.skipif(
+    not HUGE_LOG.exists(),
+    reason=f"Huge log file not found: {HUGE_LOG} (gitignored, local only)",
+)
+
 
 @pytest.fixture(scope="module")
 def inv(investigate_module):
@@ -19,6 +25,7 @@ def test_rust_backend_must_be_present(inv, rust_backend):
     assert hasattr(rust_backend, "PyInvestigator")
 
 
+@requires_huge_log
 def test_rust_metadata_and_search_fast(inv):
     files = [str(HUGE_LOG)]
     meta = inv.get_metadata(files)
@@ -39,6 +46,7 @@ def test_rust_metadata_and_search_fast(inv):
     assert any("Database timeout" in entry["entry"]["message"] for entry in res["results"])
 
 
+@requires_huge_log
 def test_rust_follow_thread_has_duration(inv):
     timeline = inv.follow_thread(files=[str(HUGE_LOG)], correlation_id=SAMPLE_CORRELATION)
     assert timeline["entries"], "follow_thread returned no entries"
@@ -50,6 +58,7 @@ def test_rust_follow_thread_has_duration(inv):
     assert all(entry.get("service_name") for entry in timeline["entries"])
 
 
+@requires_huge_log
 def test_rust_patterns_detect_errors(inv):
     patterns = inv.find_patterns([str(HUGE_LOG)], min_occurrences=3)
     pattern_list = patterns.get("patterns", [])
