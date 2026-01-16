@@ -2018,7 +2018,7 @@ class Investigator:
 
     def sql_query(self, query: str) -> List[Dict[str, Any]]:
         """
-        Execute SQL query on loaded logs (requires 'sql' feature).
+        Execute SQL query on loaded logs.
 
         Args:
             query: SQL query string
@@ -2034,23 +2034,51 @@ class Investigator:
                 ORDER BY count DESC
             \"\"\")
         """
-        if not hasattr(self._investigator, "sql_query"):
-            raise RuntimeError("SQL feature not available. Build with --features sql")
-        result_json = self._investigator.sql_query(query)
+        engine = self._get_sql_engine()
+        result_json = engine.query(query)
         return json.loads(result_json)
 
     def sql_tables(self) -> List[str]:
-        """Get list of available SQL tables (requires 'sql' feature)."""
-        if not hasattr(self._investigator, "sql_tables"):
-            raise RuntimeError("SQL feature not available. Build with --features sql")
-        return self._investigator.sql_tables()
+        """Get list of available SQL tables."""
+        engine = self._get_sql_engine()
+        return engine.get_tables()
 
     def sql_schema(self, table: str) -> List[Dict[str, Any]]:
-        """Get schema for a SQL table (requires 'sql' feature)."""
-        if not hasattr(self._investigator, "sql_schema"):
-            raise RuntimeError("SQL feature not available. Build with --features sql")
-        result_json = self._investigator.sql_schema(table)
+        """Get schema for a SQL table."""
+        engine = self._get_sql_engine()
+        result_json = engine.get_schema(table)
         return json.loads(result_json)
+
+    def _get_sql_engine(self):
+        """Get a SQL engine loaded with current log data."""
+        from logler.parser import LogParser
+        from logler.sql import SqlEngine
+
+        # Parse files and build index
+        parser = LogParser()
+        indices: Dict[str, Any] = {}
+
+        for file_path in self._files:
+            entries = []
+            with open(file_path, encoding="utf-8", errors="replace") as f:
+                for line_number, line in enumerate(f, start=1):
+                    line = line.rstrip("\n\r")
+                    if line:
+                        entry = parser.parse_line(line_number, line)
+                        entries.append(entry)
+
+            # Create a simple object with entries attribute
+            class LogIndex:
+                pass
+
+            idx = LogIndex()
+            idx.entries = entries
+            indices[file_path] = idx
+
+        # Create and load SQL engine
+        engine = SqlEngine()
+        engine.load_files(indices)
+        return engine
 
     def build_hierarchy(
         self,
