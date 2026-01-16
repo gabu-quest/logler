@@ -36,6 +36,7 @@ dependencies = [
     "websockets>=12.0",
     "aiofiles>=23.0.0",
     "click>=8.1.0",
+    "duckdb>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -69,7 +70,6 @@ logler = ["web/templates/**/*", "web/static/**/*"]
 manifest-path = "crates/logler-py/Cargo.toml"
 python-source = "src"
 python-packages = ["logler"]
-# features passed via CLI in CI (sql not supported on Windows)
 include = ["LICENSE", "README.md"]
 
 [tool.black]
