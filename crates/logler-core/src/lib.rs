@@ -42,9 +42,6 @@ pub mod thread_tracker;
 pub mod trace;
 pub mod types;
 
-#[cfg(feature = "sql")]
-pub mod sql;
-
 pub use filter::LogFilter;
 pub use index::{IndexStats, LogIndex};
 pub use investigate::Investigator;
@@ -55,9 +52,6 @@ pub use stats::LogStats;
 pub use thread_tracker::ThreadTracker;
 pub use trace::TraceExporter;
 pub use types::*;
-
-#[cfg(feature = "sql")]
-pub use sql::SqlEngine;
 
 #[cfg(test)]
 mod tests {

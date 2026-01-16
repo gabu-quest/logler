@@ -26,9 +26,6 @@ tracing.workspace = true
 uuid.workspace = true
 dashmap.workspace = true
 
-# Optional DuckDB support
-duckdb = { workspace = true, optional = true }
-
 [dev-dependencies]
 criterion.workspace = true
 tempfile.workspace = true
@@ -37,4 +34,3 @@ tokio = { workspace = true, features = ["test-util"] }
 [features]
 default = []
 async = ["tokio", "futures", "tokio-stream", "async-stream"]
-sql = ["duckdb"]
