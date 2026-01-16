@@ -24,19 +24,15 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: wheels-linux
-            features: sql
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: wheels-windows
-            features: ""
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact: wheels-macos-x86
-            features: sql
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: wheels-macos-arm
-            features: sql
 
     steps:
       - name: Checkout
@@ -56,13 +52,7 @@ jobs:
         run: pip install maturin
 
       - name: Build wheel
-        run: |
-          if [ -n "${{ matrix.features }}" ]; then
-            maturin build --release --features ${{ matrix.features }} --target ${{ matrix.target }}
-          else
-            maturin build --release --target ${{ matrix.target }}
-          fi
-        shell: bash
+        run: maturin build --release --target ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
