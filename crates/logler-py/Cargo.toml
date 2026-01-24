@@ -1,0 +1,21 @@
+[package]
+name = "logler-py"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "logler_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+logler-core = { path = "../logler-core" }
+regex.workspace = true
+pyo3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+[features]
+default = []

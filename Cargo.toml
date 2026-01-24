@@ -1,0 +1,58 @@
+[workspace]
+members = [
+    "crates/logler-core",
+    "crates/logler-py",
+    "logler-cli",
+    "logler-server",
+]
+resolver = "2"
+
+[workspace.package]
+version = "1.1.2"
+edition = "2021"
+authors = ["Logler Contributors"]
+license = "MIT"
+
+[workspace.dependencies]
+# Core dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.41", features = ["full"] }
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Regex and pattern matching
+regex = "1.11"
+fancy-regex = "0.13"
+
+# Parallel processing
+rayon = "1.8"
+
+# Memory-mapped I/O
+memmap2 = "0.9"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Python bindings
+pyo3 = { version = "0.20", features = ["extension-module", "anyhow", "chrono"] }
+
+# MCP server
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.5", features = ["cors"] }
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "serde"] }
+dashmap = "6.1"
+clap = { version = "4.5", features = ["derive"] }
+futures = "0.3"
+notify = "6.1"
+tokio-stream = "0.1"
+
+# Testing
+criterion = "0.5"
+tempfile = "3.8"
