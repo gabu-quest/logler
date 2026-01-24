@@ -7,12 +7,14 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Pattern Detection
 
     Finding recurring issues in logs is crucial for identifying
@@ -26,18 +28,21 @@ def _(mo):
     5. Using patterns for root cause analysis
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Logs with Patterns
 
     We'll create logs that contain recurring error patterns,
     simulating a system with intermittent issues.
-    """)
+    """
+    )
     return
 
 
@@ -132,18 +137,21 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Finding Patterns
 
     The `find_patterns()` function automatically groups similar
     errors and identifies recurring issues.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _():
-    from logler.investigate import find_patterns, search
+    from logler.investigate import find_patterns
+
     return (find_patterns,)
 
 
@@ -173,11 +181,13 @@ def _(find_patterns, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Analyzing Top Patterns
 
     Let's dive deeper into the most frequent issues:
-    """)
+    """
+    )
     return
 
 
@@ -214,11 +224,13 @@ def _(patterns):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Identifying Affected Components
 
     Group patterns by component to find systemic issues:
-    """)
+    """
+    )
     return
 
 
@@ -252,11 +264,13 @@ def _(patterns):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Examining Pattern Examples
 
     Each pattern includes example log entries for context:
-    """)
+    """
+    )
     return
 
 
@@ -280,11 +294,13 @@ def _(patterns):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Correlating Patterns with Threads
 
     See which threads are most affected:
-    """)
+    """
+    )
     return
 
 
@@ -308,11 +324,13 @@ def _(patterns):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. Root Cause Analysis
 
     Use patterns to identify the root cause:
-    """)
+    """
+    )
     return
 
 
@@ -350,11 +368,13 @@ def _(patterns):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 8. Pattern Severity Assessment
 
     Prioritize patterns for fixing:
-    """)
+    """
+    )
     return
 
 
@@ -389,7 +409,8 @@ def _(patterns):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned how to detect and analyze patterns:
@@ -411,7 +432,8 @@ def _(mo):
     - **Tour 07**: Error flow analysis
     - **Tour 08**: Comparison & diffing
     - **Tour 10**: Smart sampling strategies
-    """)
+    """
+    )
     return
 
 

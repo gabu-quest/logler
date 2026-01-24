@@ -100,7 +100,7 @@ def generate_realistic_microservice_logs(
                 "span_id": f"span-{req_num}-gateway",
                 "method": "POST",
                 "path": "/api/v1/orders",
-                "client_ip": f"192.168.{random.randint(1,255)}.{random.randint(1,255)}",
+                "client_ip": f"192.168.{random.randint(1, 255)}.{random.randint(1, 255)}",
             }
         )
 
@@ -742,7 +742,7 @@ class TestConcurrentThreadTracking:
         for i in range(1, len(timestamps)):
             assert (
                 timestamps[i] >= timestamps[i - 1]
-            ), f"Timeline not chronological at index {i}: {timestamps[i-1]} > {timestamps[i]}"
+            ), f"Timeline not chronological at index {i}: {timestamps[i - 1]} > {timestamps[i]}"
 
 
 class TestHierarchyBuilding:

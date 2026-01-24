@@ -46,10 +46,9 @@ class TestFollowThreadById:
         entries = result.get("entries", result.get("timeline", []))
 
         # MUST have exact count
-        assert len(entries) == expected_count, (
-            f"Thread {thread_id} should have exactly {expected_count} entries, "
-            f"got {len(entries)}"
-        )
+        assert (
+            len(entries) == expected_count
+        ), f"Thread {thread_id} should have exactly {expected_count} entries, got {len(entries)}"
 
         # ALL entries must be from this thread
         for entry in entries:
@@ -59,9 +58,9 @@ class TestFollowThreadById:
 
         # ALL entries should have the expected level
         for entry in entries:
-            assert entry["level"].upper() == expected_level, (
-                f"Thread {thread_id} should have level {expected_level}, " f"got {entry['level']}"
-            )
+            assert (
+                entry["level"].upper() == expected_level
+            ), f"Thread {thread_id} should have level {expected_level}, got {entry['level']}"
 
     def test_nonexistent_thread_returns_empty(self, deterministic_log_file):
         """Non-existent thread should return exactly 0 entries."""
@@ -202,10 +201,9 @@ class TestFollowThreadLevelCounts:
             level = entry["level"].upper()
             level_counts[level] = level_counts.get(level, 0) + 1
 
-        assert level_counts == expected_levels, (
-            f"Thread {thread_id} level distribution should be {expected_levels}, "
-            f"got {level_counts}"
-        )
+        assert (
+            level_counts == expected_levels
+        ), f"Thread {thread_id} level distribution should be {expected_levels}, got {level_counts}"
 
 
 class TestFollowThreadNoIdentifier:

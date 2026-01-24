@@ -547,7 +547,7 @@ def get_hierarchy_summary(hierarchy: Dict[str, Any]) -> str:
     # Duration
     total_duration = hierarchy.get("total_duration_ms")
     if total_duration:
-        lines.append(f"Total duration: {total_duration}ms ({total_duration/1000:.2f}s)")
+        lines.append(f"Total duration: {total_duration}ms ({total_duration / 1000:.2f}s)")
 
     # Concurrent operations
     concurrent = hierarchy.get("concurrent_count", 0)
@@ -3178,7 +3178,7 @@ class InvestigationSession:
 
         for i, entry in enumerate(self.history):
             marker = "→" if i == self.current_index else " "
-            lines.append(f"  {marker} {i+1}. {entry['description']}")
+            lines.append(f"  {marker} {i + 1}. {entry['description']}")
             if entry.get("result_summary"):
                 for key, value in entry["result_summary"].items():
                     lines.append(f"      {key}: {value}")
@@ -3255,7 +3255,7 @@ class InvestigationSession:
             desc = entry["description"]
             operation = entry["operation"]
 
-            lines.append(f"### Step {i+1}: {desc}")
+            lines.append(f"### Step {i + 1}: {desc}")
             lines.append("")
             lines.append(f"- **Time:** {timestamp}")
             lines.append(f"- **Operation:** `{operation}`")
@@ -3305,7 +3305,7 @@ class InvestigationSession:
 
         for i, entry in enumerate(self.history):
             timestamp = entry.get("timestamp", "Unknown")
-            lines.append(f"{i+1}. [{timestamp}] {entry['description']}")
+            lines.append(f"{i + 1}. [{timestamp}] {entry['description']}")
 
             if entry.get("result_summary"):
                 for key, value in entry["result_summary"].items():
@@ -3696,7 +3696,9 @@ def analyze_with_insights(
                     "suggestion": "Investigate most common errors first",
                 }
             )
-            next_steps.append("Run: logler llm sql \"SELECT message, COUNT(*) FROM logs GROUP BY message ORDER BY COUNT(*) DESC\" to find patterns")
+            next_steps.append(
+                'Run: logler llm sql "SELECT message, COUNT(*) FROM logs GROUP BY message ORDER BY COUNT(*) DESC" to find patterns'
+            )
 
     # Insight 2: Pattern detection
     if auto_investigate and error_count > 0:
@@ -3754,13 +3756,17 @@ def analyze_with_insights(
                     "suggestion": "Compare successful vs failed requests",
                 }
             )
-            next_steps.append("Run: logler llm compare <failed_id> <success_id> to find differences")
+            next_steps.append(
+                "Run: logler llm compare <failed_id> <success_id> to find differences"
+            )
 
     # Generate suggestions based on insights
     if not suggestions:
         if error_count > 0:
             suggestions.append("Start by examining the first error - it may be the root cause")
-            suggestions.append("Run: logler llm correlate <correlation_id> to see full request flow")
+            suggestions.append(
+                "Run: logler llm correlate <correlation_id> to see full request flow"
+            )
         else:
             suggestions.append("No errors found - logs look healthy")
 

@@ -1,0 +1,64 @@
+{
+  "name": "incident_investigation",
+  "files": [
+    "examples/logs/production_incident.log"
+  ],
+  "history": [
+    {
+      "timestamp": "2025-12-03T13:03:25.327847",
+      "operation": "init",
+      "description": "Initialize investigation",
+      "params": {
+        "files": [
+          "examples/logs/production_incident.log"
+        ]
+      },
+      "result_summary": null
+    },
+    {
+      "timestamp": "2025-12-03T13:03:25.331675",
+      "operation": "note",
+      "description": "Note: Analyzed sample of 10 entries...",
+      "params": {
+        "note": "Analyzed sample of 10 entries"
+      },
+      "result_summary": null
+    },
+    {
+      "timestamp": "2025-12-03T13:03:25.333347",
+      "operation": "search",
+      "description": "Search for ERROR logs",
+      "params": {
+        "query": null,
+        "level": "ERROR",
+        "output_format": "summary"
+      },
+      "result_summary": {
+        "total_matches": 12
+      }
+    },
+    {
+      "timestamp": "2025-12-03T13:03:25.333967",
+      "operation": "find_patterns",
+      "description": "Find patterns (min 2 occurrences)",
+      "params": {
+        "min_occurrences": 2
+      },
+      "result_summary": {
+        "pattern_count": 1
+      }
+    },
+    {
+      "timestamp": "2025-12-03T13:03:25.334073",
+      "operation": "note",
+      "description": "Note: Identified root cause: connection pool exhaustion...",
+      "params": {
+        "note": "Identified root cause: connection pool exhaustion"
+      },
+      "result_summary": null
+    }
+  ],
+  "current_index": 4,
+  "metadata": {},
+  "saved_at": "2025-12-03T13:03:25.334378"
+}

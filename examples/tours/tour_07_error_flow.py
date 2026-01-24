@@ -7,12 +7,14 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Error Flow Analysis
 
     When errors occur in distributed systems, they often cascade through
@@ -27,18 +29,21 @@ def _(mo):
     5. Formatting error flow reports
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Cascading Failure Scenario
 
     We'll simulate a scenario where a database failure causes
     errors to cascade through the system.
-    """)
+    """
+    )
     return
 
 
@@ -192,17 +197,20 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Building the Hierarchy
 
     First, let's build the hierarchy to see the error structure.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _():
     from logler.investigate import follow_thread_hierarchy, analyze_error_flow, format_error_flow
+
     return analyze_error_flow, follow_thread_hierarchy, format_error_flow
 
 
@@ -220,12 +228,14 @@ def _(follow_thread_hierarchy, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Analyzing Error Flow
 
     The `analyze_error_flow()` function traces how errors propagate
     through the hierarchy and identifies root causes.
-    """)
+    """
+    )
     return
 
 
@@ -242,12 +252,14 @@ def _(analyze_error_flow, hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Identifying Root Causes
 
     Root causes are the **originating** errors - the deepest errors
     in the hierarchy that didn't come from child failures.
-    """)
+    """
+    )
     return
 
 
@@ -270,12 +282,14 @@ def _(error_analysis):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Understanding Propagation Chains
 
     Propagation chains show how errors **bubbled up** through
     the system from the root cause.
-    """)
+    """
+    )
     return
 
 
@@ -300,11 +314,13 @@ def _(error_analysis):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Impact Summary
 
     The impact summary quantifies the severity of the failure.
-    """)
+    """
+    )
     return
 
 
@@ -325,11 +341,13 @@ def _(error_analysis):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. Recommendations
 
     Logler provides actionable recommendations based on the analysis.
-    """)
+    """
+    )
     return
 
 
@@ -344,11 +362,13 @@ def _(error_analysis):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 8. Formatted Error Flow Report
 
     Use `format_error_flow()` for a complete, formatted report.
-    """)
+    """
+    )
     return
 
 
@@ -362,7 +382,8 @@ def _(error_analysis, format_error_flow):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned how to analyze error flow:
@@ -383,7 +404,8 @@ def _(mo):
     **Next Steps:**
     - **Tour 08**: Comparison & diffing
     - **Tour 09**: Distributed tracing exports
-    """)
+    """
+    )
     return
 
 

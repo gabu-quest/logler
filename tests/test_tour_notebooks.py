@@ -166,6 +166,6 @@ class TestTourNotebooks:
                 f"{tour_file.name} uses invalid timedelta(ms=...) - "
                 "should be timedelta(milliseconds=...)"
             )
-            assert "_td(ms=" not in content, (
-                f"{tour_file.name} uses invalid _td(ms=...) - " "should be _td(milliseconds=...)"
-            )
+            assert (
+                "_td(ms=" not in content
+            ), f"{tour_file.name} uses invalid _td(ms=...) - should be _td(milliseconds=...)"

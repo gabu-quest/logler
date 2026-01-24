@@ -7,12 +7,14 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: AI-Powered Insights
 
     Logler can automatically analyze logs and generate insights,
@@ -25,17 +27,20 @@ def _(mo):
     4. Using insights for investigation
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Problematic Logs
 
     We'll create logs with issues that need investigation.
-    """)
+    """
+    )
     return
 
 
@@ -125,18 +130,21 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Automatic Insights
 
     `analyze_with_insights()` does the thinking for you - it analyzes
     logs and generates actionable insights automatically.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _():
     from logler.investigate import analyze_with_insights, explain, suggest_next_action
+
     return analyze_with_insights, explain, suggest_next_action
 
 
@@ -156,11 +164,13 @@ def _(analyze_with_insights, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Generated Insights
 
     Insights identify patterns and problems automatically.
-    """)
+    """
+    )
     return
 
 
@@ -181,11 +191,13 @@ def _(analysis):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Suggestions and Next Steps
 
     The analysis provides actionable suggestions.
-    """)
+    """
+    )
     return
 
 
@@ -203,12 +215,14 @@ def _(analysis):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Explaining Errors
 
     `explain()` provides human-friendly explanations of errors
     with context-specific advice.
-    """)
+    """
+    )
     return
 
 
@@ -236,11 +250,13 @@ def _(explain):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Explaining with Full Entry Context
 
     You can also explain a full log entry for more context.
-    """)
+    """
+    )
     return
 
 
@@ -264,12 +280,14 @@ def _(explain):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. Suggesting Next Actions
 
     Based on current results, `suggest_next_action()` tells you
     what to investigate next.
-    """)
+    """
+    )
     return
 
 
@@ -293,11 +311,13 @@ def _(log_file, suggest_next_action):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 8. Building an Investigation Workflow
 
     Combine these tools for effective investigation:
-    """)
+    """
+    )
     return
 
 
@@ -349,7 +369,8 @@ def _(analyze_with_insights, explain, log_file, suggest_next_action):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned AI-powered analysis features:
@@ -375,7 +396,8 @@ def _(mo):
     - **Tour 12**: Multi-file tracing across services
     - **Tour 13**: Live log watching (real-time streaming)
     - **Tour 14**: Performance at scale
-    """)
+    """
+    )
     return
 
 

@@ -433,7 +433,7 @@ def _format_duration(ms: Optional[int]) -> str:
     if ms < 1000:
         return f"{ms}ms"
     elif ms < 60000:
-        return f"{ms/1000:.2f}s"
+        return f"{ms / 1000:.2f}s"
     else:
         minutes = ms // 60000
         seconds = (ms % 60000) / 1000
@@ -519,7 +519,7 @@ def format_waterfall(
     header = f"Timeline: {_timeline_label(hierarchy)} ({_format_duration(total_duration)})"
     if len(header) > effective_width - 4:
         header = header[: effective_width - 7] + "..."
-    lines.append(f"│ {header:<{effective_width-4}} │")
+    lines.append(f"│ {header:<{effective_width - 4}} │")
     lines.append("├" + "─" * (effective_width - 2) + "┤")
 
     # Collect all nodes in order
@@ -723,7 +723,7 @@ def format_flamegraph(
             return "<1ms"  # Show marker for 0ms durations
         if ms < 1000:
             return f"{ms:.0f}ms"
-        return f"{ms/1000:.2f}s"
+        return f"{ms / 1000:.2f}s"
 
     # Build layers by depth
     max_depth = hierarchy.get("max_depth", 0)

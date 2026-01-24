@@ -848,7 +848,7 @@ def verify_pattern(
                                 match_info["groups"] = list(match.groups())
                                 for j, grp in enumerate(match.groups()):
                                     if grp:
-                                        group_values[f"group_{j+1}"][grp] += 1
+                                        group_values[f"group_{j + 1}"][grp] += 1
 
                             matches.append(match_info)
 
@@ -1968,11 +1968,13 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool):
                 if e.get("timestamp"):
                     timestamps.append(e["timestamp"])
                 if level in ["ERROR", "FATAL", "CRITICAL"]:
-                    errors.append({
-                        "message": e.get("message"),
-                        "timestamp": e.get("timestamp"),
-                        "line_number": e.get("line_number"),
-                    })
+                    errors.append(
+                        {
+                            "message": e.get("message"),
+                            "timestamp": e.get("timestamp"),
+                            "line_number": e.get("line_number"),
+                        }
+                    )
 
             # Calculate duration
             duration_ms = None
@@ -2006,30 +2008,36 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool):
             if analysis1.get("duration_ms") and analysis2.get("duration_ms"):
                 diff_ms = analysis1["duration_ms"] - analysis2["duration_ms"]
                 if abs(diff_ms) > 100:  # Significant difference
-                    differences.append({
-                        "type": "duration",
-                        "description": f"{id1} took {diff_ms:+d}ms compared to {id2}",
-                        "value1": analysis1["duration_ms"],
-                        "value2": analysis2["duration_ms"],
-                    })
+                    differences.append(
+                        {
+                            "type": "duration",
+                            "description": f"{id1} took {diff_ms:+d}ms compared to {id2}",
+                            "value1": analysis1["duration_ms"],
+                            "value2": analysis2["duration_ms"],
+                        }
+                    )
 
             # Entry count difference
             if analysis1["entry_count"] != analysis2["entry_count"]:
-                differences.append({
-                    "type": "entry_count",
-                    "description": f"{id1} has {analysis1['entry_count']} entries, {id2} has {analysis2['entry_count']}",
-                    "value1": analysis1["entry_count"],
-                    "value2": analysis2["entry_count"],
-                })
+                differences.append(
+                    {
+                        "type": "entry_count",
+                        "description": f"{id1} has {analysis1['entry_count']} entries, {id2} has {analysis2['entry_count']}",
+                        "value1": analysis1["entry_count"],
+                        "value2": analysis2["entry_count"],
+                    }
+                )
 
             # Outcome difference
             if analysis1["outcome"] != analysis2["outcome"]:
-                differences.append({
-                    "type": "outcome",
-                    "description": f"{id1} {analysis1['outcome']}, {id2} {analysis2['outcome']}",
-                    "value1": analysis1["outcome"],
-                    "value2": analysis2["outcome"],
-                })
+                differences.append(
+                    {
+                        "type": "outcome",
+                        "description": f"{id1} {analysis1['outcome']}, {id2} {analysis2['outcome']}",
+                        "value1": analysis1["outcome"],
+                        "value2": analysis2["outcome"],
+                    }
+                )
 
             # Find where they diverge
             steps1 = analysis1.get("steps", [])
@@ -2045,11 +2053,13 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool):
                     break
 
             if divergence_point:
-                differences.append({
-                    "type": "divergence",
-                    "description": f"Requests diverge at step {divergence_point['step']}",
-                    "detail": divergence_point,
-                })
+                differences.append(
+                    {
+                        "type": "divergence",
+                        "description": f"Requests diverge at step {divergence_point['step']}",
+                        "detail": divergence_point,
+                    }
+                )
 
         output = {
             "comparison": {
@@ -2063,10 +2073,14 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool):
         # Add recommendation if one failed and one succeeded
         if analysis1.get("outcome") == "error" and analysis2.get("outcome") == "success":
             if analysis1.get("errors"):
-                output["recommendation"] = f"Investigate error in {id1}: {analysis1['errors'][0].get('message', 'Unknown error')}"
+                output["recommendation"] = (
+                    f"Investigate error in {id1}: {analysis1['errors'][0].get('message', 'Unknown error')}"
+                )
         elif analysis2.get("outcome") == "error" and analysis1.get("outcome") == "success":
             if analysis2.get("errors"):
-                output["recommendation"] = f"Investigate error in {id2}: {analysis2['errors'][0].get('message', 'Unknown error')}"
+                output["recommendation"] = (
+                    f"Investigate error in {id2}: {analysis2['errors'][0].get('message', 'Unknown error')}"
+                )
 
         _output_json(output, pretty)
         sys.exit(EXIT_SUCCESS)
@@ -2082,7 +2096,12 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool):
 
 @llm.command()
 @click.argument("files", nargs=-1, required=True)
-@click.option("--focus", type=click.Choice(["errors", "all", "warnings"]), default="errors", help="What to focus on")
+@click.option(
+    "--focus",
+    type=click.Choice(["errors", "all", "warnings"]),
+    default="errors",
+    help="What to focus on",
+)
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def summarize(files: tuple, focus: str, pretty: bool):
     """
@@ -2140,17 +2159,21 @@ def summarize(files: tuple, focus: str, pretty: bool):
                             msg = entry.message or line[:100]
                             unique_errors[msg] += 1
                             if len(errors) < 10:
-                                errors.append({
-                                    "line": i + 1,
-                                    "message": msg,
-                                    "correlation_id": entry.correlation_id,
-                                })
+                                errors.append(
+                                    {
+                                        "line": i + 1,
+                                        "message": msg,
+                                        "correlation_id": entry.correlation_id,
+                                    }
+                                )
                         elif level in ["WARN", "WARNING"]:
                             if len(warnings) < 5:
-                                warnings.append({
-                                    "line": i + 1,
-                                    "message": entry.message or line[:100],
-                                })
+                                warnings.append(
+                                    {
+                                        "line": i + 1,
+                                        "message": entry.message or line[:100],
+                                    }
+                                )
 
             except (FileNotFoundError, PermissionError):
                 pass
@@ -2170,7 +2193,7 @@ def summarize(files: tuple, focus: str, pretty: bool):
             # Add top error
             if unique_errors:
                 top_error = max(unique_errors.items(), key=lambda x: x[1])
-                summary_text += f". Top error: \"{top_error[0][:50]}\" ({top_error[1]}x)"
+                summary_text += f'. Top error: "{top_error[0][:50]}" ({top_error[1]}x)'
 
         output = {
             "summary": summary_text,

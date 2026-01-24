@@ -129,10 +129,9 @@ class TestCrossServiceBreakdown:
 
             for service, expected_count in expected.items():
                 actual_count = breakdown.get(service, 0)
-                assert actual_count == expected_count, (
-                    f"Service {service} should have {expected_count} entries, "
-                    f"got {actual_count}"
-                )
+                assert (
+                    actual_count == expected_count
+                ), f"Service {service} should have {expected_count} entries, got {actual_count}"
 
     def test_total_entries_matches_breakdown_sum(self, multi_service_deterministic):
         """total_entries should equal sum of service_breakdown."""
@@ -143,10 +142,9 @@ class TestCrossServiceBreakdown:
 
         if breakdown:
             breakdown_sum = sum(breakdown.values())
-            assert breakdown_sum == len(timeline), (
-                f"Breakdown sum ({breakdown_sum}) should equal timeline length "
-                f"({len(timeline)})"
-            )
+            assert breakdown_sum == len(
+                timeline
+            ), f"Breakdown sum ({breakdown_sum}) should equal timeline length ({len(timeline)})"
 
 
 class TestCrossServiceChronologicalOrder:
@@ -350,10 +348,9 @@ class TestCrossServiceErrorEntries:
             elif level == "INFO":
                 info_count += 1
 
-        assert error_count == expected_error_count, (
-            f"{correlation_id} should have {expected_error_count} ERROR entries, "
-            f"got {error_count}"
-        )
-        assert info_count == expected_info_count, (
-            f"{correlation_id} should have {expected_info_count} INFO entries, " f"got {info_count}"
-        )
+        assert (
+            error_count == expected_error_count
+        ), f"{correlation_id} should have {expected_error_count} ERROR entries, got {error_count}"
+        assert (
+            info_count == expected_info_count
+        ), f"{correlation_id} should have {expected_info_count} INFO entries, got {info_count}"

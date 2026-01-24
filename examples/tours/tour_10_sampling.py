@@ -7,12 +7,14 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Smart Sampling Strategies
 
     When dealing with large log files, you can't always process everything.
@@ -27,17 +29,20 @@ def _(mo):
     5. Understanding coverage metrics
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Large Log Dataset
 
     We'll create a larger dataset with various patterns.
-    """)
+    """
+    )
     return
 
 
@@ -124,18 +129,21 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Representative Sampling
 
     Gets a **balanced mix** that reflects the overall distribution.
     Each log level is represented proportionally.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _():
     from logler.investigate import smart_sample
+
     return (smart_sample,)
 
 
@@ -167,12 +175,14 @@ def _(rep_sample):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Diverse Sampling
 
     Maximizes **variety** - gets as many different messages,
     threads, and services as possible.
-    """)
+    """
+    )
     return
 
 
@@ -211,12 +221,14 @@ def _(diverse_sample):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Chronological Sampling
 
     Spreads samples **evenly across time**.
     Good for detecting patterns that change over time.
-    """)
+    """
+    )
     return
 
 
@@ -259,12 +271,14 @@ def _(chrono_sample):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Errors-Focused Sampling
 
     **Prioritizes errors** and includes context around them.
     Best when investigating problems.
-    """)
+    """
+    )
     return
 
 
@@ -313,11 +327,13 @@ def _(errors_sample):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Comparing Strategies
 
     Different strategies serve different purposes:
-    """)
+    """
+    )
     return
 
 
@@ -353,11 +369,13 @@ def _(chrono_sample, diverse_sample, errors_sample, rep_sample):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. Using Samples for Efficient Analysis
 
     Samples reduce data while preserving insights:
-    """)
+    """
+    )
     return
 
 
@@ -386,7 +404,8 @@ def _(rep_sample):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned smart sampling strategies:
@@ -411,7 +430,8 @@ def _(mo):
 
     **Next Steps:**
     - **Tour 11**: AI-powered insights
-    """)
+    """
+    )
     return
 
 

@@ -218,11 +218,11 @@ def deep_hierarchy():
             "id": f"{id_prefix}-depth-{depth}",
             "node_type": "Span",
             "name": f"Level {depth}",
-            "parent_id": f"{id_prefix}-depth-{depth-1}" if depth > 0 else None,
+            "parent_id": f"{id_prefix}-depth-{depth - 1}" if depth > 0 else None,
             "children": [],
             "entry_ids": [],
             "start_time": f"2024-01-15T10:00:00.{depth:03d}Z",
-            "end_time": f"2024-01-15T10:00:00.{depth+10:03d}Z",
+            "end_time": f"2024-01-15T10:00:00.{depth + 10:03d}Z",
             "duration_ms": 10 * (max_depth - depth + 1),
             "entry_count": 1,
             "error_count": 0,
@@ -625,7 +625,7 @@ class TestEdgeCases:
             node = {
                 "id": f"depth-{depth}",
                 "node_type": "Span",
-                "parent_id": f"depth-{depth-1}" if depth > 0 else None,
+                "parent_id": f"depth-{depth - 1}" if depth > 0 else None,
                 "children": [],
                 "entry_count": 1,
                 "error_count": 0,
@@ -709,7 +709,7 @@ class TestEdgeCases:
                 "percentage": 3.2,
                 "depth": 1,
             },
-            "error_nodes": [f"child-{i*10:03d}" for i in range(15)],
+            "error_nodes": [f"child-{i * 10:03d}" for i in range(15)],
             "detection_method": "ExplicitParentId",
         }
 

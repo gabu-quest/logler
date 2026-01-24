@@ -78,10 +78,9 @@ class TestHierarchyDuration:
 
     def test_total_duration_exact(self, deterministic_hierarchy):
         """Total duration should be exactly 1000ms."""
-        assert deterministic_hierarchy["total_duration_ms"] == 1000, (
-            f"Total duration should be 1000ms, "
-            f"got {deterministic_hierarchy['total_duration_ms']}ms"
-        )
+        assert (
+            deterministic_hierarchy["total_duration_ms"] == 1000
+        ), f"Total duration should be 1000ms, got {deterministic_hierarchy['total_duration_ms']}ms"
 
 
 class TestHierarchyBottleneck:
@@ -355,10 +354,9 @@ class TestHierarchyEntryCount:
         node = find_node(deterministic_hierarchy, node_id)
 
         assert node is not None, f"Node {node_id} not found"
-        assert node["entry_count"] == expected_entry_count, (
-            f"Node {node_id} should have {expected_entry_count} entries, "
-            f"got {node['entry_count']}"
-        )
+        assert (
+            node["entry_count"] == expected_entry_count
+        ), f"Node {node_id} should have {expected_entry_count} entries, got {node['entry_count']}"
 
     def test_leaf_entry_counts_sum_to_direct_entries(self, deterministic_hierarchy):
         """Leaf node entry counts should sum to total direct entries."""
