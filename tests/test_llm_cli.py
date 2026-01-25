@@ -145,7 +145,6 @@ class TestSchemaCommand:
 class TestSearchCommand:
     """Tests for logler llm search"""
 
-    @pytest.mark.skip(reason="Requires Rust backend")
     def test_search_basic(self, sample_log_file):
         """Test basic search."""
         result = run_llm_command(["search", sample_log_file])
@@ -160,7 +159,6 @@ class TestSearchCommand:
 class TestSampleCommand:
     """Tests for logler llm sample"""
 
-    @pytest.mark.skip(reason="Requires Rust backend")
     def test_sample_basic(self, sample_log_file):
         """Test basic sampling."""
         result = run_llm_command(["sample", sample_log_file, "--size", "5"])
@@ -175,7 +173,6 @@ class TestSampleCommand:
 class TestTriageCommand:
     """Tests for logler llm triage"""
 
-    @pytest.mark.skip(reason="Requires Rust backend")
     def test_triage_basic(self, sample_log_file):
         """Test basic triage."""
         result = run_llm_command(["triage", sample_log_file])
