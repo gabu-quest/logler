@@ -849,10 +849,8 @@ impl HierarchyBuilder {
         let mut seen = HashSet::new();
 
         fn collect_errors(node: &SpanNode, errors: &mut Vec<String>, seen: &mut HashSet<String>) {
-            if node.error_count > 0 {
-                if seen.insert(node.id.clone()) {
-                    errors.push(node.id.clone());
-                }
+            if node.error_count > 0 && seen.insert(node.id.clone()) {
+                errors.push(node.id.clone());
             }
             for child in &node.children {
                 collect_errors(child, errors, seen);
