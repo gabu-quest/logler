@@ -35,36 +35,25 @@ A modern, feature-rich log viewer that makes debugging a pleasure. View logs in 
 - 🔍 **Semantic Search** - Find errors by description, not just exact matches
 - 🧵 **Thread Following** - Reconstruct request flows across distributed systems
 - 🌳 **Hierarchy Visualization** - Tree and waterfall views of nested operations, bottleneck detection
-- 📊 **Pattern Detection** - Automatically find repeated errors and cascading failures
 - 💾 **SQL Queries** - DuckDB-powered custom analysis for deep investigation
 - 📈 **Statistical Analysis** - Z-scores, percentiles, correlations, anomaly detection
+- 🌐 **OpenTelemetry Export** - Export traces to Jaeger, Zipkin, or OTLP collectors
 - 🌍 **Bilingual Docs** - Complete documentation in English and Japanese (日本語)
 
 ### 🚀 NEW: Advanced LLM Features
 
 **Designed specifically for AI agents with limited context windows:**
 
-- 💡 **Auto Insights** - `analyze_with_insights()` automatically detects patterns, errors, and suggests next steps
 - 📉 **Token-Efficient Output** - 44x token savings with summary/count/compact modes
 - 🔀 **Compare & Diff** - Compare successful vs failed requests, before/after deployments
 - 🌐 **Cross-Service Timeline** - Unified view across microservices for distributed debugging
 - 📝 **Investigation Sessions** - Track progress, undo/redo, save/resume investigations
 - 🎯 **Smart Sampling** - Representative sampling with multiple strategies (diverse, errors-focused, chronological)
 - 📄 **Report Generation** - Auto-generate markdown/text/JSON reports from investigation
-- 🤔 **Explain Feature** - Plain English explanations of cryptic errors with next steps
-- 💬 **Contextual Suggestions** - AI suggests what to investigate next based on findings
 
 ### Public API Contract
 
-Each code block carries a **Contract ID** (e.g., `[C01]`). The test suite in `tests/test_readme.py` executes these snippets against the documented public APIs. When this section changes, the tests must change with it — CI proves the README.
-
-#### [C01] Auto-insights analysis
-```python
-import logler.investigate as investigate
-
-result = investigate.analyze_with_insights(files=["app.log"])
-print(result['insights'])  # Automatic pattern detection, error analysis, suggestions
-```
+Each code block carries a **Contract ID** (e.g., `[C02]`). The test suite in `tests/test_readme.py` executes these snippets against the documented public APIs. When this section changes, the tests must change with it — CI proves the README.
 
 #### [C02] Token-efficient search
 ```python
@@ -103,7 +92,6 @@ import logler.investigate as investigate
 
 session = investigate.InvestigationSession(files=["app.log"], name="incident_2024")
 session.search(level="ERROR")
-session.find_patterns()
 session.add_note("Database connection pool exhausted")
 report = session.generate_report(format="markdown")  # Auto-generate report
 ```
@@ -117,14 +105,6 @@ sample = investigate.smart_sample(
     strategy="errors_focused",  # or "diverse", "representative", "chronological"
     sample_size=50
 )
-```
-
-#### [C07] Error explanation
-```python
-import logler.investigate as investigate
-
-explanation = investigate.explain(error_message="Connection pool exhausted", context="production")
-print(explanation)  # Common causes, next steps, production-specific advice
 ```
 
 #### [C08] Thread hierarchy
@@ -198,9 +178,7 @@ logler stats app.log --json      # JSON output
 
 **Investigate logs with smart analysis:**
 ```bash
-logler investigate app.log --auto-insights        # Auto-detect issues
 logler investigate app.log --errors               # Analyze errors
-logler investigate app.log --patterns             # Find repeated patterns
 logler investigate app.log --thread worker-1      # Follow specific thread
 logler investigate app.log --correlation req-123  # Follow correlation ID
 logler investigate app.log --trace trace-abc123   # Follow distributed trace
@@ -347,25 +325,20 @@ logler stats app.log --json | jq '.by_level'
 ### Investigation & Analysis
 
 ```bash
-# Auto-detect issues with insights
-logler investigate app.log --auto-insights
-# Output: Automatic error analysis, pattern detection, actionable suggestions
-
 # Analyze errors with context
 logler investigate app.log --errors
 # Shows error frequency, top error messages, time ranges
-
-# Find repeated patterns
-logler investigate app.log --patterns --min-occurrences 5
-# Identifies logs that repeat 5+ times
 
 # Follow a specific thread or request
 logler investigate app.log --thread worker-1
 logler investigate app.log --correlation req-abc123
 logler investigate app.log --trace trace-xyz789
 
+# Build hierarchy tree with bottleneck detection
+logler investigate app.log --correlation req-123 --hierarchy
+
 # Token-efficient output for LLMs
-logler investigate app.log --auto-insights --output summary
+logler investigate app.log --errors --output summary
 # Returns aggregated statistics instead of full logs
 
 # JSON output for automation
@@ -427,7 +400,7 @@ To unlock **all** of logler's capabilities (especially multi-level thread hierar
 |-------|---------|---------|
 | `timestamp` | When the event occurred (ISO 8601) | Timeline, duration analysis |
 | `level` | Log level (DEBUG/INFO/WARN/ERROR/FATAL) | Filtering, error detection |
-| `message` | Human-readable description | Search, pattern detection |
+| `message` | Human-readable description | Search, filtering |
 | `thread_id` | Thread/worker identifier | Thread grouping, timeline |
 | `correlation_id` | Request ID across services | Cross-service tracing |
 | `trace_id` | Distributed trace identifier | OpenTelemetry integration |
@@ -539,9 +512,35 @@ Built with:
 
 1. **Use `--follow` mode** for real-time debugging
 2. **Filter by thread** to trace execution flow
-3. **Use `--auto-insights`** for automatic issue detection
+3. **Use `--hierarchy`** to visualize request flow with bottleneck detection
 4. **Export stats as JSON** for automation
 5. **Watch directories** for new log files
+
+## 🎓 Interactive Tours
+
+Learn logler hands-on with [marimo](https://marimo.io/) notebook tours. Each tour is self-contained with sample data -- no external files needed.
+
+```bash
+# Run any tour in your browser
+uv run marimo edit examples/tours/tour_01_fundamentals.py
+```
+
+| Tour | Topic |
+|------|-------|
+| 01 | Fundamentals -- search, filter, output formats |
+| 02 | Thread Tracking -- grouping, correlation IDs |
+| 03 | Hierarchy -- tree views, waterfall, bottleneck detection |
+| 04 | Investigation -- sessions, history, report generation |
+| 06 | Flamegraph -- performance visualization |
+| 07 | Error Flow -- root cause analysis, propagation chains |
+| 08 | Comparison -- diff hierarchies, compare threads |
+| 09 | Tracing Exports -- Jaeger and Zipkin formats |
+| 10 | Sampling -- smart sampling strategies |
+| 12 | Multi-File -- cross-service distributed tracing |
+| 13 | Live Watching -- real-time tailing and streaming |
+| 14 | Performance -- 10K+ entries, benchmarks |
+
+See the [examples README](examples/README.md) for the full learning path.
 
 ## 🎓 Examples
 
@@ -564,10 +563,10 @@ logler view app.log -f --level ERROR
 logler view app.log --thread worker-1
 ```
 
-### Investigate with insights
+### Build request hierarchy
 ```bash
-logler investigate app.log --auto-insights
-# Automatic pattern detection and issue analysis
+logler investigate app.log --correlation req-123 --hierarchy
+# Visualize request flow with bottleneck detection
 ```
 
 ---

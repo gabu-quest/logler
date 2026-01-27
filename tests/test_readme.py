@@ -17,13 +17,11 @@ from pathlib import Path
 # Import with Rust backend check
 try:
     from logler.investigate import (
-        analyze_with_insights,
         search,
         compare_threads,
         cross_service_timeline,
         InvestigationSession,
         smart_sample,
-        explain,
         follow_thread_hierarchy,
         get_hierarchy_summary,
         RUST_AVAILABLE,
@@ -241,22 +239,6 @@ def multi_service_logs():
 # =============================================================================
 
 
-class TestC01AutoInsightsAnalysis:
-    """[C01] analyze_with_insights returns insights, overview, suggestions"""
-
-    def test_returns_insights_key(self, app_log):
-        result = analyze_with_insights(files=[app_log])
-        assert "insights" in result, "Result must have 'insights' key"
-        assert isinstance(result["insights"], list), "insights must be a list"
-
-    def test_returns_overview(self, app_log):
-        result = analyze_with_insights(files=[app_log])
-        assert "overview" in result, "Result must have 'overview' key"
-        overview = result["overview"]
-        assert "total_logs" in overview, "overview must have total_logs"
-        assert "error_count" in overview, "overview must have error_count"
-
-
 class TestC02TokenEfficientSearch:
     """[C02] search with output_format='summary' returns aggregated stats"""
 
@@ -319,11 +301,6 @@ class TestC05InvestigationSession:
         result = session.search(level="ERROR")
         assert isinstance(result, dict), "session.search must return dict"
 
-    def test_session_can_find_patterns(self, app_log):
-        session = InvestigationSession(files=[app_log], name="incident_2024")
-        result = session.find_patterns()
-        assert isinstance(result, dict), "session.find_patterns must return dict"
-
     def test_session_can_add_note(self, app_log):
         session = InvestigationSession(files=[app_log], name="incident_2024")
         session.add_note("Database connection pool exhausted")
@@ -332,7 +309,6 @@ class TestC05InvestigationSession:
     def test_session_generates_report(self, app_log):
         session = InvestigationSession(files=[app_log], name="incident_2024")
         session.search(level="ERROR")
-        session.find_patterns()
         session.add_note("Database connection pool exhausted")
         report = session.generate_report(format="markdown")
         assert isinstance(report, str), "generate_report must return string"
@@ -366,28 +342,6 @@ class TestC06SmartSample:
         """Chronological strategy should work"""
         sample = smart_sample(files=[huge_log], strategy="chronological", sample_size=20)
         assert isinstance(sample, dict)
-
-
-class TestC07ErrorExplanation:
-    """[C07] explain provides human-friendly error explanations"""
-
-    def test_explain_returns_string(self):
-        explanation = explain(error_message="Connection pool exhausted", context="production")
-        assert isinstance(explanation, str), "explain must return string"
-
-    def test_explain_not_empty(self):
-        explanation = explain(error_message="Connection pool exhausted", context="production")
-        assert len(explanation) > 0, "Explanation should not be empty"
-
-    def test_explain_with_entry(self, app_log):
-        """explain() can also take a full entry"""
-        entry = {
-            "timestamp": "2024-01-15T10:00:00Z",
-            "level": "ERROR",
-            "message": "Database timeout",
-        }
-        explanation = explain(entry=entry, context="production")
-        assert isinstance(explanation, str)
 
 
 class TestC08ThreadHierarchy:

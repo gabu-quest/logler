@@ -7,14 +7,12 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
-
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Logler Tour: Fundamentals
 
     Welcome to Logler! This interactive notebook will teach you the fundamentals
@@ -28,21 +26,18 @@ def _(mo):
     5. Working with results
 
     Let's dive in!
-    """
-    )
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 1. Setting Up
 
     First, let's import Logler and check that the Rust backend is available.
     The Rust backend provides blazing-fast log parsing and indexing.
-    """
-    )
+    """)
     return
 
 
@@ -65,14 +60,12 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 2. Creating Sample Logs
 
     For this tour, we'll create some sample JSON logs to work with.
     Logler supports multiple formats, but JSON logs are the richest.
-    """
-    )
+    """)
     return
 
 
@@ -232,14 +225,12 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 3. Getting File Metadata
 
     Before searching, let's understand what's in our log file.
     The `get_metadata()` function provides useful information about the logs.
-    """
-    )
+    """)
     return
 
 
@@ -264,14 +255,12 @@ def _(get_metadata, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 4. Multi-Format Parsing
 
     Logler parses JSON, plaintext, and syslog-style lines. Here's what it can
     extract from each format.
-    """
-    )
+    """)
     return
 
 
@@ -317,8 +306,7 @@ def _(temp_dir):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 5. Basic Search
 
     Now let's search our logs! The `search()` function is the primary way
@@ -326,8 +314,7 @@ def _(mo):
     - Text query (searches message content)
     - Log level
     - Limit (max results)
-    """
-    )
+    """)
     return
 
 
@@ -347,15 +334,13 @@ def _(log_file, search):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 6. Filtering by Log Level
 
     Often you want to find just errors or warnings.
     `search()` accepts one level at a time, so we'll run two quick
     searches and combine the results.
-    """
-    )
+    """)
     return
 
 
@@ -394,14 +379,12 @@ def _(log_file, search):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 7. Using the Investigator Class
 
     For more advanced operations, use the `Investigator` class.
     It keeps files loaded in memory for faster repeated queries.
-    """
-    )
+    """)
     return
 
 
@@ -433,14 +416,12 @@ def _(inv):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 8. Context Around Results
 
     Sometimes you need to see what happened before and after a log entry.
     Use context lines to get surrounding entries:
-    """
-    )
+    """)
     return
 
 
@@ -476,8 +457,7 @@ def _(inv, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## Summary
 
     You've learned the fundamentals of Logler:
@@ -493,8 +473,7 @@ def _(mo):
     - **Tour 04**: Investigation sessions and reports
     - **Tour 05**: Pattern detection
     - **Tour 12**: Multi-file tracing across services
-    """
-    )
+    """)
     return
 
 
@@ -505,6 +484,11 @@ def _(temp_dir):
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
+    return
+
+
+@app.cell
+def _():
     return
 
 

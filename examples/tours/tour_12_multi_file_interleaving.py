@@ -13,8 +13,7 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Logler Tour: Multi-File Tracing
 
     Multi-file tracing is where Logler shines. Real systems have logs scattered
@@ -34,8 +33,7 @@ def _(mo):
     5. **Notification Service** - Email/SMS confirmation
 
     Let's see how a single request flows through this system!
-    """
-    )
+    """)
     return
 
 
@@ -64,14 +62,12 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 1. Generate Distributed Logs
 
     We'll create 5 separate log files, each representing a different microservice.
     The request flows through them in sequence, with realistic timing and occasional failures.
-    """
-    )
+    """)
     return
 
 
@@ -330,14 +326,12 @@ def _(CORRELATION_ID, Path, TRACE_ID, base_time, json, temp_dir, timedelta):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 2. Load ALL Files Into Single Investigator
 
     Here's the magic: we load all 5 log files into ONE Investigator.
     This creates a unified index that can search across everything.
-    """
-    )
+    """)
     return
 
 
@@ -360,14 +354,12 @@ def _(all_files):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 3. Search Across ALL Services
 
     One query searches all 5 log files simultaneously.
     Results are merged and sorted by timestamp.
-    """
-    )
+    """)
     return
 
 
@@ -394,21 +386,19 @@ def _(inv):
     print(f"Found {payment_results['total_matches']} entries mentioning 'payment':\n")
     for _r in payment_results["results"]:
         _entry = _r["entry"]
-        _svc = _entry.get("service", "unknown")
+        _svc = _entry.get("service_name", "unknown")
         print(f"[{_svc:20}] [{_entry['level']:5}] {_entry['message'][:60]}")
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 4. Cross-Service Timeline
 
     `cross_service_timeline()` creates a unified view of a request across
     services with relative timings. This makes handoffs and latency visible.
-    """
-    )
+    """)
     return
 
 
@@ -475,14 +465,12 @@ def _(timeline):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 5. Build Hierarchy Across All Files
 
     Even more powerful: build a parent-child hierarchy from logs
     scattered across multiple files!
-    """
-    )
+    """)
     return
 
 
@@ -505,14 +493,12 @@ def _(CORRELATION_ID, all_files):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 6. Error Flow Analysis Across Services
 
     When something fails in a distributed system, where did it START?
     Error flow analysis traces failures back to their root cause.
-    """
-    )
+    """)
     return
 
 
@@ -530,8 +516,7 @@ def _(hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## Summary
 
     You've seen the real power of Logler:
@@ -547,8 +532,7 @@ def _(mo):
     **Next Steps:**
     - **Tour 13**: Live log watching (real-time streaming)
     - **Tour 14**: Performance at scale (10,000+ entries)
-    """
-    )
+    """)
     return
 
 

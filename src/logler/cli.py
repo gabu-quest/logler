@@ -135,9 +135,9 @@ def stats(files: tuple, output_json: bool):
 
 @main.command()
 @click.argument("files", nargs=-1, required=True, type=click.Path(exists=True))
-@click.option("--auto-insights", is_flag=True, help="Run automatic insights analysis")
+@click.option("--auto-insights", is_flag=True, hidden=True, help="[DEPRECATED] Removed")
 @click.option("--errors", is_flag=True, help="Show only errors with analysis")
-@click.option("--patterns", is_flag=True, help="Find repeated patterns")
+@click.option("--patterns", is_flag=True, hidden=True, help="[DEPRECATED] Removed")
 @click.option("--thread", type=str, help="Follow specific thread ID")
 @click.option("--correlation", type=str, help="Follow specific correlation ID")
 @click.option("--trace", type=str, help="Follow specific trace ID")
@@ -191,12 +191,10 @@ def investigate(
     min_occurrences: int,
 ):
     """
-    Investigate log files with smart analysis and insights.
+    Investigate log files with analysis tools.
 
     Examples:
-        logler investigate app.log --auto-insights     # Auto-detect issues
         logler investigate app.log --errors            # Analyze errors
-        logler investigate app.log --patterns          # Find repeated patterns
         logler investigate app.log --thread worker-1   # Follow specific thread
         logler investigate app.log --correlation req-123  # Follow request
         logler investigate app.log --trace trace-abc123  # Follow distributed trace
@@ -207,9 +205,7 @@ def investigate(
         logler investigate app.log --output summary    # Token-efficient output
     """
     from .investigate import (
-        analyze_with_insights,
         search,
-        find_patterns,
         follow_thread,
         follow_thread_hierarchy,
         get_hierarchy_summary,
@@ -230,90 +226,18 @@ def investigate(
             console.print("[red]❌ Provide only one of --thread, --correlation, or --trace.[/red]")
             sys.exit(2)
 
-        # Auto-insights mode (most powerful)
+        # Deprecated: Auto-insights mode
         if auto_insights:
-            console.print("[bold cyan]🎯 Running automatic insights analysis...[/bold cyan]\n")
-            result = analyze_with_insights(files=file_list, auto_investigate=True)
+            console.print("[yellow]WARNING: --auto-insights is deprecated and has been removed.[/yellow]")
+            console.print("[dim]Use 'logler llm search --level ERROR' for error analysis instead.[/dim]")
+            sys.exit(0)
 
-            if output_json:
-                console.print_json(data=result)
-                return
-
-            # Display overview
-            overview = result["overview"]
-            console.print(
-                Panel(
-                    f"[bold]Total Logs:[/bold] {overview['total_logs']}\n"
-                    f"[bold]Error Count:[/bold] {overview['error_count']}\n"
-                    f"[bold]Error Rate:[/bold] {overview['error_rate']:.1%}\n"
-                    f"[bold]Log Levels:[/bold] {overview['log_levels']}",
-                    title="📊 Overview",
-                    border_style="cyan",
-                )
-            )
-
-            # Display insights
-            if result["insights"]:
-                console.print("\n[bold cyan]💡 Automatic Insights[/bold cyan]\n")
-                for i, insight in enumerate(result["insights"], 1):
-                    severity_color = {"high": "red", "medium": "yellow", "low": "green"}.get(
-                        insight["severity"], "white"
-                    )
-
-                    severity_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(
-                        insight["severity"], "⚪"
-                    )
-
-                    console.print(
-                        f"{severity_icon} [bold {severity_color}]Insight #{i}:[/bold {severity_color}] {insight['type']}"
-                    )
-                    console.print(
-                        f"   [dim]Severity:[/dim] [{severity_color}]{insight['severity'].upper()}[/{severity_color}]"
-                    )
-                    console.print(f"   [dim]Description:[/dim] {insight['description']}")
-                    console.print(f"   [dim]Suggestion:[/dim] {insight['suggestion']}\n")
-
-            # Display suggestions
-            if result["suggestions"]:
-                console.print("[bold cyan]📝 Suggestions[/bold cyan]\n")
-                for i, suggestion in enumerate(result["suggestions"], 1):
-                    console.print(f"  {i}. {suggestion}")
-
-            # Display next steps
-            if result["next_steps"]:
-                console.print("\n[bold cyan]🚀 Next Steps[/bold cyan]\n")
-                for i, step in enumerate(result["next_steps"], 1):
-                    console.print(f"  {i}. {step}")
-
-        # Pattern detection mode
+        # Deprecated: Pattern detection mode
         elif patterns:
-            console.print(
-                f"[bold cyan]🔍 Finding repeated patterns (min {min_occurrences} occurrences)...[/bold cyan]\n"
-            )
-            result = find_patterns(files=file_list, min_occurrences=min_occurrences)
-
-            if output_json:
-                console.print_json(data=result)
-                return
-
-            pattern_list = result.get("patterns", [])
-            if pattern_list:
-                table = Table(title=f"Found {len(pattern_list)} Patterns")
-                table.add_column("Pattern", style="cyan", no_wrap=False)
-                table.add_column("Count", justify="right", style="green")
-                table.add_column("First Seen", style="yellow")
-                table.add_column("Last Seen", style="yellow")
-
-                for pattern in pattern_list[:20]:  # Show top 20
-                    pattern_text = pattern.get("pattern", "")[:80]
-                    count = pattern.get("occurrences", 0)
-                    first = pattern.get("first_seen", "N/A")
-                    last = pattern.get("last_seen", "N/A")
-                    table.add_row(pattern_text, str(count), first, last)
-
-                console.print(table)
-            else:
-                console.print("[yellow]No repeated patterns found.[/yellow]")
+            console.print("[yellow]WARNING: --patterns is deprecated and has been removed.[/yellow]")
+            console.print("[dim]Pattern detection requires specialized tools like Drain3 or LogMine.[/dim]")
+            console.print("[dim]Use 'logler llm search' with SQL grouping for similar results.[/dim]")
+            sys.exit(0)
 
         # Thread/correlation following mode
         elif thread or correlation or trace:

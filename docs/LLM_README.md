@@ -11,8 +11,9 @@ Logler now includes a **Rust-powered investigation engine** specifically designe
 - **🚀 Blazing Fast**: Rust backend with parallel processing - search 1GB files in <50ms
 - **🔍 Semantic Search**: Find errors by description, not just exact matches
 - **🧵 Thread Following**: Reconstruct request flows across distributed systems
-- **📊 Pattern Detection**: Automatically find repeated errors and cascading failures
+- **🌳 Hierarchy Visualization**: Tree and waterfall views with bottleneck detection
 - **📈 Statistical Analysis**: Get insights about error rates, response times, anomalies
+- **🌐 OpenTelemetry Export**: Export traces to Jaeger, Zipkin, or OTLP collectors
 - **🎨 Beautiful Output**: Rich terminal output and JSON for programmatic access
 - **🔌 Easy Integration**: Simple Python API designed for LLM function calling
 
@@ -60,11 +61,13 @@ investigator.load_files(["app.log", "api.log"])
 
 # Perform multiple operations
 results = investigator.search(query="error", limit=10)
-patterns = investigator.find_patterns(min_occurrences=3)
 metadata = investigator.get_metadata()
 
 # Follow a specific request
 timeline = investigator.follow_thread(correlation_id="req-001")
+
+# Build hierarchy with bottleneck detection
+hierarchy = investigator.build_hierarchy("req-001")
 ```
 
 ## 🛠️ Investigation Tools
@@ -132,32 +135,7 @@ timeline = investigate.follow_thread(
 }
 ```
 
-### 3. `find_patterns()` - Detect repeated issues
-
-```python
-patterns = investigate.find_patterns(
-    files=["app.log"],
-    min_occurrences=3
-)
-```
-
-**Output:**
-```json
-{
-  "patterns": [
-    {
-      "pattern": "Database connection timeout",
-      "occurrences": 45,
-      "first_seen": "2024-01-15T10:00:00Z",
-      "last_seen": "2024-01-15T10:30:00Z",
-      "affected_threads": ["worker-1", "worker-2", "worker-3"],
-      "examples": [...]
-    }
-  ]
-}
-```
-
-### 4. `get_metadata()` - File information
+### 3. `get_metadata()` - File information
 
 ```python
 metadata = investigate.get_metadata(files=["app.log"])
@@ -182,7 +160,7 @@ metadata = investigate.get_metadata(files=["app.log"])
 ]
 ```
 
-### 5. `get_context()` - Context around a line
+### 4. `get_context()` - Context around a line
 
 ```python
 context = investigate.get_context(
@@ -214,15 +192,7 @@ errors = investigate.search(
 )
 print(f"\nFound {errors['total_matches']} errors in {errors['search_time_ms']}ms")
 
-# Step 3: Detect patterns
-patterns = investigate.find_patterns(
-    files=["app.log"],
-    min_occurrences=3
-)
-print(f"\nTop error pattern: {patterns['patterns'][0]['pattern']}")
-print(f"Occurred {patterns['patterns'][0]['occurrences']} times")
-
-# Step 4: Investigate specific error
+# Step 3: Investigate specific error
 first_error = errors['results'][0]['entry']
 print(f"\nInvestigating error at line {first_error['line_number']}")
 
@@ -284,7 +254,7 @@ for entry in context['context_before']:
 |-----------|-----------|------|------------|
 | Search | 1GB | <50ms | 20 GB/s |
 | Follow thread | 1GB | <20ms | 50 GB/s |
-| Find patterns | 1GB | <200ms | 5 GB/s |
+| Build hierarchy | 1GB | <100ms | 10 GB/s |
 | Build index | 1GB | <500ms | 2 GB/s |
 
 **Memory usage:**
@@ -305,7 +275,7 @@ for entry in context['context_before']:
 2. **Structured output**: All results are JSON for easy parsing
 3. **Semantic relevance**: Search results ranked by relevance
 4. **Context included**: Get surrounding log lines automatically
-5. **Pattern detection**: Find issues LLMs might miss in raw logs
+5. **Hierarchy visualization**: Tree views with bottleneck detection
 6. **Statistics**: Get aggregate insights for better understanding
 7. **Thread following**: Reconstruct complex request flows easily
 
@@ -320,10 +290,6 @@ import logler.investigate as investigate
 # Get overview
 metadata = investigate.get_metadata(["app.log"])
 # Found 52,341 entries, 10,234 errors
-
-# Find top error patterns
-patterns = investigate.find_patterns(["app.log"], min_occurrences=5)
-# Top pattern: "Database connection timeout" (45 occurrences)
 
 # Search for database errors
 results = investigate.search(

@@ -7,14 +7,12 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
-
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Tour 13: Live Log Watching - Real-Time Analysis
 
     **Watch logs as they happen. Detect anomalies in real-time.**
@@ -31,8 +29,7 @@ def _(mo):
     2. Watch logs stream in real-time
     3. Detect and alert on errors
     4. Count patterns as they arrive
-    """
-    )
+    """)
     return
 
 
@@ -58,16 +55,14 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 1. The Log Writer (Simulated Service)
 
     This function simulates a running service writing logs.
     - Normal INFO logs most of the time
     - Occasional WARN logs
     - Periodic ERROR bursts (simulating incidents)
-    """
-    )
+    """)
     return
 
 
@@ -140,14 +135,12 @@ def _(json, make_log_entry, time):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 2. Start the Background Writer
 
     We'll start a background thread that writes logs every 150ms.
     This simulates a real service running in production.
-    """
-    )
+    """)
     return
 
 
@@ -168,8 +161,7 @@ def _(live_log, log_writer, threading):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 3. Watch Logs in Real-Time
 
     Now we use `LogReader.tail(follow=True)` to stream logs as they arrive.
@@ -178,8 +170,7 @@ def _(mo):
     - Normal INFO logs
     - WARN indicators
     - ERROR bursts (the incident simulation!)
-    """
-    )
+    """)
     return
 
 
@@ -212,14 +203,14 @@ def _(json, live_log, stop_event, time, total_written):
 
             stats[_level] = stats.get(_level, 0) + 1
 
-            # Visual indicators
+            # Visual indicators (consistent 10-char prefix for alignment)
             if _level == "ERROR":
-                print(f"🚨 ERROR | {_msg}")
+                print(f"🚨 ERROR  | {_msg}")
                 recent_errors.append(_entry)
             elif _level == "WARN":
-                print(f"⚠️  WARN  | {_msg}")
+                print(f"⚠️ WARN   | {_msg}")
             else:
-                print(f"   INFO  | {_msg}")
+                print(f"   INFO   | {_msg}")
 
             lines_read += 1
 
@@ -239,14 +230,12 @@ def _(json, live_log, stop_event, time, total_written):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 4. Real-Time Statistics
 
     As logs stream in, we tracked statistics.
     In production, you'd use this for dashboards and alerts.
-    """
-    )
+    """)
     return
 
 
@@ -280,8 +269,7 @@ def _(recent_errors, stats):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 5. Anomaly Detection Pattern
 
     In real production use, you'd implement patterns like:
@@ -308,17 +296,13 @@ def _(mo):
             send_alert("Error spike detected!")
             error_window.clear()
     ```
-
-    This is how production monitoring systems work!
-    """
-    )
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## Summary
 
     You've learned real-time log watching:
@@ -326,7 +310,6 @@ def _(mo):
     - **`LogReader.tail(follow=True)`** - Stream logs as they're written
     - **Real-time counting** - Track stats as logs flow
     - **Anomaly detection** - Alert on error spikes
-    - **Pattern matching** - Filter and route in real-time
 
     **Production use cases:**
     - Live dashboards
@@ -336,8 +319,7 @@ def _(mo):
 
     **Next Steps:**
     - **Tour 14**: Performance at scale (10,000+ entries)
-    """
-    )
+    """)
     return
 
 
@@ -351,6 +333,11 @@ def _(stop_event, temp_dir, writer_thread):
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
+    return
+
+
+@app.cell
+def _():
     return
 
 

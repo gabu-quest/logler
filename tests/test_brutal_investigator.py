@@ -17,7 +17,6 @@ try:
         search,
         follow_thread,
         get_context,
-        find_patterns,
         Investigator,
         InvestigationSession,
         RUST_AVAILABLE,
@@ -324,57 +323,6 @@ class TestGetContext:
             get_context(file=temp_log_file, line_number=99999, lines_before=5, lines_after=5)
 
 
-class TestFindPatterns:
-    """Pattern detection tests."""
-
-    @pytest.fixture
-    def repetitive_log_file(self):
-        """Create file with repetitive patterns"""
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
-            # Create patterns that should be detected
-            for i in range(100):
-                if i % 10 == 0:
-                    msg = "Connection timeout to database"
-                elif i % 7 == 0:
-                    msg = "Cache miss for key user_123"
-                elif i % 5 == 0:
-                    msg = "Request completed in 150ms"
-                else:
-                    msg = f"Unique message {i}"
-
-                entry = json.dumps(
-                    {"timestamp": f"2024-01-15T10:{i:02d}:00Z", "level": "INFO", "message": msg}
-                )
-                f.write(entry + "\n")
-            temp_path = f.name
-
-        yield temp_path
-        Path(temp_path).unlink()
-
-    def test_find_patterns_basic(self, repetitive_log_file):
-        """Find patterns in file - should detect repeated messages"""
-        result = find_patterns(files=[repetitive_log_file], min_occurrences=5)
-        assert "patterns" in result
-        patterns = result["patterns"]
-        # Should find patterns (timeout appears 10 times, cache miss ~14 times, request ~20 times)
-        assert isinstance(patterns, list), "Patterns should be a list"
-
-    def test_find_patterns_high_threshold(self, repetitive_log_file):
-        """Find patterns with high min_occurrences - should return fewer/no patterns"""
-        result = find_patterns(files=[repetitive_log_file], min_occurrences=50)
-        patterns = result.get("patterns", [])
-        # With threshold 50, should find fewer patterns than lower threshold
-        assert isinstance(patterns, list), "Patterns should be a list"
-
-    def test_find_patterns_threshold_one(self, repetitive_log_file):
-        """Find patterns with min_occurrences=1 - should find patterns"""
-        result = find_patterns(files=[repetitive_log_file], min_occurrences=1)
-        assert "patterns" in result
-        patterns = result["patterns"]
-        # With threshold 1, should find patterns
-        assert isinstance(patterns, list), "Patterns should be a list"
-
-
 class TestInvestigatorClass:
     """Investigator class tests."""
 
@@ -419,14 +367,6 @@ class TestInvestigatorClass:
         # ALL entries must be from worker-0
         for entry in entries:
             assert entry["thread_id"] == "worker-0"
-
-    def test_investigator_find_patterns(self, temp_log_file):
-        """Find patterns through investigator"""
-        inv = Investigator()
-        inv.load_files([temp_log_file])
-        result = inv.find_patterns(min_occurrences=2)
-        assert "patterns" in result
-
 
 class TestEmptyAndEdgeCaseFiles:
     """Edge case file handling."""

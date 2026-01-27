@@ -7,14 +7,12 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
-
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Logler Tour: Thread & Correlation Tracking
 
     In distributed systems, a single request often spans multiple threads,
@@ -28,21 +26,18 @@ def _(mo):
     5. Comparing parallel executions
 
     Let's dive in!
-    """
-    )
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 1. Setting Up - Microservice Simulation
 
     We'll create logs that simulate a request flowing through multiple services,
     similar to what you'd see in a real microservice architecture.
-    """
-    )
+    """)
     return
 
 
@@ -247,14 +242,12 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 2. Following a Thread
 
     A thread represents a single execution context. Use `follow_thread()`
     to get all logs from a specific thread, in chronological order.
-    """
-    )
+    """)
     return
 
 
@@ -283,7 +276,6 @@ def _():
             or entry.get("service")
             or "unknown"
         )
-
     return follow_thread, format_duration, service_label
 
 
@@ -304,14 +296,12 @@ def _(follow_thread, format_duration, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 3. Following a Correlation ID
 
     Correlation IDs track a single request across all services and threads.
     This is essential for debugging distributed systems.
-    """
-    )
+    """)
     return
 
 
@@ -354,14 +344,12 @@ def _(follow_thread, format_duration, log_file, service_label):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 4. Following a Trace ID
 
     In OpenTelemetry-style systems, trace IDs connect all operations
     for a single distributed transaction.
-    """
-    )
+    """)
     return
 
 
@@ -389,14 +377,12 @@ def _(follow_thread, log_file, service_label):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 5. Comparing Parallel Requests
 
     When debugging, you often want to compare a successful request
     with a failed one. Let's analyze the differences:
-    """
-    )
+    """)
     return
 
 
@@ -433,13 +419,11 @@ def _(failed_timeline, format_duration, request_timeline):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 6. Finding Where Things Went Wrong
 
     Let's pinpoint exactly where the failed request diverged:
-    """
-    )
+    """)
     return
 
 
@@ -476,8 +460,7 @@ def _(failed_timeline, request_timeline, service_label):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## Summary
 
     You've learned how to track execution flows in Logler:
@@ -495,8 +478,7 @@ def _(mo):
     **Next Steps:**
     - **Tour 03**: Hierarchy visualization (tree and waterfall views)
     - **Tour 04**: Investigation sessions
-    """
-    )
+    """)
     return
 
 

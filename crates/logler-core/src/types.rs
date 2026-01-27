@@ -230,8 +230,6 @@ pub struct Pattern {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PatternType {
     RepeatedError,
-    CascadingFailure,
-    PeriodicEvent,
 }
 
 /// Error analysis result

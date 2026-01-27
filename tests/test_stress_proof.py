@@ -27,7 +27,6 @@ try:
     from logler.investigate import (
         search,
         follow_thread,
-        find_patterns,
         get_metadata,
         Investigator,
         InvestigationSession,
@@ -734,9 +733,17 @@ class TestConcurrentThreadTracking:
 
         result = follow_thread(files=[file_path], thread_id=test_thread_id)
 
-        # Verify chronological order
+        # Parse timestamps properly - string comparison fails when formats differ
+        # (e.g., "2024-01-15T12:00:01Z" vs "2024-01-15T12:00:01.012Z")
+        def parse_ts(ts_str):
+            # Handle both Z suffix and +00:00 formats
+            ts = ts_str.replace("Z", "+00:00")
+            return datetime.fromisoformat(ts)
+
         timestamps = [
-            entry.get("timestamp") for entry in result["entries"] if entry.get("timestamp")
+            parse_ts(entry.get("timestamp"))
+            for entry in result["entries"]
+            if entry.get("timestamp")
         ]
 
         for i in range(1, len(timestamps)):
@@ -886,26 +893,6 @@ class TestMicroserviceTracing:
 
             has_error = any(entry.get("level") == "ERROR" for entry in result["entries"])
             assert has_error, f"Trace {trace_id} should have errors but none found"
-
-
-class TestPatternDetection:
-    """Prove pattern detection works at scale"""
-
-    def test_finds_repeated_errors(self, large_microservice_logs):
-        """Must detect repeated error patterns"""
-        file_path, original_logs = large_microservice_logs
-
-        result = find_patterns(files=[file_path], min_occurrences=2)
-
-        # With 8% error rate on 500 requests, we should have some patterns
-        patterns = result.get("patterns", [])
-
-        # Check that detected patterns are real
-        for pattern in patterns[:3]:  # Check top 3
-            assert pattern["occurrences"] >= 2, "Pattern has fewer occurrences than min_occurrences"
-            assert (
-                pattern["pattern_type"] == "RepeatedError"
-            ), f"Unexpected pattern type: {pattern['pattern_type']}"
 
 
 class TestInvestigationSession:
@@ -1076,10 +1063,7 @@ class TestUltimateStress:
             # 2. Search for errors
             session.search("ERROR", level="ERROR")
 
-            # 3. Find patterns
-            session.find_patterns(min_occurrences=3)
-
-            # 4. Follow random threads
+            # 3. Follow random threads
             thread_ids = list(set(log.get("thread_id") for log in logs if log.get("thread_id")))
             for tid in random.sample(thread_ids, min(20, len(thread_ids))):
                 timeline = session.follow_thread(thread_id=tid)

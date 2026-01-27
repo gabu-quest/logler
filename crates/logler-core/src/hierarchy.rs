@@ -326,7 +326,23 @@ impl HierarchyBuilder {
             .max()
             .unwrap_or(0);
 
-        let total_duration_ms = self.calculate_total_duration(&root_entries);
+        // Calculate total duration from timestamps
+        let timestamp_duration_ms = self.calculate_total_duration(&root_entries);
+
+        // Also consider explicit durations on root nodes (may exceed timestamp range)
+        let root_explicit_duration_sum: i64 = roots
+            .iter()
+            .filter_map(|r| r.duration_ms)
+            .sum();
+
+        // Use the maximum to avoid >100% percentages in flamegraph
+        let total_duration_ms = match (timestamp_duration_ms, root_explicit_duration_sum > 0) {
+            (Some(ts_dur), true) => Some(ts_dur.max(root_explicit_duration_sum)),
+            (Some(ts_dur), false) => Some(ts_dur),
+            (None, true) => Some(root_explicit_duration_sum),
+            (None, false) => None,
+        };
+
         let concurrent_count = self.count_concurrent_spans(&roots);
         let bottleneck = self.find_bottleneck(&roots, total_duration_ms);
         let error_nodes = self.collect_error_nodes(&roots);
@@ -790,45 +806,62 @@ impl HierarchyBuilder {
         max_concurrent.saturating_sub(1) // Subtract 1 to not count the parent
     }
 
-    /// Find bottleneck (slowest node)
+    /// Find bottleneck (node with highest self-time)
+    ///
+    /// Self-time = node duration minus sum of direct children's durations.
+    /// This identifies the actual bottleneck, not just the root span which
+    /// always has the longest absolute duration in a hierarchy.
     fn find_bottleneck(
         &self,
         roots: &[SpanNode],
         total_duration_ms: Option<i64>,
     ) -> Option<BottleneckInfo> {
+        // (node_id, node_name, self_time_ms, depth)
         let mut bottleneck: Option<(String, Option<String>, i64, usize)> = None;
 
-        fn find_slowest(
+        fn calculate_self_time(node: &SpanNode) -> i64 {
+            let node_duration = node.duration_ms.unwrap_or(0);
+            let children_duration: i64 = node
+                .children
+                .iter()
+                .filter_map(|c| c.duration_ms)
+                .sum();
+            // Self-time is the node's duration minus its children's durations
+            // Can be negative if timestamps are inconsistent, clamp to 0
+            (node_duration - children_duration).max(0)
+        }
+
+        fn find_highest_self_time(
             node: &SpanNode,
-            current_slowest: &mut Option<(String, Option<String>, i64, usize)>,
+            current_best: &mut Option<(String, Option<String>, i64, usize)>,
         ) {
-            if let Some(duration) = node.duration_ms {
-                match current_slowest {
-                    None => {
-                        *current_slowest =
-                            Some((node.id.clone(), node.name.clone(), duration, node.depth));
-                    }
-                    Some((_, _, max_duration, _)) if duration > *max_duration => {
-                        *current_slowest =
-                            Some((node.id.clone(), node.name.clone(), duration, node.depth));
-                    }
-                    _ => {}
+            let self_time = calculate_self_time(node);
+
+            match current_best {
+                None => {
+                    *current_best =
+                        Some((node.id.clone(), node.name.clone(), self_time, node.depth));
                 }
+                Some((_, _, max_self_time, _)) if self_time > *max_self_time => {
+                    *current_best =
+                        Some((node.id.clone(), node.name.clone(), self_time, node.depth));
+                }
+                _ => {}
             }
 
             for child in &node.children {
-                find_slowest(child, current_slowest);
+                find_highest_self_time(child, current_best);
             }
         }
 
         for root in roots {
-            find_slowest(root, &mut bottleneck);
+            find_highest_self_time(root, &mut bottleneck);
         }
 
-        bottleneck.map(|(node_id, node_name, duration_ms, depth)| {
+        bottleneck.map(|(node_id, node_name, self_time_ms, depth)| {
             let total_ms = total_duration_ms.unwrap_or(0);
             let percentage = if total_ms > 0 {
-                (duration_ms as f64 / total_ms as f64) * 100.0
+                (self_time_ms as f64 / total_ms as f64) * 100.0
             } else {
                 0.0
             };
@@ -836,7 +869,7 @@ impl HierarchyBuilder {
             BottleneckInfo {
                 node_id,
                 node_name,
-                duration_ms,
+                duration_ms: self_time_ms,
                 percentage,
                 depth,
             }

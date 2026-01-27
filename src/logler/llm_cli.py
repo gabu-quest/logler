@@ -536,7 +536,7 @@ def triage(
     """
     Quick severity assessment for incident response.
 
-    Returns severity level, top issues, and suggested actions.
+    Returns severity level, error rate, and log level distribution.
     Designed for rapid initial assessment during incidents.
 
     Example:
@@ -549,14 +549,15 @@ def triage(
         if not file_list:
             _error_json(f"No files found matching: {files}")
 
-        # Run auto-insights
-        result = investigate.analyze_with_insights(files=file_list, auto_investigate=True)
+        # Get summary stats using search
+        result = investigate.search(files=file_list, output_format="summary")
 
-        overview = result.get("overview", {})
-        insights = result.get("insights", [])
+        total = result.get("total_matches", 0)
+        levels = result.get("log_levels", {})
+        error_count = levels.get("ERROR", 0) + levels.get("FATAL", 0)
+        error_rate = error_count / total if total > 0 else 0
 
         # Determine severity
-        error_rate = overview.get("error_rate", 0)
         if error_rate > 0.2:
             severity = "critical"
             confidence = 0.95
@@ -573,39 +574,32 @@ def triage(
             severity = "healthy"
             confidence = 0.9
 
-        # Build top issues
-        top_issues = []
-        for insight in insights[:5]:
-            issue = {
-                "type": insight.get("type"),
-                "severity": insight.get("severity"),
-                "description": insight.get("description"),
-            }
-            if insight.get("count"):
-                issue["count"] = insight["count"]
-            top_issues.append(issue)
-
-        # Build suggested actions
+        # Build suggested actions based on error rate
         suggested_actions = []
-        for insight in insights[:3]:
-            if insight.get("suggestion"):
-                suggested_actions.append({"action": "investigate", "reason": insight["suggestion"]})
+        if error_rate > 0.05:
+            suggested_actions.append({
+                "action": "investigate",
+                "reason": "High error rate detected - investigate most common errors"
+            })
+        if error_count > 0:
+            suggested_actions.append({
+                "action": "search_errors",
+                "reason": "Run: logler llm search --level ERROR to find error details"
+            })
 
         output = {
             "assessment": {
                 "severity": severity,
                 "confidence": confidence,
-                "summary": f"Error rate: {error_rate:.1%}, {len(insights)} issues detected",
+                "summary": f"Error rate: {error_rate:.1%}, {error_count} errors in {total} entries",
             },
             "metrics": {
                 "error_rate": round(error_rate, 4),
-                "error_count": overview.get("error_count", 0),
-                "total_entries": overview.get("total_logs", 0),
-                "log_levels": overview.get("log_levels", {}),
+                "error_count": error_count,
+                "total_entries": total,
+                "log_levels": levels,
             },
-            "top_issues": top_issues,
             "suggested_actions": suggested_actions,
-            "next_steps": result.get("next_steps", []),
         }
 
         _output_json(output, pretty)

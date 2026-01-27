@@ -7,14 +7,12 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
-
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # Logler Tour: Comparison & Diffing
 
     When debugging, comparing things is essential:
@@ -30,21 +28,18 @@ def _(mo):
     5. Interpreting comparison results
 
     Let's dive in!
-    """
-    )
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 1. Setting Up - Two Versions
 
     We'll create "before" and "after" logs to simulate
     a deployment that introduced a performance regression.
-    """
-    )
+    """)
     return
 
 
@@ -211,14 +206,12 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 2. Comparing Hierarchies
 
     The `diff_hierarchies()` function compares two traces
     to identify performance changes.
-    """
-    )
+    """)
     return
 
 
@@ -232,7 +225,6 @@ def _():
         compare_time_periods,
         cross_service_timeline,
     )
-
     return (
         compare_threads,
         compare_time_periods,
@@ -283,13 +275,11 @@ def _(diff_hierarchies, hierarchy_after, hierarchy_before):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 3. Identifying Regressions
 
     The diff shows which nodes got slower (degraded) or faster (improved).
-    """
-    )
+    """)
     return
 
 
@@ -325,13 +315,11 @@ def _(diff):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 4. Formatted Diff Report
 
     Use `format_hierarchy_diff()` for a complete formatted report.
-    """
-    )
+    """)
     return
 
 
@@ -344,14 +332,12 @@ def _(diff, format_hierarchy_diff):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 5. Comparing Threads/Requests
 
     Compare two specific requests to find what's different.
     Perfect for "why did this request fail but that one succeed?"
-    """
-    )
+    """)
     return
 
 
@@ -471,14 +457,12 @@ def _(thread_comparison):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 6. Comparing Time Periods
 
     Compare logs from different time periods to find what changed.
     Great for "what happened after the deployment at 3pm?"
-    """
-    )
+    """)
     return
 
 
@@ -568,13 +552,11 @@ def _(period_comparison):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 7. Cross-Service Timeline
 
     Compare a single request across multiple services to see timing and handoffs.
-    """
-    )
+    """)
     return
 
 
@@ -664,8 +646,7 @@ def _(cross_service_timeline, temp_dir):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## Summary
 
     You've learned how to compare logs:
@@ -684,8 +665,7 @@ def _(mo):
     **Next Steps:**
     - **Tour 09**: Distributed tracing exports
     - **Tour 10**: Smart sampling strategies
-    """
-    )
+    """)
     return
 
 

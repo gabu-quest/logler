@@ -65,8 +65,11 @@ def test_rust_hierarchy_roots_bottleneck_and_errors(tmp_path):
 
     bottleneck = hierarchy.get("bottleneck")
     assert bottleneck is not None
-    assert bottleneck.get("node_id") == "span-root"
-    assert abs(bottleneck.get("percentage", 0.0) - 100.0) < 0.1
+    # span-child has highest self-time: 700ms (no children)
+    # span-root self-time: 1000ms - 700ms = 300ms
+    assert bottleneck.get("node_id") == "span-child"
+    # 700ms / 1000ms total = 70%
+    assert abs(bottleneck.get("percentage", 0.0) - 70.0) < 0.1
 
     error_nodes = hierarchy.get("error_nodes", [])
     assert set(error_nodes) == {"span-child"}
