@@ -78,11 +78,18 @@ hierarchy = investigator.build_hierarchy("req-001")
 results = investigate.search(
     files=["app.log"],
     query="database connection failed",
-    level="ERROR",              # Filter by level
-    thread_id="worker-1",       # Filter by thread
-    correlation_id="req-001",   # Filter by correlation ID
+    level="ERROR,WARN",             # Comma-separated levels
+    exclude_level="DEBUG",          # Exclude verbose entries
+    exclude_query="health",         # Exclude health checks
+    thread_id="worker-1,worker-2",  # Multiple threads (OR)
+    correlation_id="req-001",       # Filter by correlation ID
+    service_name="api-gateway",     # Filter by service
     limit=100,
-    context_lines=3             # Include 3 lines before/after
+    tail=20,                        # Last 20 by timestamp
+    time_start="2024-01-15T10:00:00Z",  # Time range
+    time_end="2024-01-15T11:00:00Z",
+    context_lines=3,                # Include 3 lines before/after
+    fields=["timestamp", "level", "message"],  # Project fields
 )
 ```
 
@@ -169,6 +176,34 @@ context = investigate.get_context(
     lines_before=10,
     lines_after=10
 )
+```
+
+### 5. `extract_ids()` - Discover IDs and services
+
+```python
+ids = investigate.extract_ids(
+    files=["app.log"],
+    time_start="2024-01-15T10:00:00Z",  # Optional time range
+    time_end="2024-01-15T11:00:00Z",
+)
+```
+
+**Output:**
+```json
+{
+  "thread_ids": [
+    {"id": "worker-1", "count": 1234, "first_seen": "...", "last_seen": "..."}
+  ],
+  "correlation_ids": [
+    {"id": "req-abc123", "count": 8}
+  ],
+  "trace_ids": [],
+  "services": [
+    {"id": "api-gateway", "count": 2000}
+  ],
+  "total_entries": 5000,
+  "time_range": {"start": "...", "end": "..."}
+}
 ```
 
 ## 📊 Example Investigation Workflow

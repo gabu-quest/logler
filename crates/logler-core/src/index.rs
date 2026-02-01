@@ -30,6 +30,8 @@ pub struct LogIndex {
     pub trace_index: HashMap<String, Vec<usize>>,
     /// Log level -> line numbers
     pub level_index: HashMap<LogLevel, Vec<usize>>,
+    /// Service name -> line numbers
+    pub service_index: HashMap<String, Vec<usize>>,
     /// All parsed entries (optional, for small files)
     pub entries: Option<Vec<LogEntry>>,
 }
@@ -85,6 +87,7 @@ impl LogIndex {
         let correlation_index = DashMap::new();
         let trace_index = DashMap::new();
         let level_index = DashMap::new();
+        let service_index = DashMap::new();
 
         entries.par_iter().for_each(|entry| {
             if let Some(ref thread_id) = entry.thread_id {
@@ -111,6 +114,12 @@ impl LogIndex {
                     .or_insert_with(Vec::new)
                     .push(entry.line_number);
             }
+            if let Some(ref service_name) = entry.service_name {
+                service_index
+                    .entry(service_name.clone())
+                    .or_insert_with(Vec::new)
+                    .push(entry.line_number);
+            }
         });
 
         Ok(Self {
@@ -120,6 +129,7 @@ impl LogIndex {
             correlation_index: correlation_index.into_iter().collect(),
             trace_index: trace_index.into_iter().collect(),
             level_index: level_index.into_iter().collect(),
+            service_index: service_index.into_iter().collect(),
             entries: Some(entries),
         })
     }

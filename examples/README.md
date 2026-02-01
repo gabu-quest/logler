@@ -18,7 +18,8 @@ examples/
 │   ├── tour_10_sampling.py
 │   ├── tour_12_multi_file_interleaving.py
 │   ├── tour_13_live_watching.py
-│   └── tour_14_performance.py
+│   ├── tour_14_performance.py
+│   └── tour_15_filtering.py
 └── logs/               # Sample log files for tours
 ```
 
@@ -48,6 +49,7 @@ uv run marimo edit examples/tours/tour_01_fundamentals.py
 | 12 | Multi-File | Load 5+ services, cross-service timeline, distributed tracing |
 | 13 | Live Watching | Real-time tailing, anomaly detection, streaming |
 | 14 | Performance | 10K+ entries, benchmarks, token efficiency comparison |
+| 15 | Filtering | Multi-level, exclude patterns, tail, ids, service, max-bytes |
 
 Each tour is self-contained with sample data - no external files needed.
 

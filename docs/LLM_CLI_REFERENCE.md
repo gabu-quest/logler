@@ -21,6 +21,7 @@ logler llm search app.log --level ERROR --query "timeout"
 |------|---------|
 | "What's happening?" | `triage`, `summarize` |
 | "Find specific entries" | `search`, `sql` |
+| "Discover IDs/services" | `ids` |
 | "Follow a request" | `correlate`, `hierarchy` |
 | "Compare two things" | `compare`, `diff` |
 | "Performance issue" | `bottleneck`, `hierarchy` |
@@ -61,6 +62,8 @@ logler llm triage app.log --pretty
 - `--last DURATION` - Analyze last N duration (e.g., `30m`, `2h`, `1d`)
 - `--after TIMESTAMP` - Start timestamp (ISO8601)
 - `--before TIMESTAMP` - End timestamp (ISO8601)
+- `--service NAME` - Filter by service name (comma-separated)
+- `--max-bytes N` - Maximum output size in bytes (truncates results to fit)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -100,22 +103,31 @@ logler llm triage app.log --pretty
 
 ```bash
 logler llm search app.log --level ERROR
-logler llm search app.log --query "timeout" --level ERROR
+logler llm search app.log --query "timeout" --level ERROR,WARN
 logler llm search app.log --thread worker-1 --limit 50
 logler llm search app.log --correlation req-123
 logler llm search app.log --last 30m --level WARN
+logler llm search app.log --exclude-level DEBUG --tail 20
+logler llm search app.log --service api-gateway --fields timestamp,level,message
 ```
 
 **Options:**
-- `--level LEVEL` - Filter by log level (ERROR, WARN, INFO, DEBUG)
+- `--level LEVEL` - Filter by log level (comma-separated: `ERROR,WARN`)
+- `--exclude-level LEVEL` - Exclude log levels (comma-separated: `DEBUG,INFO`)
 - `--query PATTERN` - Regex pattern to match in message
-- `--thread ID` - Filter by thread ID
-- `--correlation ID` - Filter by correlation ID
+- `--exclude-query PATTERN` - Regex pattern to exclude from results
+- `--thread ID` - Filter by thread ID (comma-separated for multiple)
+- `--correlation ID` - Filter by correlation ID (comma-separated for multiple)
+- `--trace ID` - Filter by trace ID
+- `--service NAME` - Filter by service name (comma-separated)
 - `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
 - `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
 - `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
-- `--limit N` - Limit number of results
+- `--limit N` / `--head N` - Limit number of results (first N by relevance)
+- `--tail N` - Return last N entries by timestamp
+- `--fields LIST` - Comma-separated fields to include in output (e.g., `timestamp,level,message`)
 - `--context N` - Include N context lines around each match
+- `--max-bytes N` - Maximum output size in bytes (truncates results to fit)
 - `--include-raw/--no-raw` - Include raw log line (default: yes)
 - `--aggregate/--no-aggregate` - Include aggregations (default: yes)
 - `--pretty` - Pretty-print JSON output
@@ -155,6 +167,52 @@ logler llm search app.log --last 30m --level WARN
 
 ---
 
+### ids
+
+**Discover all unique IDs (threads, correlations, traces, services) in log files.**
+
+Useful for understanding what's in a log file before querying. Returns counts and time ranges for each ID.
+
+```bash
+logler llm ids app.log
+logler llm ids app.log --last 1h --type thread
+logler llm ids /var/log/*.log --pretty
+```
+
+**Options:**
+- `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
+- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
+- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
+- `--type TYPE` - Filter to specific ID type: `thread`, `correlation`, `trace`, `service`, `all` (default)
+- `--limit N` - Limit number of IDs per category
+- `--max-bytes N` - Maximum output size in bytes
+- `--pretty` - Pretty-print JSON output
+
+**Output:**
+```json
+{
+  "thread_ids": [
+    {"id": "worker-1", "count": 1234, "first_seen": "2024-01-15T10:00:00Z", "last_seen": "2024-01-15T11:00:00Z"},
+    {"id": "worker-2", "count": 987}
+  ],
+  "correlation_ids": [
+    {"id": "req-abc123", "count": 8}
+  ],
+  "trace_ids": [],
+  "services": [
+    {"id": "api-gateway", "count": 2000},
+    {"id": "user-service", "count": 1500}
+  ],
+  "total_entries": 5000,
+  "time_range": {
+    "start": "2024-01-15T10:00:00Z",
+    "end": "2024-01-15T11:00:00Z"
+  }
+}
+```
+
+---
+
 ### summarize
 
 **Generate a concise summary of log contents.**
@@ -163,13 +221,17 @@ Perfect for getting a quick overview before diving deeper.
 
 ```bash
 logler llm summarize app.log
-logler llm summarize app.log --focus errors
-logler llm summarize app.log --focus warnings
+logler llm summarize app.log --focus errors --last 1h
+logler llm summarize app.log --focus warnings --service api-gateway
 logler llm summarize *.log --pretty
 ```
 
 **Options:**
 - `--focus FOCUS` - What to focus on: `errors` (default), `all`, `warnings`
+- `--service NAME` - Filter by service name (comma-separated)
+- `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
+- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
+- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -211,14 +273,16 @@ Builds a complete timeline of all log entries matching the identifier.
 ```bash
 logler llm correlate req-abc123 --files "*.log"
 logler llm correlate trace-xyz789 --type trace_id
-logler llm correlate worker-1 --type thread_id --window 2h
+logler llm correlate worker-1 --type thread_id --last 2h
 ```
 
 **Options:**
 - `IDENTIFIER` - The ID to trace (required, positional)
 - `--files PATTERN` - Files to search (supports globs)
 - `--type TYPE` - Identifier type: `auto` (default), `correlation_id`, `trace_id`, `thread_id`
-- `--window DURATION` - Time window to search (default: `1h`)
+- `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
+- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
+- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -277,6 +341,9 @@ logler llm hierarchy span-001 --min-confidence 0.8
 - `--files PATTERN` - Files to search (supports globs)
 - `--max-depth N` - Maximum hierarchy depth
 - `--min-confidence FLOAT` - Minimum confidence for relationships (0.0-1.0)
+- `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
+- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
+- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -339,6 +406,9 @@ logler llm bottleneck req-001 --top-n 5 --threshold-ms 50
 - `--files PATTERN` - Files to search (supports globs)
 - `--threshold-ms N` - Minimum duration to consider (default: 100ms)
 - `--top-n N` - Number of top bottlenecks to return (default: 10)
+- `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
+- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
+- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -627,6 +697,12 @@ logler llm sample app.log --strategy head --size 20
   - `tail` - Last N entries
   - `edges` - Boundaries and transitions
 - `--size N` - Sample size (default: 100)
+- `--level LEVEL` - Filter by log level (comma-separated: `ERROR,WARN`)
+- `--exclude-level LEVEL` - Exclude log levels (comma-separated)
+- `--service NAME` - Filter by service name (comma-separated)
+- `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
+- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
+- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -760,13 +836,23 @@ Outputs one JSON object per line, suitable for piping to other tools.
 logler llm emit app.log --level ERROR | head -100
 logler llm emit app.log --query "timeout" --compact
 logler llm emit app.log --fields "timestamp,level,message"
+logler llm emit app.log --level ERROR,WARN --last 1h --limit 50
+logler llm emit app.log --exclude-level DEBUG --exclude-query "health"
 ```
 
 **Options:**
-- `--level LEVEL` - Filter by level
+- `--level LEVEL` - Filter by level (comma-separated: `ERROR,WARN`)
+- `--exclude-level LEVEL` - Exclude log levels (comma-separated)
 - `--query PATTERN` - Filter by pattern
+- `--exclude-query PATTERN` - Exclude entries matching regex pattern
+- `--service NAME` - Filter by service name (comma-separated)
 - `--fields LIST` - Comma-separated fields to include
 - `--compact` - Minimal JSON (short keys: `ln`, `ts`, `lv`, `msg`, `th`)
+- `--limit N` - Maximum number of entries to output
+- `--tail N` - Output last N entries by timestamp
+- `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
+- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
+- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
 
 **Output (one per line):**
 ```json
@@ -925,9 +1011,13 @@ logler llm summarize unknown.log
 ## Tips for AI Agents
 
 1. **Start with `triage`** - It gives severity, metrics, and next steps
-2. **Use `--pretty` during development** - Easier to read, but remove for production
-3. **Chain commands using exit codes** - Exit 0 = results found, 1 = no results
-4. **Use `sql` for complex aggregations** - Full DuckDB SQL power
-5. **Use `session` for multi-step investigations** - Track what you've already checked
-6. **`compare` is powerful** - Compare good vs bad requests to find differences
-7. **`emit` for streaming** - Process large files line by line
+2. **Use `ids` to discover** - Find all thread IDs, correlation IDs, and services before querying
+3. **Use `--pretty` during development** - Easier to read, but remove for production
+4. **Chain commands using exit codes** - Exit 0 = results found, 1 = no results
+5. **Use `--tail` for recent entries** - `--tail 10` gives the last 10 entries by timestamp
+6. **Use `--exclude-level` to reduce noise** - `--exclude-level DEBUG` removes verbose entries
+7. **Use `--max-bytes` to control output size** - Prevent overwhelming LLM context windows
+8. **Use `sql` for complex aggregations** - Full DuckDB SQL power
+9. **Use `session` for multi-step investigations** - Track what you've already checked
+10. **`compare` is powerful** - Compare good vs bad requests to find differences
+11. **`emit` for streaming** - Process large files line by line

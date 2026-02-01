@@ -387,3 +387,155 @@ class TestNoTruncation:
 
         finally:
             os.unlink(log_file)
+
+
+# =============================================================================
+# New filtering CLI tests
+# =============================================================================
+
+
+@pytest.fixture
+def filtering_cli_log():
+    """Create a log file with known counts for CLI filter testing.
+
+    80 entries: 4 levels × 2 services × 10 per combination.
+    - Levels: INFO (20), DEBUG (20), WARN (20), ERROR (20)
+    - Services: svc-x (40), svc-y (40)
+    - Threads: t-0, t-1 (40 each)
+    """
+    entries = []
+    idx = 0
+    for svc in ["svc-x", "svc-y"]:
+        for level in ["INFO", "DEBUG", "WARN", "ERROR"]:
+            for j in range(10):
+                entries.append(
+                    json.dumps(
+                        {
+                            "timestamp": f"2024-01-15T10:{idx // 60:02d}:{idx % 60:02d}Z",
+                            "level": level,
+                            "message": "health ping" if j == 0 else f"operation {idx}",
+                            "thread_id": f"t-{idx % 2}",
+                            "service_name": svc,
+                            "correlation_id": f"req-{idx % 5}",
+                        }
+                    )
+                )
+                idx += 1
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
+        f.write("\n".join(entries) + "\n")
+        f.flush()
+        yield f.name
+    os.unlink(f.name)
+
+
+class TestSearchMultiLevel:
+    """Test comma-separated --level via CLI."""
+
+    def test_multi_level_filter(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--level", "ERROR,WARN"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["summary"]["total_matches"] == 40
+
+    def test_single_level_filter(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--level", "ERROR"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["summary"]["total_matches"] == 20
+
+
+class TestSearchTail:
+    """Test --tail flag returns last N entries."""
+
+    def test_tail_returns_n(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--tail", "5"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert len(data["results"]) == 5
+        assert data["summary"]["total_matches"] == 80
+
+
+class TestSearchExclude:
+    """Test --exclude-level and --exclude-query flags."""
+
+    def test_exclude_level(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--exclude-level", "DEBUG"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["summary"]["total_matches"] == 60
+
+        for item in data["results"]:
+            entry = item.get("entry", item)
+            assert entry["level"] != "DEBUG"
+
+    def test_exclude_query(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--exclude-query", "health"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        # 8 entries have "health ping" (1 per level × service = 2 services × 4 levels)
+        assert data["summary"]["total_matches"] == 72
+
+
+class TestSearchFields:
+    """Test --fields projection."""
+
+    def test_fields_projection(self, filtering_cli_log):
+        result = run_llm_command(
+            [
+                "search",
+                filtering_cli_log,
+                "--level",
+                "ERROR",
+                "--limit",
+                "3",
+                "--fields",
+                "timestamp,level,message",
+            ]
+        )
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert len(data["results"]) == 3
+
+        for item in data["results"]:
+            entry = item.get("entry", item)
+            assert "timestamp" in entry
+            assert "level" in entry
+            assert "message" in entry
+            assert "thread_id" not in entry
+
+
+class TestIdsCommand:
+    """Test the ids CLI command."""
+
+    def test_ids_outputs_json(self, filtering_cli_log):
+        result = run_llm_command(["ids", filtering_cli_log])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["total_entries"] == 80
+        assert len(data["thread_ids"]) == 2
+        assert len(data["services"]) == 2
+
+    def test_ids_pretty(self, filtering_cli_log):
+        result = run_llm_command(["ids", filtering_cli_log, "--pretty"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["total_entries"] == 80
+
+
+class TestMaxBytesCLI:
+    """Test --max-bytes truncation via CLI."""
+
+    def test_max_bytes_truncates(self, filtering_cli_log):
+        result = run_llm_command(
+            [
+                "search",
+                filtering_cli_log,
+                "--max-bytes",
+                "500",
+            ]
+        )
+        assert result.returncode == EXIT_SUCCESS
+        raw = result.stdout.encode("utf-8")
+        assert len(raw) <= 600  # Some margin for final serialization
+        data = json.loads(result.stdout)
+        assert data.get("truncated") is True

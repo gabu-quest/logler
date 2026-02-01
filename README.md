@@ -140,7 +140,7 @@ print_waterfall(hierarchy, width=100)  # Waterfall timeline
 ```
 
 **📚 Complete LLM documentation:**
-- [LLM CLI Reference](docs/LLM_CLI_REFERENCE.md) - All 16 CLI commands for AI agents
+- [LLM CLI Reference](docs/LLM_CLI_REFERENCE.md) - All 17 CLI commands for AI agents
 - [Python API Guide](docs/LLM_README.md) - Library API and examples
 - [API Reference](docs/LLM_INVESTIGATION_API.md) - All investigation functions
 - [日本語ガイド](README.ja.md) - 完全なドキュメント
@@ -194,7 +194,7 @@ logler investigate app.log --thread worker-1 --hierarchy --max-depth 3   # Limit
 
 **LLM-first CLI (JSON output by default):**
 
-Designed for AI agents - 16 commands with structured JSON output, no truncation.
+Designed for AI agents - 17 commands with structured JSON output, no truncation.
 
 ```bash
 # Assessment & Overview
@@ -202,8 +202,13 @@ logler llm triage app.log --last 1h      # Quick severity assessment
 logler llm summarize app.log             # Concise summary with stats
 logler llm schema app.log                # Infer log structure
 
-# Search & Analysis
-logler llm search app.log --level ERROR  # Find entries (full results)
+# Discovery
+logler llm ids app.log                   # Find all thread/correlation/trace IDs
+
+# Search & Analysis (with filtering)
+logler llm search app.log --level ERROR,WARN --tail 20           # Last 20 errors/warnings
+logler llm search app.log --exclude-level DEBUG --service api    # Filter by service
+logler llm search app.log --exclude-query "health" --max-bytes 4000  # Budget-controlled
 logler llm sql "SELECT level, COUNT(*) FROM logs GROUP BY level" -f app.log
 
 # Request Tracing
@@ -221,7 +226,7 @@ logler llm context app.log 1523 --before 10 --after 10
 logler llm export trace-xyz --format jaeger
 ```
 
-See **[LLM CLI Reference](docs/LLM_CLI_REFERENCE.md)** for complete documentation of all 16 commands.
+See **[LLM CLI Reference](docs/LLM_CLI_REFERENCE.md)** for complete documentation of all 17 commands.
 
 ### Visualization Modes
 

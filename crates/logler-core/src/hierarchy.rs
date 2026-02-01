@@ -330,10 +330,7 @@ impl HierarchyBuilder {
         let timestamp_duration_ms = self.calculate_total_duration(&root_entries);
 
         // Also consider explicit durations on root nodes (may exceed timestamp range)
-        let root_explicit_duration_sum: i64 = roots
-            .iter()
-            .filter_map(|r| r.duration_ms)
-            .sum();
+        let root_explicit_duration_sum: i64 = roots.iter().filter_map(|r| r.duration_ms).sum();
 
         // Use the maximum to avoid >100% percentages in flamegraph
         let total_duration_ms = match (timestamp_duration_ms, root_explicit_duration_sum > 0) {
@@ -821,11 +818,7 @@ impl HierarchyBuilder {
 
         fn calculate_self_time(node: &SpanNode) -> i64 {
             let node_duration = node.duration_ms.unwrap_or(0);
-            let children_duration: i64 = node
-                .children
-                .iter()
-                .filter_map(|c| c.duration_ms)
-                .sum();
+            let children_duration: i64 = node.children.iter().filter_map(|c| c.duration_ms).sum();
             // Self-time is the node's duration minus its children's durations
             // Can be negative if timestamps are inconsistent, clamp to 0
             (node_duration - children_duration).max(0)

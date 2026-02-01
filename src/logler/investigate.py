@@ -184,15 +184,83 @@ def _normalize_context_payload(payload: Dict[str, Any]) -> None:
     _normalize_entries(payload.get("context_after", []))
 
 
+def _build_time_range(
+    after: Optional[str] = None,
+    before: Optional[str] = None,
+    last: Optional[str] = None,
+) -> Optional[Dict[str, str]]:
+    """Build a time_range dict from --after, --before, --last args.
+
+    Returns ``{"start": iso_str, "end": iso_str}`` or ``None``.
+    """
+    if last:
+        from datetime import timedelta
+
+        match = re.match(r"^(\d+)(s|m|h|d)$", last.lower())
+        if not match:
+            raise ValueError(f"Invalid duration: {last}")
+        value = int(match.group(1))
+        unit = match.group(2)
+        delta = {
+            "s": timedelta(seconds=value),
+            "m": timedelta(minutes=value),
+            "h": timedelta(hours=value),
+            "d": timedelta(days=value),
+        }[unit]
+        now = datetime.now().astimezone()
+        return {"start": (now - delta).isoformat(), "end": now.isoformat()}
+
+    result: Dict[str, str] = {}
+    if after:
+        result["start"] = datetime.fromisoformat(after.replace("Z", "+00:00")).isoformat()
+    if before:
+        result["end"] = datetime.fromisoformat(before.replace("Z", "+00:00")).isoformat()
+    return result if result else None
+
+
+_LEVEL_MAP = {
+    "trace": "Trace",
+    "debug": "Debug",
+    "info": "Info",
+    "warn": "Warn",
+    "warning": "Warn",
+    "error": "Error",
+    "fatal": "Fatal",
+    "critical": "Fatal",
+}
+
+
+def _parse_levels(level_str: str) -> List[str]:
+    """Parse a comma-separated level string into Rust-enum names."""
+    result = []
+    for part in level_str.split(","):
+        part = part.strip().lower()
+        if not part:
+            continue
+        mapped = _LEVEL_MAP.get(part)
+        if not mapped:
+            raise ValueError(f"Unknown log level: {part}")
+        result.append(mapped)
+    return result
+
+
 def search(
     files: List[str],
     query: Optional[str] = None,
     level: Optional[str] = None,
+    exclude_level: Optional[str] = None,
+    exclude_query: Optional[str] = None,
     thread_id: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    service_name: Optional[str] = None,
     limit: Optional[int] = None,
+    tail: Optional[int] = None,
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
     context_lines: int = 3,
     output_format: str = "full",
+    fields: Optional[List[str]] = None,
     parser_format: Optional[str] = None,
     custom_regex: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -202,55 +270,25 @@ def search(
     Args:
         files: List of log file paths
         query: Search query string
-        level: Filter by log level (ERROR, WARN, INFO, etc.)
-        thread_id: Filter by thread ID
-        correlation_id: Filter by correlation ID
-        limit: Maximum number of results
+        level: Filter by log level (comma-separated, e.g. "ERROR,WARN")
+        exclude_level: Exclude log levels (comma-separated)
+        exclude_query: Regex pattern to exclude matching entries
+        thread_id: Filter by thread ID (comma-separated for multi)
+        correlation_id: Filter by correlation ID (comma-separated for multi)
+        trace_id: Filter by trace ID (comma-separated for multi)
+        service_name: Filter by service name (comma-separated for multi)
+        limit: Maximum number of results (first N by relevance)
+        tail: Return last N matches by timestamp
+        time_start: Start of time range (ISO8601)
+        time_end: End of time range (ISO8601)
         context_lines: Number of context lines before/after each result
         output_format: Output format - "full", "summary", "count", or "compact"
-                      - "full": Complete log entries (default)
-                      - "summary": Aggregated summary with examples
-                      - "count": Just counts, no log content
-                      - "compact": Essential fields only (no raw logs)
+        fields: List of fields to include in output (projection)
+        parser_format: Optional log format hint
+        custom_regex: Optional custom parsing regex
 
     Returns:
-        Dictionary with search results (format depends on output_format):
-
-        For "full":
-        {
-            "results": [...],  # Full entries
-            "total_matches": 123,
-            "search_time_ms": 45
-        }
-
-        For "summary":
-        {
-            "total_matches": 123,
-            "unique_messages": 15,
-            "log_levels": {"ERROR": 100, "WARN": 23},
-            "top_messages": [
-                {"message": "...", "count": 50, "first_seen": "...", "last_seen": "..."},
-                ...
-            ],
-            "sample_entries": [...]  # 3-5 examples
-        }
-
-        For "count":
-        {
-            "total_matches": 123,
-            "by_level": {"ERROR": 100, "WARN": 23},
-            "by_file": {"app.log": 80, "api.log": 43},
-            "time_range": {"start": "...", "end": "..."}
-        }
-
-        For "compact":
-        {
-            "matches": [
-                {"time": "...", "level": "ERROR", "msg": "...", "thread": "..."},
-                ...
-            ],
-            "total": 123
-        }
+        Dictionary with search results (format depends on output_format)
     """
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
@@ -258,41 +296,74 @@ def search(
     investigator = logler_rs.PyInvestigator()
     _load_files_with_config(investigator, files, parser_format, custom_regex)
 
-    # Build query
-    filters = {"levels": []}
+    # Build filters
+    filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
     if level:
-        level_map = {
-            "trace": "Trace",
-            "debug": "Debug",
-            "info": "Info",
-            "warn": "Warn",
-            "warning": "Warn",
-            "error": "Error",
-            "fatal": "Fatal",
-            "critical": "Fatal",
-        }
-        normalized_level = level_map.get(level.lower())
-        if not normalized_level:
-            raise ValueError(f"Unknown log level: {level}")
-        filters["levels"] = [normalized_level]
-    if thread_id:
-        filters["thread_id"] = thread_id
-    if correlation_id:
-        filters["correlation_id"] = correlation_id
+        filters["levels"] = _parse_levels(level)
+    if exclude_level:
+        filters["exclude_levels"] = _parse_levels(exclude_level)
+    if exclude_query:
+        filters["exclude_pattern"] = exclude_query
 
-    query_dict = {
+    # ID filters — comma-separated → multi-value
+    if thread_id:
+        parts = [p.strip() for p in thread_id.split(",") if p.strip()]
+        if len(parts) == 1:
+            filters["thread_id"] = parts[0]
+        else:
+            filters["thread_ids"] = parts
+    if correlation_id:
+        parts = [p.strip() for p in correlation_id.split(",") if p.strip()]
+        if len(parts) == 1:
+            filters["correlation_id"] = parts[0]
+        else:
+            filters["correlation_ids"] = parts
+    if trace_id:
+        parts = [p.strip() for p in trace_id.split(",") if p.strip()]
+        if len(parts) == 1:
+            filters["trace_id"] = parts[0]
+        else:
+            filters["trace_ids"] = parts
+    if service_name:
+        parts = [p.strip() for p in service_name.split(",") if p.strip()]
+        if len(parts) == 1:
+            filters["service_name"] = parts[0]
+        else:
+            filters["service_names"] = parts
+
+    # Time range — push to Rust
+    if time_start or time_end:
+        tr: Dict[str, str] = {}
+        if time_start:
+            tr["start"] = time_start
+        if time_end:
+            tr["end"] = time_end
+        filters["time_range"] = tr
+
+    query_dict: Dict[str, Any] = {
         "files": files,
         "query": query,
         "filters": filters,
         "limit": limit,
         "context_lines": context_lines,
     }
+    if tail is not None:
+        query_dict["tail"] = tail
 
-    # Call Rust engine with the full query payload
+    # Call Rust engine
     result_json = investigator.search(json.dumps(query_dict))
     result = json.loads(result_json)
     _normalize_search_result_levels(result)
     _apply_custom_regex_to_results(result, custom_regex)
+
+    # Field projection
+    if fields and output_format == "full":
+        field_set = set(fields)
+        for item in result.get("results", []):
+            entry = item.get("entry", {})
+            keys_to_remove = [k for k in entry if k not in field_set]
+            for k in keys_to_remove:
+                del entry[k]
 
     # Transform based on output_format
     if output_format == "full":
@@ -305,6 +376,42 @@ def search(
         return _format_as_compact(result)
     else:
         return result
+
+
+def extract_ids(
+    files: List[str],
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Extract all unique IDs (thread, correlation, trace, service) from files.
+
+    Args:
+        files: List of log file paths
+        time_start: Optional start of time range (ISO8601)
+        time_end: Optional end of time range (ISO8601)
+
+    Returns:
+        Dictionary with thread_ids, correlation_ids, trace_ids, services,
+        total_entries, and time_range.
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    investigator = logler_rs.PyInvestigator()
+    investigator.load_files(files)
+
+    filters_json = None
+    if time_start or time_end:
+        f: Dict[str, Any] = {}
+        tr: Dict[str, str] = {}
+        if time_start:
+            tr["start"] = time_start
+        if time_end:
+            tr["end"] = time_end
+        f["time_range"] = tr
+        filters_json = json.dumps(f)
+
+    return json.loads(investigator.extract_ids(filters_json))
 
 
 def follow_thread(
@@ -1945,46 +2052,91 @@ class Investigator:
         self,
         query: Optional[str] = None,
         level: Optional[str] = None,
+        exclude_level: Optional[str] = None,
+        exclude_query: Optional[str] = None,
         thread_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        service_name: Optional[str] = None,
         limit: Optional[int] = None,
+        tail: Optional[int] = None,
+        time_start: Optional[str] = None,
+        time_end: Optional[str] = None,
         context_lines: int = 3,
     ) -> Dict[str, Any]:
         """Search loaded files."""
-        filters = {"levels": []}
+        filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
         if level:
-            level_map = {
-                "trace": "Trace",
-                "debug": "Debug",
-                "info": "Info",
-                "warn": "Warn",
-                "warning": "Warn",
-                "error": "Error",
-                "fatal": "Fatal",
-                "critical": "Fatal",
-            }
-            normalized_level = level_map.get(level.lower())
-            if not normalized_level:
-                raise ValueError(f"Unknown log level: {level}")
-            filters["levels"] = [normalized_level]
+            filters["levels"] = _parse_levels(level)
+        if exclude_level:
+            filters["exclude_levels"] = _parse_levels(exclude_level)
+        if exclude_query:
+            filters["exclude_pattern"] = exclude_query
         if thread_id:
-            filters["thread_id"] = thread_id
+            parts = [p.strip() for p in thread_id.split(",") if p.strip()]
+            if len(parts) == 1:
+                filters["thread_id"] = parts[0]
+            else:
+                filters["thread_ids"] = parts
         if correlation_id:
-            filters["correlation_id"] = correlation_id
+            parts = [p.strip() for p in correlation_id.split(",") if p.strip()]
+            if len(parts) == 1:
+                filters["correlation_id"] = parts[0]
+            else:
+                filters["correlation_ids"] = parts
+        if trace_id:
+            parts = [p.strip() for p in trace_id.split(",") if p.strip()]
+            if len(parts) == 1:
+                filters["trace_id"] = parts[0]
+            else:
+                filters["trace_ids"] = parts
+        if service_name:
+            parts = [p.strip() for p in service_name.split(",") if p.strip()]
+            if len(parts) == 1:
+                filters["service_name"] = parts[0]
+            else:
+                filters["service_names"] = parts
+        if time_start or time_end:
+            tr: Dict[str, str] = {}
+            if time_start:
+                tr["start"] = time_start
+            if time_end:
+                tr["end"] = time_end
+            filters["time_range"] = tr
 
-        query_dict = {
+        query_dict: Dict[str, Any] = {
             "files": self._files,
             "query": query,
             "filters": filters,
             "limit": limit,
             "context_lines": context_lines,
         }
+        if tail is not None:
+            query_dict["tail"] = tail
 
         result_json = self._investigator.search(json.dumps(query_dict))
         result = json.loads(result_json)
         _normalize_search_result_levels(result)
         _apply_custom_regex_to_results(result, self._custom_regex)
         return result
+
+    def extract_ids(
+        self,
+        time_start: Optional[str] = None,
+        time_end: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Extract all unique IDs from loaded files."""
+        filters_json = None
+        if time_start or time_end:
+            f: Dict[str, Any] = {}
+            tr: Dict[str, str] = {}
+            if time_start:
+                tr["start"] = time_start
+            if time_end:
+                tr["end"] = time_end
+            f["time_range"] = tr
+            filters_json = json.dumps(f)
+        return json.loads(self._investigator.extract_ids(filters_json))
 
     def follow_thread(
         self,
