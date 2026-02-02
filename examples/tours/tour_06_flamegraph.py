@@ -7,12 +7,14 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Flamegraph Visualization
 
     Flamegraphs are powerful visualizations for understanding performance.
@@ -27,18 +29,21 @@ def _(mo):
     5. Comparing flamegraphs
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Performance Trace Data
 
     We'll create a trace with multiple nested operations
     where some are much slower than others.
-    """)
+    """
+    )
     return
 
 
@@ -202,11 +207,13 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Building the Hierarchy
 
     First, let's build the hierarchy that we'll visualize.
-    """)
+    """
+    )
     return
 
 
@@ -214,6 +221,7 @@ def _(mo):
 def _():
     from logler.investigate import follow_thread_hierarchy
     from logler.tree_formatter import format_flamegraph, format_tree, format_waterfall
+
     return (
         follow_thread_hierarchy,
         format_flamegraph,
@@ -242,12 +250,14 @@ def _(follow_thread_hierarchy, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Creating a Flamegraph
 
     The flamegraph shows the call hierarchy where **width = time spent**.
     Wider bars mean more time was spent in that operation.
-    """)
+    """
+    )
     return
 
 
@@ -261,11 +271,13 @@ def _(format_flamegraph, hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Interpreting the Flamegraph
 
     Key insights from the flamegraph above:
-    """)
+    """
+    )
     return
 
 
@@ -318,14 +330,16 @@ def _(hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Comparing with Other Visualizations
 
     Flamegraphs complement tree and waterfall views:
     - **Tree**: Shows structure and hierarchy
     - **Waterfall**: Shows timing sequence
     - **Flamegraph**: Shows time distribution
-    """)
+    """
+    )
     return
 
 
@@ -349,7 +363,8 @@ def _(format_waterfall, hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. When to Use Flamegraphs
 
     **Use Flamegraphs when:**
@@ -361,13 +376,15 @@ def _(mo):
     **Flamegraph vs Waterfall:**
     - Waterfall shows *when* things happened (sequence)
     - Flamegraph shows *how much time* each took (proportion)
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned how to use flamegraph visualizations:
@@ -385,7 +402,8 @@ def _(mo):
     **Next Steps:**
     - **Tour 07**: Error flow analysis
     - **Tour 08**: Comparison & diffing
-    """)
+    """
+    )
     return
 
 

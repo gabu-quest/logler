@@ -7,12 +7,14 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Performance at Scale
 
     **Benchmark the Rust backend on a realistic dataset.**
@@ -28,7 +30,8 @@ def _(mo):
     2. Benchmark indexing speed
     3. Benchmark search operations
     4. Compare output formats (token efficiency)
-    """)
+    """
+    )
     return
 
 
@@ -50,7 +53,8 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Generate 10,000 Log Entries
 
     We'll create a realistic log file with:
@@ -58,7 +62,8 @@ def _(mo):
     - 50 unique thread IDs
     - 100 unique correlation IDs
     - Realistic message patterns
-    """)
+    """
+    )
     return
 
 
@@ -166,11 +171,13 @@ def _(Path, datetime, json, random, temp_dir, time, timedelta, timezone):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Benchmark Indexing Speed
 
     This is where the Rust backend shines. Watch how fast it indexes 10,000 entries!
-    """)
+    """
+    )
     return
 
 
@@ -204,11 +211,13 @@ def _(large_log, time):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Benchmark Search Operations
 
     Now let's see how fast searches are on the indexed data!
-    """)
+    """
+    )
     return
 
 
@@ -264,11 +273,13 @@ def _(inv, time):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Output Format Comparison (Token Efficiency)
 
     For LLM agents, token count matters! Let's compare output formats.
-    """)
+    """
+    )
     return
 
 
@@ -316,6 +327,7 @@ def _(large_log):
 
         def count_tokens(obj):
             return len(enc.encode(json_mod.dumps(obj)))
+
     except ImportError:
         # Fallback to char/4 estimate if tiktoken not installed
         def count_tokens(obj):
@@ -332,9 +344,11 @@ def _(large_log):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Performance Summary
-    """)
+    """
+    )
     return
 
 
@@ -374,7 +388,8 @@ def _(
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've seen Logler's performance at scale:
@@ -395,7 +410,8 @@ def _(mo):
     - Zero-copy parsing where possible
 
     Use these benchmarks to set expectations for your environment.
-    """)
+    """
+    )
     return
 
 

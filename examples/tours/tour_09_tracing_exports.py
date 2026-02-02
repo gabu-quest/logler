@@ -7,12 +7,14 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Distributed Tracing Exports
 
     Logler can export hierarchies to standard distributed tracing formats:
@@ -28,17 +30,20 @@ def _(mo):
     4. How to import into tracing UIs
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Trace Data
 
     We'll create a multi-service trace to export.
-    """)
+    """
+    )
     return
 
 
@@ -150,17 +155,20 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Building the Hierarchy
 
     First, build the hierarchy from the logs.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _():
     from logler.investigate import follow_thread_hierarchy, export_to_jaeger, export_to_zipkin
+
     return export_to_jaeger, export_to_zipkin, follow_thread_hierarchy
 
 
@@ -176,12 +184,14 @@ def _(follow_thread_hierarchy, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Exporting to Jaeger Format
 
     Jaeger is a popular distributed tracing platform.
     The export follows Jaeger's JSON format specification.
-    """)
+    """
+    )
     return
 
 
@@ -220,7 +230,8 @@ def _(jaeger_trace):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Jaeger Export Structure
 
     The Jaeger format includes:
@@ -228,7 +239,8 @@ def _(mo):
     - **spans**: Array of span objects
     - **processes**: Service metadata
     - **references**: Parent-child relationships
-    """)
+    """
+    )
     return
 
 
@@ -244,12 +256,14 @@ def _(jaeger_trace):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Exporting to Zipkin Format
 
     Zipkin uses a different format - an array of spans
     with direct parentId references.
-    """)
+    """
+    )
     return
 
 
@@ -285,7 +299,8 @@ def _(zipkin_spans):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Zipkin Export Structure
 
     Zipkin format is simpler - just an array of spans:
@@ -294,7 +309,8 @@ def _(mo):
     - **parentId**: Direct parent reference (optional)
     - **localEndpoint**: Service info
     - **tags**: Metadata
-    """)
+    """
+    )
     return
 
 
@@ -310,7 +326,8 @@ def _(zipkin_spans):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. How to Import
 
     **Jaeger:**
@@ -332,15 +349,18 @@ def _(mo):
          -H 'Content-Type: application/json' \
          -d @spans.json
     ```
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 8. Saving Exports to Files
-    """)
+    """
+    )
     return
 
 
@@ -365,7 +385,8 @@ def _(jaeger_trace, temp_dir, zipkin_spans):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned how to export traces:
@@ -388,7 +409,8 @@ def _(mo):
     **Next Steps:**
     - **Tour 10**: Smart sampling strategies
     - **Tour 11**: AI-powered insights
-    """)
+    """
+    )
     return
 
 

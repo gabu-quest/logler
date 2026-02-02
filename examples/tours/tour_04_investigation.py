@@ -7,12 +7,14 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Investigation Sessions
 
     When debugging complex issues, you need to track what you've already
@@ -27,17 +29,20 @@ def _(mo):
     6. SQL queries for quick aggregation
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. Setting Up - Sample Logs
 
     Let's create some logs to investigate:
-    """)
+    """
+    )
     return
 
 
@@ -125,18 +130,21 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Creating an Investigation Session
 
     An `InvestigationSession` tracks all your analysis steps,
     allowing you to review what you've done and undo if needed.
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _():
     from logler.investigate import InvestigationSession
+
     return (InvestigationSession,)
 
 
@@ -153,11 +161,13 @@ def _(InvestigationSession, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Conducting the Investigation
 
     Each operation is automatically tracked in the session history:
-    """)
+    """
+    )
     return
 
 
@@ -182,11 +192,13 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Viewing Investigation History
 
     See all the steps you've taken:
-    """)
+    """
+    )
     return
 
 
@@ -211,11 +223,13 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Undo/Redo Operations
 
     Made a wrong turn? Undo your last step:
-    """)
+    """
+    )
     return
 
 
@@ -244,11 +258,13 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Adding Notes
 
     Document your findings as you go:
-    """)
+    """
+    )
     return
 
 
@@ -269,11 +285,13 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. Saving and Loading Sessions
 
     Save your investigation to continue later:
-    """)
+    """
+    )
     return
 
 
@@ -312,11 +330,13 @@ def _(InvestigationSession, save_path):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 8. Generating Reports
 
     Summarize your investigation for documentation or sharing:
-    """)
+    """
+    )
     return
 
 
@@ -334,11 +354,13 @@ def _(session):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 9. SQL Queries for Aggregation
 
     Use SQL to summarize large logs quickly (powered by DuckDB).
-    """)
+    """
+    )
     return
 
 
@@ -366,7 +388,8 @@ def _(log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     You've learned how to use Investigation Sessions:
@@ -387,7 +410,8 @@ def _(mo):
 
     **Next Steps:**
     - **Tour 06**: Flamegraph visualization (performance analysis)
-    """)
+    """
+    )
     return
 
 

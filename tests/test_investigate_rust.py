@@ -56,5 +56,3 @@ def test_rust_follow_thread_has_duration(inv):
     assert timeline["unique_spans"]
     assert all(entry["correlation_id"] == SAMPLE_CORRELATION for entry in timeline["entries"])
     assert all(entry.get("service_name") for entry in timeline["entries"])
-
-

@@ -368,6 +368,7 @@ class TestInvestigatorClass:
         for entry in entries:
             assert entry["thread_id"] == "worker-0"
 
+
 class TestEmptyAndEdgeCaseFiles:
     """Edge case file handling."""
 
