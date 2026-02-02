@@ -147,6 +147,48 @@ class TestRealisticSyslog:
             assert entry["raw"] is not None
             assert len(entry["raw"]) > 10
 
+    def test_syslog_levels_not_all_unknown(self, syslog_file):
+        """BSD syslog entries should have inferred levels, not all UNKNOWN."""
+        result = search(files=[syslog_file], limit=200)
+        levels = [item["entry"]["level"] for item in result["results"]]
+        known_levels = [lv for lv in levels if lv is not None and lv != "UNKNOWN"]
+        # At least 20% of 150 entries should have meaningful levels
+        assert (
+            len(known_levels) >= 30
+        ), f"Expected >=30 entries with known levels, got {len(known_levels)}"
+
+    def test_syslog_auth_failures_are_error(self, syslog_file):
+        """Authentication failures should be classified as ERROR."""
+        result = search(files=[syslog_file], query="authentication failure", limit=200)
+        assert result["total_matches"] == 16
+        for item in result["results"]:
+            assert item["entry"]["level"] == "ERROR", (
+                f"Expected ERROR for auth failure, got {item['entry']['level']}: "
+                f"{item['entry']['message'][:80]}"
+            )
+
+    def test_syslog_oom_is_fatal(self, syslog_file):
+        """Out of memory kills should be classified as FATAL."""
+        result = search(files=[syslog_file], query="Out of memory", limit=200)
+        assert result["total_matches"] > 0
+        oom_entries = [
+            item
+            for item in result["results"]
+            if "Out of memory" in (item["entry"].get("message") or "")
+        ]
+        assert len(oom_entries) >= 7
+        for item in oom_entries:
+            assert item["entry"]["level"] == "FATAL"
+
+    def test_syslog_format_detected(self, syslog_file):
+        """BSD syslog lines should be detected as Syslog format, not PlainText."""
+        result = search(files=[syslog_file], limit=10)
+        for item in result["results"]:
+            assert item["entry"]["format"] == "Syslog", (
+                f"Expected Syslog format, got {item['entry']['format']}: "
+                f"{item['entry']['raw'][:80]}"
+            )
+
 
 class TestRealisticHDFS:
     """Verify parsing of HDFS plaintext logs."""
