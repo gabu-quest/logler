@@ -7,12 +7,14 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     # Logler Tour: Hierarchy Visualization
 
     Complex distributed systems create hierarchical execution patterns.
@@ -26,13 +28,15 @@ def _(mo):
     5. Detecting bottlenecks and errors
 
     Let's dive in!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 1. OpenTelemetry Field Conventions
 
     Logler follows **OpenTelemetry** conventions for distributed tracing.
@@ -48,13 +52,15 @@ def _(mo):
 
     **Important:** Without `operation_name`, the tree shows raw span IDs like
     "span-root" which isn't helpful. Always add descriptive operation names!
-    """)
+    """
+    )
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 2. Creating Sample Trace Data
 
     We'll simulate a dashboard request that:
@@ -62,7 +68,8 @@ def _(mo):
     - Fetches user data (with a DB query and cache lookup)
     - Fetches metrics (with a SLOW aggregation - our bottleneck)
     - Has an ERROR in the notification service
-    """)
+    """
+    )
     return
 
 
@@ -236,12 +243,14 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 3. Building the Hierarchy
 
     Use `Investigator.build_hierarchy(trace_id)` to reconstruct
     parent-child relationships from `span_id` and `parent_span_id` fields.
-    """)
+    """
+    )
     return
 
 
@@ -249,6 +258,7 @@ def _(mo):
 def _():
     from logler.investigate import Investigator, get_hierarchy_summary
     from logler.tree_formatter import format_tree, format_waterfall
+
     return Investigator, format_tree, format_waterfall, get_hierarchy_summary
 
 
@@ -275,12 +285,14 @@ def _(Investigator, log_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 4. Tree Visualization
 
     The tree view shows the hierarchical structure. Notice how nodes
     display the `operation_name` we provided, not raw span IDs!
-    """)
+    """
+    )
     return
 
 
@@ -304,7 +316,8 @@ def _(format_tree, hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 5. Waterfall Diagram
 
     The waterfall shows **when** each span started and **how long** it took.
@@ -312,7 +325,8 @@ def _(mo):
     - Parallelism (spans starting at the same time)
     - Bottlenecks (wide bars)
     - Sequential dependencies
-    """)
+    """
+    )
     return
 
 
@@ -327,12 +341,14 @@ def _(format_waterfall, hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 6. Detecting Bottlenecks
 
     Logler automatically identifies the slowest span. In our trace,
     it should find the "Metrics Aggregation" span (180ms).
-    """)
+    """
+    )
     return
 
 
@@ -356,12 +372,14 @@ def _(hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 7. Error Detection
 
     Logler tracks which nodes have errors. In our trace, the
     "Notification DB Query" span has an ERROR level log.
-    """)
+    """
+    )
     return
 
 
@@ -388,11 +406,13 @@ def _(hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## 8. Hierarchy Summary
 
     Get a text summary suitable for reports or LLM context:
-    """)
+    """
+    )
     return
 
 
@@ -405,13 +425,14 @@ def _(get_hierarchy_summary, hierarchy):
 
 @app.cell
 def _(mo):
-    mo.md(r"""
+    mo.md(
+        r"""
     ## Summary
 
     **OpenTelemetry Fields for Hierarchy:**
     - `trace_id` - Groups all spans in a distributed trace
     - `span_id` - Unique identifier for each operation
-    - `parent_span_id` - Links child spans to parentswe n
+    - `parent_span_id` - Links child spans to parents
     - `operation_name` - **Human-readable label** (use this for nice output!)
     - `duration_ms` - Time taken by this span
 
@@ -430,7 +451,8 @@ def _(mo):
     - **Tour 04**: Investigation sessions
     - **Tour 05**: Pattern detection
     - **Tour 06**: Flamegraph visualization
-    """)
+    """
+    )
     return
 
 

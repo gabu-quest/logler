@@ -109,6 +109,13 @@ logler llm search app.log --correlation req-123
 logler llm search app.log --last 30m --level WARN
 logler llm search app.log --exclude-level DEBUG --tail 20
 logler llm search app.log --service api-gateway --fields timestamp,level,message
+
+# Token optimization
+logler llm search app.log --count-only                 # Just the count
+logler llm search app.log --metadata-only              # Aggregations only
+logler llm search app.log --compact --limit 50         # Short field names
+logler llm search app.log --offset 50 --limit 25       # Pagination (page 3)
+logler llm search app.log --after=-1h --before=-30m    # Relative time window
 ```
 
 **Options:**
@@ -120,17 +127,30 @@ logler llm search app.log --service api-gateway --fields timestamp,level,message
 - `--correlation ID` - Filter by correlation ID (comma-separated for multiple)
 - `--trace ID` - Filter by trace ID
 - `--service NAME` - Filter by service name (comma-separated)
-- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
-- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
+- `--after TIME` - Only entries after this time (ISO8601 or relative: `-1h`, `-30m`)
+- `--before TIME` - Only entries before this time (ISO8601 or relative: `-1h`, `-30m`)
 - `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
 - `--limit N` / `--head N` - Limit number of results (first N by relevance)
 - `--tail N` - Return last N entries by timestamp
+- `--offset N` - Skip first N results (for pagination, use with `--limit`)
+- `--count-only` - Return only match count, no results array
+- `--compact` - Use short field names (`ts`/`lv`/`msg`/`svc`/`th`/`cid`/`trc`)
+- `--metadata-only` - Return aggregations only, no results array
 - `--fields LIST` - Comma-separated fields to include in output (e.g., `timestamp,level,message`)
 - `--context N` - Include N context lines around each match
 - `--max-bytes N` - Maximum output size in bytes (truncates results to fit)
 - `--include-raw/--no-raw` - Include raw log line (default: yes)
 - `--aggregate/--no-aggregate` - Include aggregations (default: yes)
 - `--pretty` - Pretty-print JSON output
+
+**Pagination Pattern:**
+```bash
+# Page 1: first 25 results
+logler llm search app.log --limit 25 --offset 0
+# Page 2: results 26-50
+logler llm search app.log --limit 25 --offset 25
+# Check has_more in summary to know if more pages exist
+```
 
 **Output:**
 ```json
@@ -144,7 +164,10 @@ logler llm search app.log --service api-gateway --fields timestamp,level,message
   },
   "summary": {
     "total_matches": 15,
-    "files_searched": 1
+    "returned": 15,
+    "files_searched": 1,
+    "offset": 0,
+    "has_more": false
   },
   "results": [
     {
@@ -230,8 +253,9 @@ logler llm summarize *.log --pretty
 - `--focus FOCUS` - What to focus on: `errors` (default), `all`, `warnings`
 - `--service NAME` - Filter by service name (comma-separated)
 - `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
-- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
-- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
+- `--after TIME` - Only entries after this time (ISO8601 or relative: `-1h`, `-30m`)
+- `--before TIME` - Only entries before this time (ISO8601 or relative: `-1h`, `-30m`)
+- `--max-bytes N` - Maximum output size in bytes (truncates results to fit)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -281,8 +305,9 @@ logler llm correlate worker-1 --type thread_id --last 2h
 - `--files PATTERN` - Files to search (supports globs)
 - `--type TYPE` - Identifier type: `auto` (default), `correlation_id`, `trace_id`, `thread_id`
 - `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
-- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
-- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
+- `--after TIME` - Only entries after this time (ISO8601 or relative: `-1h`)
+- `--before TIME` - Only entries before this time (ISO8601 or relative: `-30m`)
+- `--max-bytes N` - Maximum output size in bytes (truncates results to fit)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -342,8 +367,9 @@ logler llm hierarchy span-001 --min-confidence 0.8
 - `--max-depth N` - Maximum hierarchy depth
 - `--min-confidence FLOAT` - Minimum confidence for relationships (0.0-1.0)
 - `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
-- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
-- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
+- `--after TIME` - Only entries after this time (ISO8601 or relative: `-1h`)
+- `--before TIME` - Only entries before this time (ISO8601 or relative: `-30m`)
+- `--max-bytes N` - Maximum output size in bytes (truncates results to fit)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -407,8 +433,9 @@ logler llm bottleneck req-001 --top-n 5 --threshold-ms 50
 - `--threshold-ms N` - Minimum duration to consider (default: 100ms)
 - `--top-n N` - Number of top bottlenecks to return (default: 10)
 - `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
-- `--after TIMESTAMP` - Only entries after this timestamp (ISO8601)
-- `--before TIMESTAMP` - Only entries before this timestamp (ISO8601)
+- `--after TIME` - Only entries after this time (ISO8601 or relative: `-1h`)
+- `--before TIME` - Only entries before this time (ISO8601 or relative: `-30m`)
+- `--max-bytes N` - Maximum output size in bytes (truncates results to fit)
 - `--pretty` - Pretty-print JSON output
 
 **Output:**
@@ -1017,7 +1044,12 @@ logler llm summarize unknown.log
 5. **Use `--tail` for recent entries** - `--tail 10` gives the last 10 entries by timestamp
 6. **Use `--exclude-level` to reduce noise** - `--exclude-level DEBUG` removes verbose entries
 7. **Use `--max-bytes` to control output size** - Prevent overwhelming LLM context windows
-8. **Use `sql` for complex aggregations** - Full DuckDB SQL power
-9. **Use `session` for multi-step investigations** - Track what you've already checked
-10. **`compare` is powerful** - Compare good vs bad requests to find differences
-11. **`emit` for streaming** - Process large files line by line
+8. **Use `--count-only` first** - Estimate scope before fetching full results
+9. **Use `--offset` for pagination** - `--offset 50 --limit 25` = page 3
+10. **Use `--compact` to save tokens** - Short field names save ~15-20% output size
+11. **Use `--metadata-only` for aggregations** - Get level/service distributions without entries
+12. **Use `sql` for complex aggregations** - Full DuckDB SQL power
+13. **Use `session` for multi-step investigations** - Track what you've already checked
+14. **`compare` is powerful** - Compare good vs bad requests to find differences
+15. **`emit` for streaming** - Process large files line by line
+16. **Relative time in `--after`/`--before`** - `--after=-1h --before=-30m` for recent windows

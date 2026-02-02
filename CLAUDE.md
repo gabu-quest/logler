@@ -33,8 +33,8 @@ cp target/release/liblogler_rs.so \
 ## Test
 
 ```bash
-uv run pytest              # 650+ Python tests
-cargo test --workspace     # 20 Rust tests
+uv run pytest              # 680+ Python tests
+cargo test --workspace     # 26 Rust tests
 ```
 
 ## CLI
@@ -56,16 +56,28 @@ emit, export, session
 - Assert exact values, not types or existence
 - README contract tests (C02-C10) enforce public API examples
 
+## Search CLI Flags
+
+Key flags for `logler llm search`:
+- `--count-only` — Return only match count (no results array)
+- `--offset N` — Skip first N results (pagination)
+- `--compact` — Short field names (ts/lv/msg/svc/th/cid/trc)
+- `--metadata-only` — Aggregations only, no results
+- `--max-bytes N` — Truncate output to fit byte budget
+- `--after/-before` — Supports relative time: `--after=-1h --before=-30m`
+
+`--max-bytes` also available on: correlate, hierarchy, bottleneck, summarize.
+
 ## Log Formats Supported
 
-JSON (recommended), syslog (RFC 3164/5424), logfmt, plaintext, Apache CLF.
-Parser auto-detects format.
+JSON (recommended), syslog (RFC 3164/5424 + BSD), logfmt, plaintext, Apache CLF.
+Parser auto-detects format. BSD syslog without `<priority>` prefix uses
+pattern-based level inference (auth failures → ERROR, OOM → FATAL, etc.).
 
 ## Known Issues
 
-- Duration calculation ignores `duration_ms` field in hierarchy builder
-  -> bottleneck/waterfall/flamegraph show 0ms
 - Tour 12 duplicates entries when correlation_id AND trace_id match
+- Rust backend crashes with time_start/time_end on some log formats (BSD syslog)
 
 ## Key Dependencies
 

@@ -27,6 +27,8 @@ def _(mo):
     5. `--service` filtering
     6. `--max-bytes` budget control
     7. Combining filters for surgical precision
+    8. Token optimization: `--count-only`, `--offset`, `--compact`, `--metadata-only`
+    9. Relative time windows: `--after=-1h`, `--before=-30m`
     """
     )
     return
@@ -375,6 +377,51 @@ def _(search, LOG_FILE):
 def _(mo):
     mo.md(
         r"""
+    ## New: Token Optimization Flags (CLI)
+
+    The LLM CLI now has flags to reduce token usage:
+
+    - `--count-only` — Get match count without results
+    - `--offset N` — Pagination (skip first N results)
+    - `--compact` — Short field names (ts/lv/msg/th/cid/trc/svc)
+    - `--metadata-only` — Aggregations without results array
+    - `--after=-1h` / `--before=-30m` — Relative time windows
+
+    These are CLI-only features (use `logler llm search` in terminal).
+    The Python API provides equivalent functionality through its parameters.
+    """
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
+    ### Equivalent Python patterns for CLI features
+
+    ```bash
+    # CLI: logler llm search app.log --count-only
+    # Python: just use total_matches from result
+
+    # CLI: logler llm search app.log --offset 50 --limit 25
+    # Python: results = result['results'][50:75]
+
+    # CLI: logler llm search app.log --compact
+    # Python: use fields= to project only needed keys
+
+    # CLI: logler llm search app.log --metadata-only
+    # Python: just read total_matches and build aggregations from results
+    ```
+    """
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
     ## Summary
 
     | Feature | Syntax | Example |
@@ -388,6 +435,11 @@ def _(mo):
     | Field projection | `fields=[...]` | Limit output keys |
     | Max bytes | `_apply_max_bytes(data, N)` | Budget-controlled output |
     | ID discovery | `extract_ids(files)` | Find all IDs before querying |
+    | Count-only | `--count-only` (CLI) | Scope estimation |
+    | Pagination | `--offset N` (CLI) | Page through results |
+    | Compact | `--compact` (CLI) | Short field names |
+    | Metadata-only | `--metadata-only` (CLI) | Aggregations without entries |
+    | Relative time | `--after=-1h` (CLI) | Recent time windows |
     """
     )
     return
