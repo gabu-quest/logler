@@ -33,7 +33,7 @@ cp target/release/liblogler_rs.so \
 ## Test
 
 ```bash
-uv run pytest              # 618+ Python tests
+uv run pytest              # 650+ Python tests
 cargo test --workspace     # 20 Rust tests
 ```
 
@@ -63,8 +63,6 @@ Parser auto-detects format.
 
 ## Known Issues
 
-- Rust panics on malformed timestamp data during sort (NaN total_order)
-  -> `test_handles_messy_production_data` skips on this
 - Duration calculation ignores `duration_ms` field in hierarchy builder
   -> bottleneck/waterfall/flamegraph show 0ms
 - Tour 12 duplicates entries when correlation_id AND trace_id match

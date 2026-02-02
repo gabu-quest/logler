@@ -88,11 +88,12 @@ impl Investigator {
             // Sort by relevance and timestamp
             all_results.sort_by(|a, b| {
                 b.relevance_score
-                    .partial_cmp(&a.relevance_score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .total_cmp(&a.relevance_score)
                     .then_with(|| match (&a.entry.timestamp, &b.entry.timestamp) {
                         (Some(t1), Some(t2)) => t1.cmp(t2),
-                        _ => std::cmp::Ordering::Equal,
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
                     })
             });
             if let Some(limit) = query.limit {
