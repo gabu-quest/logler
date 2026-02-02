@@ -80,7 +80,7 @@ class TestMultiLevelFilter:
 
         allowed = {lvl.strip().upper() for lvl in levels.split(",")}
         for item in result["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             assert entry["level"] in allowed
 
 
@@ -102,7 +102,7 @@ class TestExcludeLevel:
 
         excluded = {lvl.strip().upper() for lvl in exclude.split(",")}
         for item in result["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             assert entry["level"] not in excluded
 
 
@@ -117,7 +117,7 @@ class TestExcludeQuery:
         assert result_no_health["total_matches"] == 180
 
         for item in result_no_health["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             assert "health" not in entry["message"].lower()
 
 
@@ -136,13 +136,19 @@ class TestTail:
         assert timestamps[0] == "2024-01-15T10:03:10Z"
         assert timestamps[-1] == "2024-01-15T10:03:19Z"
 
+    def test_tail_wins_over_limit(self, filtering_log_file):
+        """When both tail and limit are set, tail wins."""
+        result = search(files=[filtering_log_file], tail=5, limit=3)
+        assert len(result["results"]) == 5
+        assert result["total_matches"] == 200
+
     def test_tail_with_level_filter(self, filtering_log_file):
         result = search(files=[filtering_log_file], level="ERROR", tail=5)
         assert len(result["results"]) == 5
         assert result["total_matches"] == 50
 
         for item in result["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             assert entry["level"] == "ERROR"
 
 
@@ -155,8 +161,8 @@ class TestServiceFilter:
         assert len(result["results"]) == 100
 
         for item in result["results"]:
-            entry = item.get("entry", item)
-            assert entry.get("service_name") == "svc-alpha"
+            entry = item["entry"]
+            assert entry["service_name"] == "svc-alpha"
 
     def test_other_service(self, filtering_log_file):
         result = search(files=[filtering_log_file], service_name="svc-beta", limit=200)
@@ -176,7 +182,7 @@ class TestMultiValueIds:
 
         allowed_threads = {"worker-0", "worker-1"}
         for item in result["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             assert entry["thread_id"] in allowed_threads
 
     def test_two_correlations(self, filtering_log_file):
@@ -189,7 +195,7 @@ class TestMultiValueIds:
 
         allowed = {"corr-0", "corr-1"}
         for item in result["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             assert entry["correlation_id"] in allowed
 
 
@@ -206,9 +212,21 @@ class TestFieldProjection:
         assert len(result["results"]) == 5
 
         for item in result["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             # Should have EXACTLY the requested fields — no more, no less
             assert set(entry.keys()) == {"timestamp", "level", "message"}
+
+    def test_fields_nonexistent_field(self, filtering_log_file):
+        """Requesting a nonexistent field returns only the fields that exist."""
+        result = search(
+            files=[filtering_log_file],
+            limit=3,
+            fields=["timestamp", "nonexistent_xyz"],
+        )
+        assert len(result["results"]) == 3
+        for item in result["results"]:
+            entry = item["entry"]
+            assert set(entry.keys()) == {"timestamp"}
 
 
 class TestMaxBytes:
@@ -249,6 +267,33 @@ class TestMaxBytes:
         assert result["total_matches"] == 1
         assert "truncated" not in result
 
+    def test_max_bytes_exactly_at_limit(self, filtering_log_file):
+        """Data at exact byte limit should NOT truncate."""
+        from logler.llm_cli import _apply_max_bytes
+
+        data = {
+            "results": [{"entry": {"message": "short"}}],
+            "total_matches": 1,
+        }
+        exact_size = len(json.dumps(data, default=str).encode("utf-8"))
+        result = _apply_max_bytes(data, exact_size)
+        assert "truncated" not in result
+        assert result["results"] == data["results"]
+
+    def test_max_bytes_zero_results(self, filtering_log_file):
+        """Tiny budget truncates to 0 results gracefully."""
+        from logler.llm_cli import _apply_max_bytes
+
+        data = {
+            "results": [{"entry": {"message": f"msg {i}"}} for i in range(10)],
+            "total_matches": 10,
+        }
+        result = _apply_max_bytes(data, 10)
+        assert result["truncated"] is True
+        assert len(result["results"]) == 0
+        assert result["truncated_at"] == 0
+        assert result["original_count"] == 10
+
 
 class TestCombinedFilters:
     """Test combining multiple filters."""
@@ -264,9 +309,9 @@ class TestCombinedFilters:
         assert result["total_matches"] == 25
 
         for item in result["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             assert entry["level"] == "ERROR"
-            assert entry.get("service_name") == "svc-alpha"
+            assert entry["service_name"] == "svc-alpha"
 
     def test_exclude_level_and_tail(self, filtering_log_file):
         result = search(
@@ -278,7 +323,7 @@ class TestCombinedFilters:
         assert result["total_matches"] == 100  # WARN + ERROR = 100
 
         for item in result["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             assert entry["level"] in ("WARN", "ERROR")
 
     def test_all_filters_combined(self, filtering_log_file):
@@ -301,7 +346,7 @@ class TestCombinedFilters:
         assert len(result["results"]) == 5
 
         for item in result["results"]:
-            entry = item.get("entry", item)
+            entry = item["entry"]
             assert entry["level"] in ("WARN", "ERROR")
             assert set(entry.keys()) == {"timestamp", "level", "message", "service_name"}
             assert "health" not in entry["message"].lower()

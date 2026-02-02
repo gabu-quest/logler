@@ -91,10 +91,9 @@ class TestSchemaCommand:
         assert result.returncode == EXIT_SUCCESS
 
         output = json.loads(result.stdout)
-        assert "files_analyzed" in output
-        assert "total_entries" in output
+        assert output["files_analyzed"] == 1
+        assert output["total_entries"] == 10
         assert "schema" in output
-        assert output["total_entries"] > 0
 
     def test_schema_json_output(self, sample_log_file):
         """Test that schema outputs valid JSON."""
@@ -154,6 +153,7 @@ class TestSearchCommand:
         assert "query" in output
         assert "summary" in output
         assert "results" in output
+        assert output["summary"]["total_matches"] == 10
 
 
 class TestSampleCommand:
@@ -465,8 +465,7 @@ class TestSearchExclude:
         assert data["summary"]["total_matches"] == 60
 
         for item in data["results"]:
-            entry = item.get("entry", item)
-            assert entry["level"] != "DEBUG"
+            assert item["level"] != "DEBUG"
 
     def test_exclude_query(self, filtering_cli_log):
         result = run_llm_command(["search", filtering_cli_log, "--exclude-query", "health"])
@@ -497,11 +496,10 @@ class TestSearchFields:
         assert len(data["results"]) == 3
 
         for item in data["results"]:
-            entry = item.get("entry", item)
-            assert "timestamp" in entry
-            assert "level" in entry
-            assert "message" in entry
-            assert "thread_id" not in entry
+            assert "timestamp" in item
+            assert "level" in item
+            assert "message" in item
+            assert "thread_id" not in item
 
 
 class TestIdsCommand:
@@ -539,3 +537,93 @@ class TestMaxBytesCLI:
         assert len(raw) <= 600  # Some margin for final serialization
         data = json.loads(result.stdout)
         assert data.get("truncated") is True
+
+
+# =============================================================================
+# CLI Smoke Suite
+# =============================================================================
+
+
+class TestCLISmokeSuite:
+    """Comprehensive CLI smoke tests using filtering_cli_log (80 entries)."""
+
+    def test_ids_command_structure(self, filtering_cli_log):
+        """ids returns valid JSON with exact counts."""
+        result = run_llm_command(["ids", filtering_cli_log])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["total_entries"] == 80
+        assert len(data["thread_ids"]) == 2
+        assert len(data["services"]) == 2
+        assert len(data["correlation_ids"]) == 5
+
+    def test_search_multi_level_tail(self, filtering_cli_log):
+        """--level ERROR,WARN --tail 5 returns last 5 of 40 matches."""
+        result = run_llm_command(
+            ["search", filtering_cli_log, "--level", "ERROR,WARN", "--tail", "5"]
+        )
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["summary"]["total_matches"] == 40
+        assert len(data["results"]) == 5
+
+    def test_search_exclude_level(self, filtering_cli_log):
+        """--exclude-level DEBUG removes 20 entries, leaving 60."""
+        result = run_llm_command(["search", filtering_cli_log, "--exclude-level", "DEBUG"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["summary"]["total_matches"] == 60
+
+    def test_search_service_filter(self, filtering_cli_log):
+        """--service svc-x returns 40 entries."""
+        result = run_llm_command(["search", filtering_cli_log, "--service", "svc-x"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["summary"]["total_matches"] == 40
+
+    def test_search_fields_projection(self, filtering_cli_log):
+        """--fields limits to exact key set."""
+        result = run_llm_command(
+            [
+                "search",
+                filtering_cli_log,
+                "--level",
+                "ERROR",
+                "--limit",
+                "3",
+                "--fields",
+                "timestamp,level",
+            ]
+        )
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert len(data["results"]) == 3
+        for item in data["results"]:
+            assert set(item.keys()) == {"timestamp", "level"}
+
+    def test_search_max_bytes_truncates(self, filtering_cli_log):
+        """--max-bytes truncates and reports metadata."""
+        result = run_llm_command(["search", filtering_cli_log, "--max-bytes", "2000"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["truncated"] is True
+        assert data["original_count"] == 80
+        assert 0 < data["truncated_at"] < 80
+        assert len(data["results"]) == data["truncated_at"]
+
+    def test_search_nonexistent_service(self, filtering_cli_log):
+        """Nonexistent service returns exit code 1."""
+        result = run_llm_command(["search", filtering_cli_log, "--service", "nonexistent"])
+        assert result.returncode == EXIT_NO_RESULTS
+
+    def test_triage_output_structure(self, filtering_cli_log):
+        """Triage returns metrics with exact error_count/rate."""
+        result = run_llm_command(["triage", filtering_cli_log])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        metrics = data["metrics"]
+        assert metrics["total_entries"] == 80
+        assert metrics["error_count"] == 20
+        assert metrics["error_rate"] == 0.25
+        assert metrics["log_levels"]["ERROR"] == 20
+        assert metrics["log_levels"]["INFO"] == 20
