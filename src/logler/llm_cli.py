@@ -111,6 +111,9 @@ def _apply_max_bytes(data: Dict[str, Any], max_bytes: int) -> Dict[str, Any]:
     data["truncated"] = True
     data["truncated_at"] = best
     data["original_count"] = original_count
+    # Update summary.returned if present so LLMs see consistent counts
+    if "summary" in data and isinstance(data["summary"], dict):
+        data["summary"]["returned"] = best
     return data
 
 
