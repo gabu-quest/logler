@@ -214,7 +214,6 @@ def investigate(
     )
     from rich.console import Console
     from rich.table import Table
-    from rich.panel import Panel
 
     console = Console()
     file_list = list(files)
@@ -228,15 +227,25 @@ def investigate(
 
         # Deprecated: Auto-insights mode
         if auto_insights:
-            console.print("[yellow]WARNING: --auto-insights is deprecated and has been removed.[/yellow]")
-            console.print("[dim]Use 'logler llm search --level ERROR' for error analysis instead.[/dim]")
+            console.print(
+                "[yellow]WARNING: --auto-insights is deprecated and has been removed.[/yellow]"
+            )
+            console.print(
+                "[dim]Use 'logler llm search --level ERROR' for error analysis instead.[/dim]"
+            )
             sys.exit(0)
 
         # Deprecated: Pattern detection mode
         elif patterns:
-            console.print("[yellow]WARNING: --patterns is deprecated and has been removed.[/yellow]")
-            console.print("[dim]Pattern detection requires specialized tools like Drain3 or LogMine.[/dim]")
-            console.print("[dim]Use 'logler llm search' with SQL grouping for similar results.[/dim]")
+            console.print(
+                "[yellow]WARNING: --patterns is deprecated and has been removed.[/yellow]"
+            )
+            console.print(
+                "[dim]Pattern detection requires specialized tools like Drain3 or LogMine.[/dim]"
+            )
+            console.print(
+                "[dim]Use 'logler llm search' with SQL grouping for similar results.[/dim]"
+            )
             sys.exit(0)
 
         # Thread/correlation following mode

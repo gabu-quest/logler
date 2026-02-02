@@ -559,24 +559,18 @@ impl Investigator {
 
     /// Extract all unique IDs (thread, correlation, trace, service) from loaded files
     pub fn extract_ids(&self, filters: Option<&SearchFilters>) -> anyhow::Result<IdsResult> {
-        let mut thread_map: HashMap<String, (usize, Option<DateTime<Utc>>, Option<DateTime<Utc>>)> =
-            HashMap::new();
-        let mut correlation_map: HashMap<
-            String,
-            (usize, Option<DateTime<Utc>>, Option<DateTime<Utc>>),
-        > = HashMap::new();
-        let mut trace_map: HashMap<String, (usize, Option<DateTime<Utc>>, Option<DateTime<Utc>>)> =
-            HashMap::new();
-        let mut service_map: HashMap<
-            String,
-            (usize, Option<DateTime<Utc>>, Option<DateTime<Utc>>),
-        > = HashMap::new();
+        type IdMap = HashMap<String, (usize, Option<DateTime<Utc>>, Option<DateTime<Utc>>)>;
+
+        let mut thread_map: IdMap = HashMap::new();
+        let mut correlation_map: IdMap = HashMap::new();
+        let mut trace_map: IdMap = HashMap::new();
+        let mut service_map: IdMap = HashMap::new();
 
         let mut total_entries = 0usize;
         let mut min_ts: Option<DateTime<Utc>> = None;
         let mut max_ts: Option<DateTime<Utc>> = None;
 
-        for (_file_path, index) in &self.indices {
+        for index in self.indices.values() {
             if let Some(entries) = &index.entries {
                 for entry in entries {
                     // Apply time filter if present
@@ -651,9 +645,7 @@ impl Investigator {
             }
         }
 
-        fn to_id_infos(
-            map: HashMap<String, (usize, Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
-        ) -> Vec<IdInfo> {
+        fn to_id_infos(map: IdMap) -> Vec<IdInfo> {
             let mut infos: Vec<IdInfo> = map
                 .into_iter()
                 .map(|(id, (count, first, last))| IdInfo {
