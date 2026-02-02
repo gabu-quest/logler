@@ -2,297 +2,170 @@
 
 ## Overview
 
-Logler is built with a modern, high-performance architecture that separates concerns between data processing (Rust) and presentation (Python/Web).
+Logler is a Rust-powered log investigation tool optimized for AI agents. It uses a three-tier architecture: Rust core engine, PyO3 bridge, and Python API/CLI.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         User Browser                         │
-│                    (HTMX + Alpine.js)                       │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTP/WebSocket
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    FastAPI Gateway (Python)                  │
-│  - Web UI serving                                           │
-│  - HTTP proxy to Rust backend                               │
-│  - HTMX partial rendering                                   │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTP/REST
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Rust Backend (Axum)                        │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │              logler-server (Web API)                  │  │
-│  │  - REST API endpoints                                 │  │
-│  │  - WebSocket real-time streaming                     │  │
-│  │  - File watching                                      │  │
-│  │  - State management                                   │  │
-│  └─────────────────────┬────────────────────────────────┘  │
-│                        │                                     │
-│  ┌─────────────────────▼────────────────────────────────┐  │
-│  │              logler-core (Library)                    │  │
-│  │                                                        │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │  │
-│  │  │   Parser     │  │    Reader    │  │  Thread    │ │  │
-│  │  │              │  │              │  │  Tracker   │ │  │
-│  │  │ - Format     │  │ - Async file │  │            │ │  │
-│  │  │   detection  │  │   reading    │  │ - Thread   │ │  │
-│  │  │ - JSON/Plain │  │ - Streaming  │  │   context  │ │  │
-│  │  │ - Regex      │  │ - Tail       │  │ - Trace    │ │  │
-│  │  │   extraction │  │              │  │   tracking │ │  │
-│  │  └──────────────┘  └──────────────┘  └────────────┘ │  │
-│  │                                                        │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │  │
-│  │  │   Filter     │  │    Stats     │  │   Types    │ │  │
-│  │  │              │  │              │  │            │ │  │
-│  │  │ - Level      │  │ - Aggregates │  │ - LogEntry │ │  │
-│  │  │ - Pattern    │  │ - Counts     │  │ - Level    │ │  │
-│  │  │ - Thread ID  │  │ - Error rate │  │ - Context  │ │  │
-│  │  │ - Trace ID   │  │              │  │            │ │  │
-│  │  └──────────────┘  └──────────────┘  └────────────┘ │  │
-│  └────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │              logler-cli (CLI Tool)                    │  │
-│  │  - Terminal interface                                 │  │
-│  │  - Uses logler-core directly                          │  │
-│  └──────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        Python Layer                               │
+│                                                                    │
+│  ┌─────────────────────┐  ┌──────────────────────────────────┐  │
+│  │   cli.py (Human)    │  │    llm_cli.py (LLM Agent)       │  │
+│  │                     │  │                                    │  │
+│  │  - view             │  │  - 17 JSON commands                │  │
+│  │  - stats            │  │  - Pagination, compact mode        │  │
+│  │  - investigate      │  │  - Max-bytes truncation            │  │
+│  │  - watch            │  │  - Consistent exit codes           │  │
+│  └─────────┬───────────┘  └────────────┬─────────────────────┘  │
+│            │                            │                          │
+│  ┌─────────▼────────────────────────────▼─────────────────────┐  │
+│  │              investigate.py (Python API)                     │  │
+│  │                                                              │  │
+│  │  - search(), follow_thread(), extract_ids()                  │  │
+│  │  - follow_thread_hierarchy(), get_metadata()                 │  │
+│  │  - cross_service_timeline(), smart_sample()                  │  │
+│  │  - InvestigationSession (stateful analysis)                  │  │
+│  └─────────────────────────┬────────────────────────────────┘  │
+│                              │                                     │
+│  ┌───────────────────────────▼────────────────────────────────┐  │
+│  │              logler_rs (PyO3 Bridge)                        │  │
+│  │                                                              │  │
+│  │  PyInvestigator: load_files(), search(), follow_thread()     │  │
+│  └───────────────────────────┬────────────────────────────────┘  │
+└──────────────────────────────┼────────────────────────────────────┘
+                               │ FFI
+┌──────────────────────────────▼────────────────────────────────────┐
+│                         Rust Core                                  │
+│                    (crates/logler-core)                            │
+│                                                                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
+│  │   parser.rs   │  │   index.rs   │  │   investigate.rs     │  │
+│  │               │  │              │  │                      │  │
+│  │  - Auto-      │  │  - File      │  │  - Search            │  │
+│  │    detect     │  │    indexing   │  │  - Thread follow     │  │
+│  │  - JSON       │  │  - Line      │  │  - ID extraction     │  │
+│  │  - Syslog     │  │    offsets   │  │  - Time filtering    │  │
+│  │  - Logfmt     │  │  - Parallel  │  │  - Context lines     │  │
+│  │  - Apache CLF │  │    loading   │  │                      │  │
+│  │  - PlainText  │  │              │  │                      │  │
+│  └──────────────┘  └──────────────┘  └──────────────────────┘  │
+│                                                                    │
+│  ┌──────────────┐  ┌──────────────────────────────────────────┐  │
+│  │  hierarchy.rs │  │               types.rs                   │  │
+│  │               │  │                                          │  │
+│  │  - Tree build │  │  LogEntry, LogLevel, LogFormat           │  │
+│  │  - duration_ms│  │  Thread/trace/correlation IDs            │  │
+│  │  - Bottleneck │  │  Hierarchy nodes                         │  │
+│  │  - Waterfall  │  │                                          │  │
+│  └──────────────┘  └──────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Components
 
-### 1. Rust Backend
+### Rust Core (`crates/logler-core`)
 
-#### logler-core (Library)
-The core parsing and analysis engine.
+The performance engine. All parsing, indexing, and searching happens here.
 
-**Modules:**
-- `parser.rs`: Log format detection and parsing
-  - Regex-based pattern matching
-  - JSON structured log parsing
-  - Multi-format support (JSON, plain, syslog, logfmt, Apache)
-  - Extraction of thread IDs, correlation IDs, trace IDs
+**parser.rs** — Log format detection and parsing
+- Auto-detects: JSON, Syslog (RFC 3164/5424 + BSD), logfmt, Apache CLF, plaintext
+- Extracts: timestamp, level, message, thread_id, correlation_id, trace_id, span_id, service_name
+- BSD syslog without `<priority>` uses pattern-based level inference
+- Custom regex support via named capture groups
 
-- `reader.rs`: Async file I/O
-  - Tokio-based async file reading
-  - Streaming support for large files
-  - Memory-efficient chunked reading
-  - Tail/head operations
+**index.rs** — File indexing with rayon parallel processing
 
-- `thread_tracker.rs`: Correlation tracking
-  - Thread context tracking
-  - Trace/span correlation
-  - Correlation ID mapping
-  - Temporal analysis
+**investigate.rs** — Search engine with multi-dimensional filtering
+- Level, pattern, thread, correlation, trace, service filters
+- Exclusion filters (exclude_level, exclude_pattern)
+- Time range filtering
+- Tail mode (last N by timestamp)
+- Context lines around matches
 
-- `filter.rs`: Log filtering
-  - Multi-dimensional filtering
-  - Regex pattern matching
-  - Time range filtering
+**hierarchy.rs** — Thread/span hierarchy builder
+- Explicit parent_span_id (OpenTelemetry)
+- Naming pattern inference (worker-1.task-a)
+- Temporal inference
+- Duration from explicit `duration_ms` fields or timestamp calculation
+- Bottleneck detection
 
-- `stats.rs`: Statistics computation
-  - Log level distribution
-  - Error rate calculation
-  - Service/thread aggregation
+### PyO3 Bridge (`crates/logler-py`)
 
-- `types.rs`: Core data structures
-  - `LogEntry`: Main log entry structure
-  - `LogLevel`, `LogFormat`: Enums
-  - `ThreadContext`, `TraceContext`: Correlation types
+Thin FFI layer exposing Rust functions to Python via PyO3/maturin.
+The compiled `.so` lives in the `logler_rs` package.
 
-#### logler-server (Web Server)
-REST API and WebSocket server.
+### Python API (`src/logler/investigate.py`)
 
-**Features:**
-- Axum web framework
-- REST endpoints for all operations
-- WebSocket for real-time streaming
-- File watching (notify crate)
-- In-memory caching (DashMap)
+Wraps Rust calls with Python ergonomics. Adds:
+- DuckDB SQL interface
+- Investigation sessions
+- Smart sampling strategies
+- Cross-service timeline
+- Report generation
 
-**API Endpoints:**
-- File operations: `/api/files/*`
-- Log operations: `/api/logs/*`
-- Thread tracking: `/api/threads/*`
-- Trace tracking: `/api/traces/*`
-- Correlation: `/api/correlations/*`
-- WebSocket: `/ws`
+### Human CLI (`src/logler/cli.py`)
 
-#### logler-cli (CLI Tool)
-Command-line interface for terminal usage.
+Rich terminal output for human users: `view`, `stats`, `investigate`, `watch`.
 
-**Commands:**
-- `view`: View log files
-- `search`: Search logs
-- `stats`: Show statistics
+### LLM CLI (`src/logler/llm_cli.py`)
 
-### 2. Python FastAPI Gateway
+17 JSON-output commands optimized for AI agents:
+- Assessment: `triage`, `summarize`
+- Search: `search`, `ids`, `schema`, `sample`
+- Tracing: `correlate`, `hierarchy`, `bottleneck`, `compare`
+- Analysis: `sql`, `verify-pattern`, `diff`, `context`
+- Utilities: `emit`, `export`, `session`
 
-**Responsibilities:**
-- Serve web UI (HTML/CSS/JS)
-- Proxy requests to Rust backend
-- HTMX partial rendering
-- Session management (future)
-
-**Stack:**
-- FastAPI for async web framework
-- Jinja2 for templating
-- httpx for HTTP client
-- Uvicorn for ASGI server
-
-### 3. Web Frontend
-
-**Technologies:**
-- HTMX for dynamic updates
-- Alpine.js for client-side state
-- TailwindCSS for styling
-- Native WebSocket API
-
-**Features:**
-- Real-time log streaming
-- Advanced filtering UI
-- Thread/trace visualization
-- Statistics dashboard
-- Auto-scrolling viewer
+Key features: `--count-only`, `--offset` pagination, `--compact` mode,
+`--metadata-only`, `--max-bytes` truncation, relative `--after`/`--before`.
 
 ## Data Flow
 
-### 1. Opening a Log File
-
+### Search Query
 ```
-Browser → FastAPI → Rust API → LogReader
-                              ↓
-                          Parse logs
-                              ↓
-                          Track threads/traces
-                              ↓
-                          Store in memory
-                              ↓
-Browser ← FastAPI ← JSON response
+CLI args → llm_cli.py → investigate.py → logler_rs (PyO3) → Rust search
+                                                                │
+                                                          Parse all files
+                                                          Apply filters
+                                                          Return JSON
+                                                                │
+CLI JSON ← llm_cli.py ← investigate.py ← logler_rs ←──────────┘
 ```
 
-### 2. Filtering Logs
-
+### Hierarchy Build
 ```
-Browser → FastAPI → Rust API → Apply filters
-                              ↓
-                          Filter in-memory cache
-                              ↓
-Browser ← FastAPI ← Filtered results
-```
-
-### 3. Real-time Streaming (Future)
-
-```
-Browser ←→ WebSocket ←→ Rust API
-                           ↓
-                      File watcher
-                           ↓
-                      New log lines
-                           ↓
-                      Parse & filter
-                           ↓
-Browser ←─── Push to WebSocket
+identifier → investigate.py → logler_rs → Rust hierarchy builder
+                                              │
+                                        Load files, find entries
+                                        Build parent-child tree
+                                        Calculate durations
+                                        Find bottleneck
+                                              │
+JSON tree ← investigate.py ← logler_rs ←─────┘
 ```
 
-## Performance Characteristics
+## Performance
 
-### Rust Backend
-- **Parsing speed**: ~1M lines/second (JSON logs)
-- **Memory usage**: O(n) where n = file size (streaming)
-- **Concurrency**: Async/await with Tokio runtime
-- **Thread safety**: Lock-free data structures (DashMap)
+- **Search**: <50ms for 1GB files (~20 GB/s throughput)
+- **Thread follow**: <20ms for 1GB files
+- **Hierarchy build**: <100ms for 1GB files
+- **Parallel indexing**: Uses rayon for multi-core file loading
 
-### Python Gateway
-- **Request latency**: <10ms (proxy overhead)
-- **Concurrent requests**: 1000+ (async httpx)
-- **Memory**: Minimal (stateless proxy)
+## Build & Test
 
-### Web Frontend
-- **Initial load**: <100KB (gzipped)
-- **DOM updates**: Incremental via HTMX
-- **WebSocket**: Binary protocol for efficiency
-
-## Scalability
-
-### Current Scale
-- File size: Tested up to 10GB
-- Concurrent users: 1000+ WebSocket connections
-- Log lines: Millions per file
-
-### Future Improvements
-- Distributed log aggregation
-- Multi-file support
-- Log indexing (ElasticSearch/Loki)
-- Persistent storage
-- Clustering
-
-## Security
-
-### Current Implementation
-- No authentication (local use)
-- CORS enabled (development)
-- Path traversal protection
-- Resource limits
-
-### Production Recommendations
-- Add authentication (JWT/OAuth)
-- Rate limiting
-- TLS/HTTPS
-- Sandboxing file access
-- Input sanitization
-
-## Deployment
-
-### Development
 ```bash
-make dev
+cargo build --release --all          # Build Rust
+uv sync --all-groups                  # Install Python deps
+cargo test --workspace                # 26 Rust tests
+uv run pytest                         # 680+ Python tests
 ```
 
-### Production
+After Rust changes, copy the `.so` manually:
 ```bash
-make build
-make run
+cp target/release/liblogler_rs.so \
+   .venv/lib/python3.12/site-packages/logler_rs/logler_rs.cpython-312-x86_64-linux-gnu.so
 ```
 
-### Docker
-```bash
-make docker-build
-make docker-up
-```
+## Key Dependencies
 
-## Technology Choices
-
-### Why Rust?
-- **Performance**: 100x faster than Python for parsing
-- **Memory safety**: No segfaults or memory leaks
-- **Concurrency**: Built-in async/await
-- **Type safety**: Catch errors at compile time
-
-### Why FastAPI?
-- **Rapid development**: Quick API prototyping
-- **Async support**: Non-blocking I/O
-- **OpenAPI**: Auto-generated docs
-- **Ecosystem**: Rich Python libraries
-
-### Why HTMX?
-- **Simplicity**: No build step required
-- **Progressive enhancement**: Works without JS
-- **Low overhead**: Minimal client-side code
-- **Server-driven**: UI logic in backend
-
-## Future Architecture
-
-### Planned Enhancements
-1. **Log aggregation**: Multi-file, multi-host support
-2. **Persistence**: SQLite/PostgreSQL backend
-3. **Indexing**: Full-text search
-4. **Alerting**: Real-time alerts on patterns
-5. **Plugins**: Custom parsers and formatters
-6. **Authentication**: Multi-user support
-7. **API tokens**: Programmatic access
-8. **Export**: CSV, JSON, Parquet
-9. **Integration**: Grafana, ElasticSearch, Loki
-10. **Machine learning**: Anomaly detection
+**Rust**: chrono, serde, regex, rayon (parallel), pyo3, uuid
+**Python**: click, rich, duckdb, pydantic, watchdog

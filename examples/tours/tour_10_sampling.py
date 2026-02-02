@@ -429,7 +429,7 @@ def _(mo):
     - Coverage metrics show what you're capturing
 
     **Next Steps:**
-    - **Tour 11**: AI-powered insights
+    - **Tour 12**: Multi-file interleaving
     """
     )
     return
@@ -441,6 +441,11 @@ def _(temp_dir):
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
+    return
+
+
+@app.cell
+def _():
     return
 
 

@@ -186,12 +186,7 @@ def _(session):
     # Step 3: Follow the correlation ID of the error
     print("Step 3: Following the failed request...")
     timeline = session.follow_thread(correlation_id="req-025")
-    print(f"  Found {timeline['total_entries']} entries for req-025\n")
-
-    # Step 4: Look for patterns
-    print("Step 4: Finding patterns...")
-    patterns = session.find_patterns(min_occurrences=2)
-    print(f"  Found {len(patterns.get('patterns', []))} patterns")
+    print(f"  Found {timeline['total_entries']} entries for req-025")
     return
 
 
@@ -414,7 +409,7 @@ def _(mo):
     - Generate reports of your investigation process
 
     **Next Steps:**
-    - **Tour 05**: Pattern detection (find recurring issues)
+    - **Tour 06**: Flamegraph visualization (performance analysis)
     """
     )
     return
@@ -426,6 +421,11 @@ def _(temp_dir):
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
+    return
+
+
+@app.cell
+def _():
     return
 
 

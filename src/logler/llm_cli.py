@@ -76,6 +76,121 @@ def _expand_globs(patterns: List[str]) -> List[str]:
     return sorted(set(files))
 
 
+def _apply_max_bytes(data: Dict[str, Any], max_bytes: int) -> Dict[str, Any]:
+    """Truncate results list to fit within max_bytes budget."""
+    serialized = json.dumps(data, default=str)
+    if len(serialized.encode("utf-8")) <= max_bytes:
+        return data
+
+    # Binary search for the right number of results to keep
+    results_key = None
+    for key in (
+        "results",
+        "entries",
+        "timeline",
+        "thread_ids",
+        "bottlenecks",
+        "errors",
+        "warnings",
+    ):
+        if key in data and isinstance(data[key], list):
+            results_key = key
+            break
+
+    if results_key is None:
+        return data
+
+    original_count = len(data[results_key])
+    lo, hi = 0, original_count
+    best = 0
+
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        trial = dict(data)
+        trial[results_key] = data[results_key][:mid]
+        # Include truncation metadata in size estimate (it will be in final output)
+        trial["truncated"] = True
+        trial["truncated_at"] = mid
+        trial["original_count"] = original_count
+        trial_size = len(json.dumps(trial, default=str).encode("utf-8"))
+        if trial_size <= max_bytes:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    data[results_key] = data[results_key][:best]
+    data["truncated"] = True
+    data["truncated_at"] = best
+    data["original_count"] = original_count
+    # Update summary.returned if present so LLMs see consistent counts
+    if "summary" in data and isinstance(data["summary"], dict):
+        data["summary"]["returned"] = best
+    return data
+
+
+def time_filter_options(f):
+    """Add --last, --after, --before to a command."""
+    f = click.option(
+        "--last", "last_duration", help="Only entries in last N duration (e.g., 30m, 2h)"
+    )(f)
+    f = click.option(
+        "--after", help="Only entries after this time (ISO8601 or relative: -1h, -30m)"
+    )(f)
+    f = click.option(
+        "--before", help="Only entries before this time (ISO8601 or relative: -1h, -30m)"
+    )(f)
+    return f
+
+
+def _resolve_time_filters(
+    last_duration: Optional[str], after: Optional[str], before: Optional[str]
+) -> tuple:
+    """Resolve time filter options into (time_start, time_end) ISO strings.
+
+    Supports relative time with '-' prefix: --after=-1h --before=-30m
+    means "between 1 hour ago and 30 minutes ago".
+    """
+    from . import investigate as inv_mod
+
+    if last_duration:
+        tr = inv_mod._build_time_range(last=last_duration)
+        return (tr.get("start") if tr else None, tr.get("end") if tr else None)
+
+    time_start = None
+    time_end = None
+    if after:
+        time_start = _parse_time_arg(after, "--after")
+    if before:
+        time_end = _parse_time_arg(before, "--before")
+    return (time_start, time_end)
+
+
+def _parse_time_arg(value: str, flag_name: str) -> str:
+    """Parse a time argument, supporting both ISO8601 and relative durations.
+
+    Relative format: -30m, -2h, -1d (dash prefix + duration)
+    """
+    if value.startswith("-"):
+        # Relative time: subtract duration from now
+        try:
+            delta = _parse_duration(value[1:])
+            from datetime import timezone
+
+            return (datetime.now(timezone.utc) - delta).isoformat()
+        except ValueError:
+            _error_json(
+                f"Invalid relative duration for {flag_name}: {value}. "
+                f"Use format like '-30m', '-2h', '-1d'"
+            )
+    else:
+        # Absolute ISO8601 timestamp
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
+        except ValueError:
+            _error_json(f"Invalid timestamp format for {flag_name}: {value}")
+
+
 @click.group()
 def llm():
     """
@@ -269,31 +384,53 @@ def _extract_patterns(values: List[str]) -> List[str]:
 
 @llm.command()
 @click.argument("files", nargs=-1, required=True)
-@click.option("--level", help="Filter by log level (ERROR, WARN, INFO, DEBUG)")
+@click.option("--level", help="Filter by log level (comma-separated: ERROR,WARN)")
+@click.option("--exclude-level", help="Exclude log levels (comma-separated)")
 @click.option("--query", help="Regex pattern to match in message")
-@click.option("--thread", help="Filter by thread ID")
-@click.option("--correlation", help="Filter by correlation ID")
-@click.option("--after", help="Only entries after this timestamp (ISO8601)")
-@click.option("--before", help="Only entries before this timestamp (ISO8601)")
-@click.option("--last", help="Only entries in last N duration (e.g., 30m, 2h)")
-@click.option("--limit", type=int, help="Limit number of results")
+@click.option("--exclude-query", help="Regex pattern to exclude matching entries")
+@click.option("--thread", help="Filter by thread ID (comma-separated for multi)")
+@click.option("--correlation", help="Filter by correlation ID (comma-separated)")
+@click.option("--trace", help="Filter by trace ID (comma-separated)")
+@click.option("--service", help="Filter by service name (comma-separated)")
+@time_filter_options
+@click.option("--limit", type=int, help="Limit number of results (first N)")
+@click.option("--head", "head_n", type=int, help="Alias for --limit")
+@click.option("--tail", "tail_n", type=int, help="Return last N matches by timestamp")
 @click.option("--context", type=int, default=0, help="Include N context lines")
+@click.option("--fields", help="Comma-separated fields to include in output")
 @click.option("--include-raw/--no-raw", default=True, help="Include raw log line")
 @click.option("--aggregate/--no-aggregate", default=True, help="Include aggregations")
+@click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
+@click.option("--count-only", is_flag=True, help="Return only match count, no results")
+@click.option("--offset", type=int, default=0, help="Skip first N results (for pagination)")
+@click.option("--compact", is_flag=True, help="Use short field names (ts/lv/msg/svc/th/cid/trc)")
+@click.option("--metadata-only", is_flag=True, help="Return aggregations only, no results array")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def search(
     files: tuple,
     level: Optional[str],
+    exclude_level: Optional[str],
     query: Optional[str],
+    exclude_query: Optional[str],
     thread: Optional[str],
     correlation: Optional[str],
+    trace: Optional[str],
+    service: Optional[str],
+    last_duration: Optional[str],
     after: Optional[str],
     before: Optional[str],
-    last: Optional[str],
     limit: Optional[int],
+    head_n: Optional[int],
+    tail_n: Optional[int],
     context: int,
+    fields: Optional[str],
     include_raw: bool,
     aggregate: bool,
+    max_bytes: Optional[int],
+    count_only: bool,
+    offset: int,
+    compact: bool,
+    metadata_only: bool,
     pretty: bool,
 ):
     """
@@ -303,7 +440,9 @@ def search(
     Use --limit to restrict results if needed.
 
     Example:
-        logler llm search app.log --level ERROR --query "timeout"
+        logler llm search app.log --level ERROR,WARN --query "timeout"
+        logler llm search app.log --exclude-level DEBUG --tail 20
+        logler llm search app.log --service api --last 1h
     """
     from . import investigate
 
@@ -312,85 +451,99 @@ def search(
         if not file_list:
             _error_json(f"No files found matching: {files}")
 
-        # Calculate time filters
-        after_ts = None
-        before_ts = None
+        # Resolve time filters → push to Rust
+        time_start, time_end = _resolve_time_filters(last_duration, after, before)
 
-        if last:
-            try:
-                duration = _parse_duration(last)
-                before_ts = datetime.now()
-                after_ts = before_ts - duration
-            except ValueError as e:
-                _error_json(str(e))
-        else:
-            if after:
-                try:
-                    after_ts = datetime.fromisoformat(after.replace("Z", "+00:00"))
-                except ValueError:
-                    _error_json(f"Invalid timestamp format for --after: {after}")
-            if before:
-                try:
-                    before_ts = datetime.fromisoformat(before.replace("Z", "+00:00"))
-                except ValueError:
-                    _error_json(f"Invalid timestamp format for --before: {before}")
+        # --head is alias for --limit
+        effective_limit = limit or head_n
 
-        # Call search
+        # When using offset, we need to fetch offset + limit from Rust
+        # so we have enough results to skip the first `offset` entries
+        backend_limit = effective_limit
+        if offset > 0 and effective_limit:
+            backend_limit = effective_limit + offset
+
+        # Parse fields list
+        field_list = [f.strip() for f in fields.split(",")] if fields else None
+
+        # Call search — time filtering now happens in Rust
         result = investigate.search(
             files=file_list,
             query=query,
             level=level,
+            exclude_level=exclude_level,
+            exclude_query=exclude_query,
             thread_id=thread,
             correlation_id=correlation,
-            limit=limit,
+            trace_id=trace,
+            service_name=service,
+            limit=backend_limit,
+            tail=tail_n,
+            time_start=time_start,
+            time_end=time_end,
             context_lines=context,
             output_format="full",
+            fields=field_list,
         )
 
         # Build LLM-optimized output
         results = result.get("results", [])
+        total_matches = result.get("total_matches", len(results))
 
-        # Apply time filters if specified
-        if after_ts or before_ts:
-            filtered = []
-            for item in results:
-                entry = item.get("entry", {})
-                ts_str = entry.get("timestamp")
-                if ts_str:
-                    try:
-                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                        if after_ts and ts < after_ts:
-                            continue
-                        if before_ts and ts > before_ts:
-                            continue
-                    except (ValueError, TypeError):
-                        pass
-                filtered.append(item)
-            results = filtered
+        # --count-only: return just the count, no results
+        if count_only:
+            output: Dict[str, Any] = {
+                "total_matches": total_matches,
+                "files_searched": len(file_list),
+            }
+            _output_json(output, pretty)
+            sys.exit(EXIT_SUCCESS if total_matches > 0 else EXIT_NO_RESULTS)
+            return
 
         # Transform results
         output_results = []
         for item in results:
             entry = item.get("entry", {})
-            out_entry = {
-                "file": entry.get("file", file_list[0] if len(file_list) == 1 else None),
-                "line_number": entry.get("line_number"),
-                "timestamp": entry.get("timestamp"),
-                "level": entry.get("level"),
-                "message": entry.get("message"),
-            }
 
-            # Optional fields
-            if entry.get("thread_id"):
-                out_entry["thread_id"] = entry["thread_id"]
-            if entry.get("correlation_id"):
-                out_entry["correlation_id"] = entry["correlation_id"]
-            if entry.get("trace_id"):
-                out_entry["trace_id"] = entry["trace_id"]
-            if entry.get("span_id"):
-                out_entry["span_id"] = entry["span_id"]
-            if include_raw and entry.get("raw"):
-                out_entry["raw"] = entry["raw"]
+            if compact:
+                out_entry: Dict[str, Any] = {
+                    "ln": entry.get("line_number"),
+                    "ts": entry.get("timestamp"),
+                    "lv": entry.get("level"),
+                    "msg": entry.get("message"),
+                }
+                if entry.get("thread_id"):
+                    out_entry["th"] = entry["thread_id"]
+                if entry.get("correlation_id"):
+                    out_entry["cid"] = entry["correlation_id"]
+                if entry.get("trace_id"):
+                    out_entry["trc"] = entry["trace_id"]
+                if entry.get("span_id"):
+                    out_entry["sid"] = entry["span_id"]
+                if entry.get("service_name"):
+                    out_entry["svc"] = entry["service_name"]
+            else:
+                out_entry = {
+                    "file": entry.get("file", file_list[0] if len(file_list) == 1 else None),
+                    "line_number": entry.get("line_number"),
+                    "timestamp": entry.get("timestamp"),
+                    "level": entry.get("level"),
+                    "message": entry.get("message"),
+                }
+
+                # Optional fields
+                if entry.get("thread_id"):
+                    out_entry["thread_id"] = entry["thread_id"]
+                if entry.get("correlation_id"):
+                    out_entry["correlation_id"] = entry["correlation_id"]
+                if entry.get("trace_id"):
+                    out_entry["trace_id"] = entry["trace_id"]
+                if entry.get("span_id"):
+                    out_entry["span_id"] = entry["span_id"]
+                if entry.get("service_name"):
+                    out_entry["service_name"] = entry["service_name"]
+                if include_raw and entry.get("raw"):
+                    out_entry["raw"] = entry["raw"]
 
             # Context if requested
             if context > 0:
@@ -399,38 +552,92 @@ def search(
                 if item.get("context_after"):
                     out_entry["context_after"] = item["context_after"]
 
+            # Field projection at CLI level
+            if field_list:
+                out_entry = {k: v for k, v in out_entry.items() if k in field_list}
+
             output_results.append(out_entry)
+
+        # Apply offset for pagination
+        if offset > 0:
+            output_results = output_results[offset:]
+
+        # Trim back to effective_limit after offset (we fetched offset+limit from backend)
+        if effective_limit and len(output_results) > effective_limit:
+            output_results = output_results[:effective_limit]
+
+        has_more = (offset + len(output_results)) < total_matches
+
+        # Build aggregations from ALL results (before offset) for metadata-only
+        agg_by_level: Dict[str, int] = defaultdict(int)
+        agg_by_thread: Dict[str, int] = defaultdict(int)
+        agg_by_service: Dict[str, int] = defaultdict(int)
+
+        if aggregate or metadata_only:
+            for item in results:
+                entry = item.get("entry", {})
+                if entry.get("level"):
+                    agg_by_level[entry["level"]] += 1
+                if entry.get("thread_id"):
+                    agg_by_thread[entry["thread_id"]] += 1
+                if entry.get("service_name"):
+                    agg_by_service[entry["service_name"]] += 1
+
+        # --metadata-only: aggregations without results array
+        if metadata_only:
+            output = {
+                "query": {
+                    "files": file_list,
+                    "level": level,
+                    "exclude_level": exclude_level,
+                    "pattern": query,
+                    "service": service,
+                },
+                "summary": {
+                    "total_matches": total_matches,
+                    "files_searched": len(file_list),
+                },
+                "aggregations": {
+                    "by_level": dict(agg_by_level),
+                    "by_thread": dict(agg_by_thread) if agg_by_thread else None,
+                    "by_service": dict(agg_by_service) if agg_by_service else None,
+                },
+            }
+            _output_json(output, pretty)
+            sys.exit(EXIT_SUCCESS if total_matches > 0 else EXIT_NO_RESULTS)
+            return
 
         output = {
             "query": {
                 "files": file_list,
                 "level": level,
+                "exclude_level": exclude_level,
                 "pattern": query,
+                "exclude_query": exclude_query,
                 "thread": thread,
                 "correlation": correlation,
+                "trace": trace,
+                "service": service,
             },
             "summary": {
-                "total_matches": len(output_results),
+                "total_matches": total_matches,
+                "returned": len(output_results),
                 "files_searched": len(file_list),
+                "offset": offset,
+                "has_more": has_more,
             },
             "results": output_results,
         }
 
         # Add aggregations if requested
         if aggregate and output_results:
-            agg_by_level = defaultdict(int)
-            agg_by_thread = defaultdict(int)
-
-            for r in output_results:
-                if r.get("level"):
-                    agg_by_level[r["level"]] += 1
-                if r.get("thread_id"):
-                    agg_by_thread[r["thread_id"]] += 1
-
             output["aggregations"] = {
                 "by_level": dict(agg_by_level),
                 "by_thread": dict(agg_by_thread) if agg_by_thread else None,
             }
+
+        if max_bytes:
+            output = _apply_max_bytes(output, max_bytes)
 
         _output_json(output, pretty)
 
@@ -452,6 +659,83 @@ def search(
 
 @llm.command()
 @click.argument("files", nargs=-1, required=True)
+@time_filter_options
+@click.option(
+    "--type",
+    "id_type",
+    type=click.Choice(["thread", "correlation", "trace", "service", "all"]),
+    default="all",
+    help="Type of IDs to extract",
+)
+@click.option("--limit", type=int, help="Limit number of IDs per category")
+@click.option("--max-bytes", type=int, help="Maximum output size in bytes")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
+def ids(
+    files: tuple,
+    last_duration: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    id_type: str,
+    limit: Optional[int],
+    max_bytes: Optional[int],
+    pretty: bool,
+):
+    """
+    Discover all unique IDs in log files.
+
+    Returns thread IDs, correlation IDs, trace IDs, and service names
+    with counts and first/last seen timestamps.
+
+    Example:
+        logler llm ids app.log --last 5m
+        logler llm ids app.log --type thread --limit 10
+    """
+    from . import investigate
+
+    try:
+        file_list = _expand_globs(list(files))
+        if not file_list:
+            _error_json(f"No files found matching: {files}")
+
+        time_start, time_end = _resolve_time_filters(last_duration, after, before)
+
+        result = investigate.extract_ids(
+            files=file_list,
+            time_start=time_start,
+            time_end=time_end,
+        )
+
+        # Filter by type
+        if id_type != "all":
+            key_map = {
+                "thread": "thread_ids",
+                "correlation": "correlation_ids",
+                "trace": "trace_ids",
+                "service": "services",
+            }
+            keep_key = key_map[id_type]
+            for key in ["thread_ids", "correlation_ids", "trace_ids", "services"]:
+                if key != keep_key:
+                    result[key] = []
+
+        # Apply limit
+        if limit:
+            for key in ["thread_ids", "correlation_ids", "trace_ids", "services"]:
+                if key in result:
+                    result[key] = result[key][:limit]
+
+        if max_bytes:
+            result = _apply_max_bytes(result, max_bytes)
+
+        _output_json(result, pretty)
+        sys.exit(EXIT_SUCCESS)
+
+    except Exception as e:
+        _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
+
+
+@llm.command()
+@click.argument("files", nargs=-1, required=True)
 @click.option(
     "--strategy",
     type=click.Choice(["random", "diverse", "errors_focused", "head", "tail", "edges"]),
@@ -459,8 +743,23 @@ def search(
     help="Sampling strategy",
 )
 @click.option("--size", type=int, default=100, help="Sample size (default: 100)")
+@click.option("--level", help="Filter by log level (comma-separated: ERROR,WARN)")
+@click.option("--exclude-level", help="Exclude log levels (comma-separated)")
+@click.option("--service", help="Filter by service name (comma-separated)")
+@time_filter_options
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
-def sample(files: tuple, strategy: str, size: int, pretty: bool):
+def sample(
+    files: tuple,
+    strategy: str,
+    size: int,
+    level: Optional[str],
+    exclude_level: Optional[str],
+    service: Optional[str],
+    last_duration: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    pretty: bool,
+):
     """
     Get a statistically representative sample of log entries.
 
@@ -482,7 +781,31 @@ def sample(files: tuple, strategy: str, size: int, pretty: bool):
         if not file_list:
             _error_json(f"No files found matching: {files}")
 
-        result = investigate.smart_sample(files=file_list, strategy=strategy, sample_size=size)
+        # Resolve time filters
+        time_start, time_end = _resolve_time_filters(last_duration, after, before)
+
+        result = investigate.smart_sample(
+            files=file_list, level=level, strategy=strategy, sample_size=size
+        )
+
+        # Post-filter by exclude_level, service, and time
+        entries = result.get("samples", []) or result.get("entries", [])
+        if exclude_level:
+            excl_set = {level.strip().upper() for level in exclude_level.split(",")}
+            entries = [e for e in entries if (e.get("level") or "").upper() not in excl_set]
+        if service:
+            svc_set = {s.strip() for s in service.split(",")}
+            entries = [
+                e
+                for e in entries
+                if e.get("service_name") in svc_set or e.get("service") in svc_set
+            ]
+        if time_start:
+            entries = [e for e in entries if e.get("timestamp") and e["timestamp"] >= time_start]
+        if time_end:
+            entries = [e for e in entries if e.get("timestamp") and e["timestamp"] <= time_end]
+
+        result["samples"] = entries
 
         # Build output
         output = {
@@ -526,17 +849,23 @@ def sample(files: tuple, strategy: str, size: int, pretty: bool):
 
 @llm.command()
 @click.argument("files", nargs=-1, required=True)
-@click.option("--last", help="Analyze last N duration (e.g., 30m, 2h)")
-@click.option("--after", help="Start timestamp (ISO8601)")
-@click.option("--before", help="End timestamp (ISO8601)")
+@time_filter_options
+@click.option("--service", help="Filter by service name (comma-separated)")
+@click.option("--max-bytes", type=int, help="Maximum output size in bytes")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def triage(
-    files: tuple, last: Optional[str], after: Optional[str], before: Optional[str], pretty: bool
+    files: tuple,
+    last_duration: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    service: Optional[str],
+    max_bytes: Optional[int],
+    pretty: bool,
 ):
     """
     Quick severity assessment for incident response.
 
-    Returns severity level, top issues, and suggested actions.
+    Returns severity level, error rate, and log level distribution.
     Designed for rapid initial assessment during incidents.
 
     Example:
@@ -549,14 +878,24 @@ def triage(
         if not file_list:
             _error_json(f"No files found matching: {files}")
 
-        # Run auto-insights
-        result = investigate.analyze_with_insights(files=file_list, auto_investigate=True)
+        # Resolve time filters
+        time_start, time_end = _resolve_time_filters(last_duration, after, before)
 
-        overview = result.get("overview", {})
-        insights = result.get("insights", [])
+        # Get summary stats using search
+        result = investigate.search(
+            files=file_list,
+            service_name=service,
+            time_start=time_start,
+            time_end=time_end,
+            output_format="summary",
+        )
+
+        total = result.get("total_matches", 0)
+        levels = result.get("log_levels", {})
+        error_count = levels.get("ERROR", 0) + levels.get("FATAL", 0)
+        error_rate = error_count / total if total > 0 else 0
 
         # Determine severity
-        error_rate = overview.get("error_rate", 0)
         if error_rate > 0.2:
             severity = "critical"
             confidence = 0.95
@@ -573,40 +912,40 @@ def triage(
             severity = "healthy"
             confidence = 0.9
 
-        # Build top issues
-        top_issues = []
-        for insight in insights[:5]:
-            issue = {
-                "type": insight.get("type"),
-                "severity": insight.get("severity"),
-                "description": insight.get("description"),
-            }
-            if insight.get("count"):
-                issue["count"] = insight["count"]
-            top_issues.append(issue)
-
-        # Build suggested actions
+        # Build suggested actions based on error rate
         suggested_actions = []
-        for insight in insights[:3]:
-            if insight.get("suggestion"):
-                suggested_actions.append({"action": "investigate", "reason": insight["suggestion"]})
+        if error_rate > 0.05:
+            suggested_actions.append(
+                {
+                    "action": "investigate",
+                    "reason": "High error rate detected - investigate most common errors",
+                }
+            )
+        if error_count > 0:
+            suggested_actions.append(
+                {
+                    "action": "search_errors",
+                    "reason": "Run: logler llm search --level ERROR to find error details",
+                }
+            )
 
         output = {
             "assessment": {
                 "severity": severity,
                 "confidence": confidence,
-                "summary": f"Error rate: {error_rate:.1%}, {len(insights)} issues detected",
+                "summary": f"Error rate: {error_rate:.1%}, {error_count} errors in {total} entries",
             },
             "metrics": {
                 "error_rate": round(error_rate, 4),
-                "error_count": overview.get("error_count", 0),
-                "total_entries": overview.get("total_logs", 0),
-                "log_levels": overview.get("log_levels", {}),
+                "error_count": error_count,
+                "total_entries": total,
+                "log_levels": levels,
             },
-            "top_issues": top_issues,
             "suggested_actions": suggested_actions,
-            "next_steps": result.get("next_steps", []),
         }
+
+        if max_bytes:
+            output = _apply_max_bytes(output, max_bytes)
 
         _output_json(output, pretty)
         sys.exit(EXIT_SUCCESS)
@@ -625,9 +964,19 @@ def triage(
     default="auto",
     help="Identifier type",
 )
-@click.option("--window", default="1h", help="Time window to search (e.g., 30m, 2h)")
+@time_filter_options
+@click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
-def correlate(identifier: str, files: tuple, id_type: str, window: str, pretty: bool):
+def correlate(
+    identifier: str,
+    files: tuple,
+    id_type: str,
+    last_duration: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    max_bytes: Optional[int],
+    pretty: bool,
+):
     """
     Trace a request/correlation ID across files and services.
 
@@ -669,11 +1018,20 @@ def correlate(identifier: str, files: tuple, id_type: str, window: str, pretty: 
             thread_id = identifier
             detected_type = "thread_id"
 
+        # Resolve time filters
+        time_start, time_end = _resolve_time_filters(last_duration, after, before)
+
         result = investigate.follow_thread(
             files=file_list, thread_id=thread_id, correlation_id=correlation_id, trace_id=trace_id
         )
 
         entries = result.get("entries", [])
+
+        # Apply time filters to entries
+        if time_start:
+            entries = [e for e in entries if e.get("timestamp") and e["timestamp"] >= time_start]
+        if time_end:
+            entries = [e for e in entries if e.get("timestamp") and e["timestamp"] <= time_end]
 
         # Build timeline
         timeline = []
@@ -727,6 +1085,9 @@ def correlate(identifier: str, files: tuple, id_type: str, window: str, pretty: 
         if error_point:
             output["error_point"] = error_point
 
+        if max_bytes:
+            output = _apply_max_bytes(output, max_bytes)
+
         _output_json(output, pretty)
 
         if len(timeline) == 0:
@@ -743,9 +1104,19 @@ def correlate(identifier: str, files: tuple, id_type: str, window: str, pretty: 
 @click.option("--files", "-f", multiple=True, help="Files to search (supports globs)")
 @click.option("--max-depth", type=int, help="Maximum hierarchy depth")
 @click.option("--min-confidence", type=float, default=0.0, help="Minimum confidence (0.0-1.0)")
+@time_filter_options
+@click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def hierarchy(
-    identifier: str, files: tuple, max_depth: Optional[int], min_confidence: float, pretty: bool
+    identifier: str,
+    files: tuple,
+    max_depth: Optional[int],
+    min_confidence: float,
+    last_duration: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    max_bytes: Optional[int],
+    pretty: bool,
 ):
     """
     Build full parent-child hierarchy tree as structured data.
@@ -773,6 +1144,9 @@ def hierarchy(
         )
 
         # Output directly - hierarchy result is already structured
+        if max_bytes:
+            result = _apply_max_bytes(result, max_bytes)
+
         _output_json(result, pretty)
 
         if not result.get("roots"):
@@ -918,12 +1292,30 @@ def verify_pattern(
 
 @llm.command()
 @click.argument("files", nargs=-1, required=True)
-@click.option("--level", help="Filter by level")
+@click.option("--level", help="Filter by level (comma-separated: ERROR,WARN)")
+@click.option("--exclude-level", help="Exclude log levels (comma-separated)")
 @click.option("--query", help="Filter by pattern")
+@click.option("--exclude-query", help="Regex pattern to exclude matching entries")
+@click.option("--service", help="Filter by service name")
 @click.option("--fields", help="Comma-separated fields to include")
 @click.option("--compact", is_flag=True, help="Minimal JSON (short keys)")
+@click.option("--limit", type=int, help="Maximum entries to emit")
+@click.option("--tail", "tail_n", type=int, help="Emit last N entries by timestamp")
+@time_filter_options
 def emit(
-    files: tuple, level: Optional[str], query: Optional[str], fields: Optional[str], compact: bool
+    files: tuple,
+    level: Optional[str],
+    exclude_level: Optional[str],
+    query: Optional[str],
+    exclude_query: Optional[str],
+    service: Optional[str],
+    fields: Optional[str],
+    compact: bool,
+    limit: Optional[int],
+    tail_n: Optional[int],
+    last_duration: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
 ):
     """
     Stream parsed entries as JSONL for processing.
@@ -932,7 +1324,7 @@ def emit(
     to other tools or processing large files.
 
     Example:
-        logler llm emit app.log --level ERROR | head -100
+        logler llm emit app.log --level ERROR --last 1h --limit 100
     """
     from .parser import LogParser
 
@@ -948,6 +1340,21 @@ def emit(
         if fields:
             include_fields = set(f.strip() for f in fields.split(","))
 
+        # Parse level filters (comma-separated)
+        level_set = None
+        if level:
+            level_set = {lvl.strip().upper() for lvl in level.split(",") if lvl.strip()}
+        exclude_level_set = None
+        if exclude_level:
+            exclude_level_set = {
+                lvl.strip().upper() for lvl in exclude_level.split(",") if lvl.strip()
+            }
+
+        # Time filters
+        time_start_str, time_end_str = _resolve_time_filters(last_duration, after, before)
+        time_start_dt = datetime.fromisoformat(time_start_str) if time_start_str else None
+        time_end_dt = datetime.fromisoformat(time_end_str) if time_end_str else None
+
         # Compile query regex if provided
         query_regex = None
         if query:
@@ -955,6 +1362,17 @@ def emit(
                 query_regex = safe_compile(query, re.IGNORECASE)
             except (re.error, RegexTimeoutError, RegexPatternTooLongError) as e:
                 _error_json(f"Invalid regex pattern: {e}")
+
+        exclude_regex = None
+        if exclude_query:
+            try:
+                exclude_regex = safe_compile(exclude_query, re.IGNORECASE)
+            except (re.error, RegexTimeoutError, RegexPatternTooLongError) as e:
+                _error_json(f"Invalid exclude regex: {e}")
+
+        # Collect entries (for tail mode we need to buffer)
+        emitted = 0
+        buffer = [] if tail_n else None
 
         for file_path in file_list:
             try:
@@ -965,10 +1383,34 @@ def emit(
                             continue
 
                         entry = parser.parse_line(i + 1, line)
+                        entry_level = str(entry.level).upper() if entry.level else None
 
-                        # Apply level filter
-                        if level and str(entry.level).upper() != level.upper():
+                        # Apply level filter (comma-separated)
+                        if level_set and entry_level not in level_set:
                             continue
+                        if exclude_level_set and entry_level in exclude_level_set:
+                            continue
+
+                        # Apply service filter
+                        if service:
+                            svc = getattr(entry, "service_name", None)
+                            if not svc or svc != service:
+                                continue
+
+                        # Apply time filter
+                        if time_start_dt or time_end_dt:
+                            ts = entry.timestamp
+                            if ts:
+                                if isinstance(ts, str):
+                                    try:
+                                        ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                                    except (ValueError, TypeError):
+                                        ts = None
+                                if ts:
+                                    if time_start_dt and ts < time_start_dt:
+                                        continue
+                                    if time_end_dt and ts > time_end_dt:
+                                        continue
 
                         # Apply query filter
                         if query_regex:
@@ -976,12 +1418,19 @@ def emit(
                                 if not query_regex.search(line):
                                     continue
 
+                        # Apply exclude query filter
+                        if exclude_regex:
+                            if exclude_regex.search(entry.message or "") or exclude_regex.search(
+                                line
+                            ):
+                                continue
+
                         # Build output
                         if compact:
                             out = {
                                 "ln": i + 1,
                                 "ts": str(entry.timestamp) if entry.timestamp else None,
-                                "lv": str(entry.level) if entry.level else None,
+                                "lv": entry_level,
                                 "msg": entry.message,
                             }
                             if entry.thread_id:
@@ -991,29 +1440,45 @@ def emit(
                                 "file": file_path,
                                 "line_number": i + 1,
                                 "timestamp": str(entry.timestamp) if entry.timestamp else None,
-                                "level": str(entry.level) if entry.level else None,
+                                "level": entry_level,
                                 "message": entry.message,
                             }
                             if entry.thread_id:
                                 out["thread_id"] = entry.thread_id
                             if entry.correlation_id:
                                 out["correlation_id"] = entry.correlation_id
+                            if hasattr(entry, "service_name") and entry.service_name:
+                                out["service_name"] = entry.service_name
 
                         # Filter fields if specified
                         if include_fields:
                             out = {k: v for k, v in out.items() if k in include_fields}
 
-                        click.echo(json.dumps(out, default=str))
+                        if buffer is not None:
+                            buffer.append(out)
+                        else:
+                            click.echo(json.dumps(out, default=str))
+                            emitted += 1
+                            if limit and emitted >= limit:
+                                break
 
             except FileNotFoundError:
-                pass  # Skip missing files in emit mode
+                pass
             except PermissionError:
                 pass
+
+            if limit and emitted >= limit and buffer is None:
+                break
+
+        # Handle tail mode
+        if buffer is not None:
+            tail_entries = buffer[-tail_n:] if tail_n else buffer
+            for out in tail_entries:
+                click.echo(json.dumps(out, default=str))
 
         sys.exit(EXIT_SUCCESS)
 
     except Exception as e:
-        # In emit mode, errors go to stderr
         import sys as _sys
 
         _sys.stderr.write(json.dumps({"error": str(e)}) + "\n")
@@ -1610,8 +2075,20 @@ def sql(query: Optional[str], files: tuple, stdin: bool, pretty: bool):
 @click.option("--files", "-f", multiple=True, help="Files to search (supports globs)")
 @click.option("--threshold-ms", type=int, default=100, help="Minimum duration to consider (ms)")
 @click.option("--top-n", type=int, default=10, help="Number of top bottlenecks to return")
+@time_filter_options
+@click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
-def bottleneck(identifier: str, files: tuple, threshold_ms: int, top_n: int, pretty: bool):
+def bottleneck(
+    identifier: str,
+    files: tuple,
+    threshold_ms: int,
+    top_n: int,
+    last_duration: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    max_bytes: Optional[int],
+    pretty: bool,
+):
     """
     Analyze performance bottlenecks for a trace/correlation ID.
 
@@ -1691,6 +2168,9 @@ def bottleneck(identifier: str, files: tuple, threshold_ms: int, top_n: int, pre
             "bottlenecks": top_bottlenecks,
             "hierarchy_bottleneck": hierarchy.get("bottleneck"),
         }
+
+        if max_bytes:
+            output = _apply_max_bytes(output, max_bytes)
 
         _output_json(output, pretty)
         sys.exit(EXIT_SUCCESS)
@@ -2102,8 +2582,20 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool):
     default="errors",
     help="What to focus on",
 )
+@click.option("--service", help="Filter by service name (comma-separated)")
+@time_filter_options
+@click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
-def summarize(files: tuple, focus: str, pretty: bool):
+def summarize(
+    files: tuple,
+    focus: str,
+    service: Optional[str],
+    last_duration: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    max_bytes: Optional[int],
+    pretty: bool,
+):
     """
     Generate a concise summary of log contents.
 
@@ -2119,6 +2611,10 @@ def summarize(files: tuple, focus: str, pretty: bool):
         file_list = _expand_globs(list(files))
         if not file_list:
             _error_json(f"No files found matching: {files}")
+
+        # Resolve time and service filters
+        time_start, time_end = _resolve_time_filters(last_duration, after, before)
+        svc_set = {s.strip() for s in service.split(",")} if service else None
 
         parser = LogParser()
 
@@ -2140,6 +2636,23 @@ def summarize(files: tuple, focus: str, pretty: bool):
                             continue
 
                         entry = parser.parse_line(i + 1, line)
+
+                        # Apply time filters
+                        if time_start and entry.timestamp:
+                            if str(entry.timestamp) < time_start:
+                                continue
+                        if time_end and entry.timestamp:
+                            if str(entry.timestamp) > time_end:
+                                continue
+
+                        # Apply service filter
+                        if svc_set:
+                            entry_svc = getattr(entry, "service_name", None) or getattr(
+                                entry, "service", None
+                            )
+                            if entry_svc not in svc_set:
+                                continue
+
                         total += 1
 
                         level = str(entry.level).upper() if entry.level else "UNKNOWN"
@@ -2207,6 +2720,9 @@ def summarize(files: tuple, focus: str, pretty: bool):
             "warnings": warnings if focus in ["warnings", "all"] else [],
             "unique_error_messages": dict(unique_errors) if unique_errors else {},
         }
+
+        if max_bytes:
+            output = _apply_max_bytes(output, max_bytes)
 
         _output_json(output, pretty)
         sys.exit(EXIT_SUCCESS if total > 0 else EXIT_NO_RESULTS)

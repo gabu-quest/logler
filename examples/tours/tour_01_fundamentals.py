@@ -487,12 +487,16 @@ def _(mo):
     - **`Investigator`** - Keep files loaded for faster repeated queries
     - **Context** - See surrounding log entries
 
+    **Tip:** For LLM agents, the CLI offers token-saving flags:
+    `--count-only`, `--compact`, `--max-bytes`, `--offset`. See Tour 15.
+
     **Next Steps:**
     - **Tour 02**: Thread and correlation tracking
     - **Tour 03**: Hierarchy visualization
     - **Tour 04**: Investigation sessions and reports
     - **Tour 05**: Pattern detection
     - **Tour 12**: Multi-file tracing across services
+    - **Tour 15**: Advanced filtering and token optimization
     """
     )
     return
@@ -505,6 +509,16 @@ def _(temp_dir):
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
     return
 
 

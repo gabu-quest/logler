@@ -212,14 +212,14 @@ def _(json, live_log, stop_event, time, total_written):
 
             stats[_level] = stats.get(_level, 0) + 1
 
-            # Visual indicators
+            # Visual indicators (consistent 10-char prefix for alignment)
             if _level == "ERROR":
-                print(f"🚨 ERROR | {_msg}")
+                print(f"🚨 ERROR  | {_msg}")
                 recent_errors.append(_entry)
             elif _level == "WARN":
-                print(f"⚠️  WARN  | {_msg}")
+                print(f"⚠️ WARN   | {_msg}")
             else:
-                print(f"   INFO  | {_msg}")
+                print(f"   INFO   | {_msg}")
 
             lines_read += 1
 
@@ -308,8 +308,6 @@ def _(mo):
             send_alert("Error spike detected!")
             error_window.clear()
     ```
-
-    This is how production monitoring systems work!
     """
     )
     return
@@ -326,7 +324,6 @@ def _(mo):
     - **`LogReader.tail(follow=True)`** - Stream logs as they're written
     - **Real-time counting** - Track stats as logs flow
     - **Anomaly detection** - Alert on error spikes
-    - **Pattern matching** - Filter and route in real-time
 
     **Production use cases:**
     - Live dashboards
@@ -351,6 +348,11 @@ def _(stop_event, temp_dir, writer_thread):
 
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("Cleaned up temp files")
+    return
+
+
+@app.cell
+def _():
     return
 
 

@@ -15,6 +15,7 @@ static SPAN_ID_RE: OnceLock<Regex> = OnceLock::new();
 static SYSLOG_PRIORITY_RE: OnceLock<Regex> = OnceLock::new();
 static COMMON_LOG_RE: OnceLock<Regex> = OnceLock::new();
 static LOGFMT_PAIR_RE: OnceLock<Regex> = OnceLock::new();
+static BSD_SYSLOG_RE: OnceLock<Regex> = OnceLock::new();
 
 fn init_regexes() {
     TIMESTAMP_RE.get_or_init(|| {
@@ -60,6 +61,10 @@ fn init_regexes() {
         Regex::new(r#"^(\S+) \S+ \S+ \[([^\]]+)\] "([^"]+)" (\d+) (\S+)"#).unwrap()
     });
     LOGFMT_PAIR_RE.get_or_init(|| Regex::new(r#"(\w+)=(?:"([^"]*)"|([^\s]+))"#).unwrap());
+    BSD_SYSLOG_RE.get_or_init(|| {
+        Regex::new(r"^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+\S+(?:\[\d+\])?:")
+            .unwrap()
+    });
 }
 
 #[derive(Debug, Clone, Default)]
@@ -184,6 +189,9 @@ impl LogParser {
             return LogFormat::Json;
         }
         if SYSLOG_PRIORITY_RE.get().unwrap().is_match(trimmed) {
+            return LogFormat::Syslog;
+        }
+        if BSD_SYSLOG_RE.get().unwrap().is_match(trimmed) {
             return LogFormat::Syslog;
         }
         if COMMON_LOG_RE.get().unwrap().is_match(trimmed) {
@@ -323,9 +331,74 @@ impl LogParser {
             remaining = &raw[cap.get(0)?.end()..];
         }
 
+        // Keyword fallback for syslog without priority prefix
+        if entry.level.is_none() {
+            entry.level = self.extract_level(remaining);
+        }
+        // Pattern-based inference for common syslog messages
+        if entry.level.is_none() {
+            entry.level = Self::infer_syslog_level(remaining);
+        }
+
         entry.timestamp = self.extract_timestamp(remaining);
         entry.message = remaining.trim().to_string();
         Some(entry)
+    }
+
+    fn infer_syslog_level(text: &str) -> Option<LogLevel> {
+        let lower = text.to_lowercase();
+
+        // Fatal patterns
+        if lower.contains("out of memory")
+            || lower.contains("kill process")
+            || lower.contains("segfault")
+            || lower.contains("kernel panic")
+            || lower.contains("oom-killer")
+        {
+            return Some(LogLevel::Fatal);
+        }
+
+        // Error patterns
+        if lower.contains("failed password")
+            || lower.contains("authentication failure")
+            || lower.contains("invalid user")
+            || lower.contains("connection refused")
+            || lower.contains("permission denied")
+            || lower.contains("not allowed")
+            || lower.contains("fatal:")
+            || lower.contains("error:")
+            || lower.contains("failed to")
+            || lower.contains("unable to")
+            || lower.contains("timed out")
+            || lower.contains("timeout")
+        {
+            return Some(LogLevel::Error);
+        }
+
+        // Warn patterns
+        if lower.contains("warning:")
+            || lower.contains("rate limit")
+            || lower.contains("stopping")
+            || lower.contains("deprecated")
+            || lower.contains("retry")
+        {
+            return Some(LogLevel::Warn);
+        }
+
+        // Info patterns (common success/operational messages)
+        if lower.contains("accepted")
+            || lower.contains("session opened")
+            || lower.contains("session closed")
+            || lower.contains("started")
+            || lower.contains("mounted")
+            || lower.contains("received signal")
+            || lower.contains("listening on")
+            || lower.contains(") cmd")
+        {
+            return Some(LogLevel::Info);
+        }
+
+        None
     }
 
     fn parse_common_log(&self, line_number: usize, raw: &str) -> Option<LogEntry> {
@@ -700,6 +773,111 @@ mod tests {
         assert_eq!(entry.format, LogFormat::Syslog);
         assert_eq!(entry.level, Some(LogLevel::Error));
         assert!(entry.message.contains("critical failure imminent"));
+    }
+
+    #[test]
+    fn test_bsd_syslog_detected_as_syslog() {
+        let line =
+            "Mar 15 03:00:00 host sshd[1234]: Failed password for root from 10.0.0.1 port 22";
+        let format = LogParser::detect_format(line);
+        assert_eq!(format, LogFormat::Syslog);
+    }
+
+    #[test]
+    fn test_bsd_syslog_infers_error_level() {
+        let parser = LogParser::new("test.log");
+        let line =
+            "Mar 15 03:00:00 host sshd[1234]: Failed password for root from 10.0.0.1 port 22";
+        let entry = parser.parse_line(1, line).unwrap();
+
+        assert_eq!(entry.format, LogFormat::Syslog);
+        assert_eq!(entry.level, Some(LogLevel::Error));
+        assert!(entry.message.contains("Failed password"));
+    }
+
+    #[test]
+    fn test_bsd_syslog_infers_fatal_for_oom() {
+        let parser = LogParser::new("test.log");
+        let line = "Mar 15 03:00:00 host kernel: Out of memory: Kill process 1234 (java)";
+        let entry = parser.parse_line(1, line).unwrap();
+
+        assert_eq!(entry.format, LogFormat::Syslog);
+        assert_eq!(entry.level, Some(LogLevel::Fatal));
+    }
+
+    #[test]
+    fn test_bsd_syslog_infers_info_for_session() {
+        let parser = LogParser::new("test.log");
+        let line = "Mar 15 03:00:00 host sshd[1234]: Accepted publickey for user from 10.0.0.1";
+        let entry = parser.parse_line(1, line).unwrap();
+
+        assert_eq!(entry.format, LogFormat::Syslog);
+        assert_eq!(entry.level, Some(LogLevel::Info));
+    }
+
+    #[test]
+    fn test_bsd_syslog_infers_warn_for_stopping() {
+        let parser = LogParser::new("test.log");
+        let line = "Mar 15 03:00:00 host systemd[1]: Stopping nginx.service";
+        let entry = parser.parse_line(1, line).unwrap();
+
+        assert_eq!(entry.format, LogFormat::Syslog);
+        assert_eq!(entry.level, Some(LogLevel::Warn));
+    }
+
+    #[test]
+    fn test_bsd_syslog_cron_gets_info() {
+        let parser = LogParser::new("test.log");
+        let line = "Mar 15 03:00:00 host CRON[5678]: (root) CMD (/usr/bin/cleanup)";
+        let entry = parser.parse_line(1, line).unwrap();
+
+        assert_eq!(entry.format, LogFormat::Syslog);
+        assert_eq!(entry.level, Some(LogLevel::Info));
+    }
+
+    #[test]
+    fn test_infer_syslog_level_patterns() {
+        // Fatal
+        assert_eq!(
+            LogParser::infer_syslog_level("kernel: Out of memory: Kill process 123"),
+            Some(LogLevel::Fatal)
+        );
+        assert_eq!(
+            LogParser::infer_syslog_level("kernel: segfault at 0000000"),
+            Some(LogLevel::Fatal)
+        );
+        // Error
+        assert_eq!(
+            LogParser::infer_syslog_level("sshd[1]: Failed password for root"),
+            Some(LogLevel::Error)
+        );
+        assert_eq!(
+            LogParser::infer_syslog_level("sshd[1]: authentication failure; user=nobody"),
+            Some(LogLevel::Error)
+        );
+        assert_eq!(
+            LogParser::infer_syslog_level("sshd[1]: Invalid user admin from 10.0.0.1"),
+            Some(LogLevel::Error)
+        );
+        // Warn
+        assert_eq!(
+            LogParser::infer_syslog_level("systemd[1]: Stopping nginx.service"),
+            Some(LogLevel::Warn)
+        );
+        // Info
+        assert_eq!(
+            LogParser::infer_syslog_level("sshd[1]: Accepted publickey for user"),
+            Some(LogLevel::Info)
+        );
+        assert_eq!(
+            LogParser::infer_syslog_level("CRON[5678]: (root) CMD (/usr/bin/cleanup)"),
+            Some(LogLevel::Info)
+        );
+        // No match
+        assert_eq!(
+            LogParser::infer_syslog_level("some random message with no pattern"),
+            None
+        );
     }
 
     #[test]

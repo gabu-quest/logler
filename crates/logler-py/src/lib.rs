@@ -135,6 +135,26 @@ impl PyInvestigator {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
+    /// Extract all unique IDs from loaded files
+    fn extract_ids(&self, filters_json: Option<String>) -> PyResult<String> {
+        let filters = if let Some(json_str) = filters_json {
+            Some(
+                serde_json::from_str::<SearchFilters>(&json_str)
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?,
+            )
+        } else {
+            None
+        };
+
+        let result = self
+            .investigator
+            .extract_ids(filters.as_ref())
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        serde_json::to_string(&result)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
     /// Build hierarchical view of threads/spans
     fn build_hierarchy(
         &self,
@@ -185,6 +205,7 @@ fn search(files: Vec<String>, query: String, limit: Option<usize>) -> PyResult<S
         query: Some(query),
         filters: SearchFilters::default(),
         limit,
+        tail: None,
         context_lines: Some(3),
     };
 
@@ -290,6 +311,32 @@ fn build_hierarchy(
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
 }
 
+/// Standalone extract_ids function (convenience)
+#[pyfunction]
+fn extract_ids(files: Vec<String>, filters_json: Option<String>) -> PyResult<String> {
+    let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+    let mut investigator = Investigator::new();
+    investigator
+        .load_files(&paths)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+    let filters = if let Some(json_str) = filters_json {
+        Some(
+            serde_json::from_str::<SearchFilters>(&json_str)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?,
+        )
+    } else {
+        None
+    };
+
+    let result = investigator
+        .extract_ids(filters.as_ref())
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+    serde_json::to_string(&result)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+}
+
 /// Python module
 #[pymodule]
 fn logler_rs(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -299,6 +346,7 @@ fn logler_rs(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_patterns, m)?)?;
     m.add_function(wrap_pyfunction!(get_metadata, m)?)?;
     m.add_function(wrap_pyfunction!(build_hierarchy, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_ids, m)?)?;
     Ok(())
 }
 

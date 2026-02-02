@@ -394,7 +394,7 @@ def _(inv):
     print(f"Found {payment_results['total_matches']} entries mentioning 'payment':\n")
     for _r in payment_results["results"]:
         _entry = _r["entry"]
-        _svc = _entry.get("service", "unknown")
+        _svc = _entry.get("service_name", "unknown")
         print(f"[{_svc:20}] [{_entry['level']:5}] {_entry['message'][:60]}")
     return
 

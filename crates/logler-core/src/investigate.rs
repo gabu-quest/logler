@@ -3,6 +3,7 @@ use crate::parser::ParserConfig;
 use crate::types::*;
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
+use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -42,6 +43,17 @@ impl Investigator {
     /// Search logs with filters
     pub fn search(&self, query: &SearchQuery) -> anyhow::Result<SearchResults> {
         let start = Instant::now();
+
+        // Pre-compile exclude_pattern regex once
+        let exclude_regex = if let Some(ref pattern) = query.filters.exclude_pattern {
+            Some(
+                Regex::new(pattern)
+                    .map_err(|e| anyhow::anyhow!("Invalid exclude_pattern regex: {}", e))?,
+            )
+        } else {
+            None
+        };
+
         let mut all_results = Vec::new();
 
         for (file_path, index) in &self.indices {
@@ -55,26 +67,40 @@ impl Investigator {
                 }
             }
 
-            let entries = self.search_in_index(index, query)?;
+            let entries = self.search_in_index(index, query, exclude_regex.as_ref())?;
             all_results.extend(entries);
         }
 
-        // Sort by relevance and timestamp
-        all_results.sort_by(|a, b| {
-            b.relevance_score
-                .partial_cmp(&a.relevance_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| match (&a.entry.timestamp, &b.entry.timestamp) {
-                    (Some(t1), Some(t2)) => t1.cmp(t2),
-                    _ => std::cmp::Ordering::Equal,
-                })
-        });
-
         let total_matches = all_results.len();
-        let results = if let Some(limit) = query.limit {
-            all_results.into_iter().take(limit).collect()
+
+        // Handle tail vs limit
+        let results = if let Some(tail_n) = query.tail {
+            // Sort by timestamp ASC and take last N
+            all_results.sort_by(|a, b| match (&a.entry.timestamp, &b.entry.timestamp) {
+                (Some(t1), Some(t2)) => t1.cmp(t2),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => a.entry.line_number.cmp(&b.entry.line_number),
+            });
+            let skip = all_results.len().saturating_sub(tail_n);
+            all_results.into_iter().skip(skip).collect()
         } else {
-            all_results
+            // Sort by relevance and timestamp
+            all_results.sort_by(|a, b| {
+                b.relevance_score
+                    .total_cmp(&a.relevance_score)
+                    .then_with(|| match (&a.entry.timestamp, &b.entry.timestamp) {
+                        (Some(t1), Some(t2)) => t1.cmp(t2),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    })
+            });
+            if let Some(limit) = query.limit {
+                all_results.into_iter().take(limit).collect()
+            } else {
+                all_results
+            }
         };
 
         Ok(SearchResults {
@@ -89,6 +115,7 @@ impl Investigator {
         &self,
         index: &LogIndex,
         query: &SearchQuery,
+        exclude_regex: Option<&Regex>,
     ) -> anyhow::Result<Vec<SearchResult>> {
         let entries = index
             .entries
@@ -97,7 +124,7 @@ impl Investigator {
 
         let results: Vec<SearchResult> = entries
             .par_iter()
-            .filter(|entry| self.matches_filters(entry, &query.filters))
+            .filter(|entry| self.matches_filters(entry, &query.filters, exclude_regex))
             .filter_map(|entry| {
                 let score = self.calculate_relevance(entry, query);
                 if score > 0.0 {
@@ -123,8 +150,13 @@ impl Investigator {
     }
 
     /// Check if entry matches filters
-    fn matches_filters(&self, entry: &LogEntry, filters: &SearchFilters) -> bool {
-        // Level filter
+    fn matches_filters(
+        &self,
+        entry: &LogEntry,
+        filters: &SearchFilters,
+        exclude_regex: Option<&Regex>,
+    ) -> bool {
+        // Level include filter
         if !filters.levels.is_empty() {
             if let Some(level) = entry.level {
                 if !filters.levels.contains(&level) {
@@ -132,6 +164,15 @@ impl Investigator {
                 }
             } else {
                 return false;
+            }
+        }
+
+        // Level exclude filter
+        if !filters.exclude_levels.is_empty() {
+            if let Some(level) = entry.level {
+                if filters.exclude_levels.contains(&level) {
+                    return false;
+                }
             }
         }
 
@@ -151,23 +192,74 @@ impl Investigator {
             }
         }
 
-        // Thread ID filter
-        if let Some(ref thread_id) = filters.thread_id {
+        // Thread ID filter (single OR multi-value)
+        if let Some(ref thread_ids) = filters.thread_ids {
+            if !thread_ids.is_empty() {
+                match &entry.thread_id {
+                    Some(tid) => {
+                        if !thread_ids.contains(tid) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+        } else if let Some(ref thread_id) = filters.thread_id {
             if entry.thread_id.as_ref() != Some(thread_id) {
                 return false;
             }
         }
 
-        // Correlation ID filter
-        if let Some(ref correlation_id) = filters.correlation_id {
+        // Correlation ID filter (single OR multi-value)
+        if let Some(ref correlation_ids) = filters.correlation_ids {
+            if !correlation_ids.is_empty() {
+                match &entry.correlation_id {
+                    Some(cid) => {
+                        if !correlation_ids.contains(cid) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+        } else if let Some(ref correlation_id) = filters.correlation_id {
             if entry.correlation_id.as_ref() != Some(correlation_id) {
                 return false;
             }
         }
 
-        // Trace ID filter
-        if let Some(ref trace_id) = filters.trace_id {
+        // Trace ID filter (single OR multi-value)
+        if let Some(ref trace_ids) = filters.trace_ids {
+            if !trace_ids.is_empty() {
+                match &entry.trace_id {
+                    Some(tid) => {
+                        if !trace_ids.contains(tid) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+        } else if let Some(ref trace_id) = filters.trace_id {
             if entry.trace_id.as_ref() != Some(trace_id) {
+                return false;
+            }
+        }
+
+        // Service name filter (single OR multi-value)
+        if let Some(ref service_names) = filters.service_names {
+            if !service_names.is_empty() {
+                match &entry.service_name {
+                    Some(sn) => {
+                        if !service_names.contains(sn) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+        } else if let Some(ref service_name) = filters.service_name {
+            if entry.service_name.as_ref() != Some(service_name) {
                 return false;
             }
         }
@@ -175,6 +267,13 @@ impl Investigator {
         // Has correlation ID filter
         if let Some(has_correlation_id) = filters.has_correlation_id {
             if entry.correlation_id.is_some() != has_correlation_id {
+                return false;
+            }
+        }
+
+        // Exclude pattern filter (regex pre-compiled, passed in)
+        if let Some(regex) = exclude_regex {
+            if regex.is_match(&entry.message) || regex.is_match(&entry.raw) {
                 return false;
             }
         }
@@ -458,6 +557,127 @@ impl Investigator {
         Ok(metadata)
     }
 
+    /// Extract all unique IDs (thread, correlation, trace, service) from loaded files
+    pub fn extract_ids(&self, filters: Option<&SearchFilters>) -> anyhow::Result<IdsResult> {
+        type IdMap = HashMap<String, (usize, Option<DateTime<Utc>>, Option<DateTime<Utc>>)>;
+
+        let mut thread_map: IdMap = HashMap::new();
+        let mut correlation_map: IdMap = HashMap::new();
+        let mut trace_map: IdMap = HashMap::new();
+        let mut service_map: IdMap = HashMap::new();
+
+        let mut total_entries = 0usize;
+        let mut min_ts: Option<DateTime<Utc>> = None;
+        let mut max_ts: Option<DateTime<Utc>> = None;
+
+        for index in self.indices.values() {
+            if let Some(entries) = &index.entries {
+                for entry in entries {
+                    // Apply time filter if present
+                    if let Some(f) = filters {
+                        if let Some(ref time_range) = f.time_range {
+                            if let Some(ts) = entry.timestamp {
+                                if let Some(start) = time_range.start {
+                                    if ts < start {
+                                        continue;
+                                    }
+                                }
+                                if let Some(end) = time_range.end {
+                                    if ts > end {
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    total_entries += 1;
+                    let ts = entry.timestamp;
+
+                    // Update global time range
+                    if let Some(t) = ts {
+                        min_ts = Some(min_ts.map_or(t, |m: DateTime<Utc>| m.min(t)));
+                        max_ts = Some(max_ts.map_or(t, |m: DateTime<Utc>| m.max(t)));
+                    }
+
+                    // Track thread IDs
+                    if let Some(ref tid) = entry.thread_id {
+                        let e = thread_map.entry(tid.clone()).or_insert((0, None, None));
+                        e.0 += 1;
+                        if let Some(t) = ts {
+                            e.1 = Some(e.1.map_or(t, |m: DateTime<Utc>| m.min(t)));
+                            e.2 = Some(e.2.map_or(t, |m: DateTime<Utc>| m.max(t)));
+                        }
+                    }
+
+                    // Track correlation IDs
+                    if let Some(ref cid) = entry.correlation_id {
+                        let e = correlation_map
+                            .entry(cid.clone())
+                            .or_insert((0, None, None));
+                        e.0 += 1;
+                        if let Some(t) = ts {
+                            e.1 = Some(e.1.map_or(t, |m: DateTime<Utc>| m.min(t)));
+                            e.2 = Some(e.2.map_or(t, |m: DateTime<Utc>| m.max(t)));
+                        }
+                    }
+
+                    // Track trace IDs
+                    if let Some(ref tid) = entry.trace_id {
+                        let e = trace_map.entry(tid.clone()).or_insert((0, None, None));
+                        e.0 += 1;
+                        if let Some(t) = ts {
+                            e.1 = Some(e.1.map_or(t, |m: DateTime<Utc>| m.min(t)));
+                            e.2 = Some(e.2.map_or(t, |m: DateTime<Utc>| m.max(t)));
+                        }
+                    }
+
+                    // Track service names
+                    if let Some(ref sn) = entry.service_name {
+                        let e = service_map.entry(sn.clone()).or_insert((0, None, None));
+                        e.0 += 1;
+                        if let Some(t) = ts {
+                            e.1 = Some(e.1.map_or(t, |m: DateTime<Utc>| m.min(t)));
+                            e.2 = Some(e.2.map_or(t, |m: DateTime<Utc>| m.max(t)));
+                        }
+                    }
+                }
+            }
+        }
+
+        fn to_id_infos(map: IdMap) -> Vec<IdInfo> {
+            let mut infos: Vec<IdInfo> = map
+                .into_iter()
+                .map(|(id, (count, first, last))| IdInfo {
+                    id,
+                    count,
+                    first_seen: first,
+                    last_seen: last,
+                })
+                .collect();
+            infos.sort_by(|a, b| b.count.cmp(&a.count));
+            infos
+        }
+
+        let time_range = if min_ts.is_some() || max_ts.is_some() {
+            Some(TimeRange {
+                start: min_ts,
+                end: max_ts,
+            })
+        } else {
+            None
+        };
+
+        Ok(IdsResult {
+            thread_ids: to_id_infos(thread_map),
+            correlation_ids: to_id_infos(correlation_map),
+            trace_ids: to_id_infos(trace_map),
+            services: to_id_infos(service_map),
+            total_entries,
+            time_range,
+        })
+    }
+
     /// Build hierarchical view of threads/spans for a given identifier
     pub fn build_hierarchy(
         &self,
@@ -512,5 +732,246 @@ impl Investigator {
 impl Default for Investigator {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn make_test_file(entries: &[&str]) -> NamedTempFile {
+        let mut f = NamedTempFile::new().unwrap();
+        for e in entries {
+            writeln!(f, "{}", e).unwrap();
+        }
+        f.flush().unwrap();
+        f
+    }
+
+    fn json_entry(ts: &str, level: &str, msg: &str, thread: &str, svc: &str) -> String {
+        format!(
+            r#"{{"timestamp":"{}","level":"{}","message":"{}","thread_id":"{}","service_name":"{}"}}"#,
+            ts, level, msg, thread, svc
+        )
+    }
+
+    fn json_entry_corr(ts: &str, level: &str, msg: &str, thread: &str, corr: &str) -> String {
+        format!(
+            r#"{{"timestamp":"{}","level":"{}","message":"{}","thread_id":"{}","correlation_id":"{}"}}"#,
+            ts, level, msg, thread, corr
+        )
+    }
+
+    fn build_investigator(file: &NamedTempFile) -> Investigator {
+        let mut inv = Investigator::new();
+        inv.load_files(&[file.path().to_path_buf()]).unwrap();
+        inv
+    }
+
+    fn make_query(
+        file: &NamedTempFile,
+        filters: SearchFilters,
+        query: Option<String>,
+    ) -> SearchQuery {
+        SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query,
+            filters,
+            limit: None,
+            tail: None,
+            context_lines: None,
+        }
+    }
+
+    #[test]
+    fn test_exclude_levels() {
+        let entries: Vec<String> = vec![
+            json_entry("2024-01-15T10:00:00Z", "DEBUG", "debug msg", "w-0", "svc-a"),
+            json_entry("2024-01-15T10:00:01Z", "INFO", "info msg", "w-0", "svc-a"),
+            json_entry("2024-01-15T10:00:02Z", "WARN", "warn msg", "w-0", "svc-a"),
+            json_entry("2024-01-15T10:00:03Z", "ERROR", "error msg", "w-0", "svc-a"),
+        ];
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = make_query(
+            &file,
+            SearchFilters {
+                exclude_levels: vec![LogLevel::Debug],
+                ..Default::default()
+            },
+            None,
+        );
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 3);
+        for r in &results.results {
+            assert_ne!(r.entry.level, Some(LogLevel::Debug));
+        }
+    }
+
+    #[test]
+    fn test_multi_thread_ids() {
+        let entries: Vec<String> = vec![
+            json_entry("2024-01-15T10:00:00Z", "INFO", "a", "w-0", "svc-a"),
+            json_entry("2024-01-15T10:00:01Z", "INFO", "b", "w-1", "svc-a"),
+            json_entry("2024-01-15T10:00:02Z", "INFO", "c", "w-2", "svc-a"),
+            json_entry("2024-01-15T10:00:03Z", "INFO", "d", "w-0", "svc-a"),
+        ];
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = make_query(
+            &file,
+            SearchFilters {
+                thread_ids: Some(vec!["w-0".to_string(), "w-1".to_string()]),
+                ..Default::default()
+            },
+            None,
+        );
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 3);
+    }
+
+    #[test]
+    fn test_service_filter() {
+        let entries: Vec<String> = vec![
+            json_entry("2024-01-15T10:00:00Z", "INFO", "a", "w-0", "api"),
+            json_entry("2024-01-15T10:00:01Z", "INFO", "b", "w-0", "worker"),
+            json_entry("2024-01-15T10:00:02Z", "INFO", "c", "w-0", "api"),
+        ];
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = make_query(
+            &file,
+            SearchFilters {
+                service_name: Some("api".to_string()),
+                ..Default::default()
+            },
+            None,
+        );
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 2);
+    }
+
+    #[test]
+    fn test_tail() {
+        let mut entries = Vec::new();
+        for i in 0..100 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:{:02}:00Z", i % 60),
+                "INFO",
+                &format!("msg {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: None,
+            tail: Some(10),
+            context_lines: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 100);
+        assert_eq!(results.results.len(), 10);
+    }
+
+    #[test]
+    fn test_exclude_pattern() {
+        let entries: Vec<String> = vec![
+            json_entry(
+                "2024-01-15T10:00:00Z",
+                "INFO",
+                "health check ok",
+                "w-0",
+                "svc",
+            ),
+            json_entry("2024-01-15T10:00:01Z", "ERROR", "db timeout", "w-0", "svc"),
+            json_entry(
+                "2024-01-15T10:00:02Z",
+                "INFO",
+                "health check ok",
+                "w-0",
+                "svc",
+            ),
+            json_entry("2024-01-15T10:00:03Z", "INFO", "user login", "w-0", "svc"),
+        ];
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = make_query(
+            &file,
+            SearchFilters {
+                exclude_pattern: Some("health".to_string()),
+                ..Default::default()
+            },
+            None,
+        );
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 2);
+    }
+
+    #[test]
+    fn test_backward_compat_single_thread_id() {
+        let entries: Vec<String> = vec![
+            json_entry("2024-01-15T10:00:00Z", "INFO", "a", "w-0", "svc"),
+            json_entry("2024-01-15T10:00:01Z", "INFO", "b", "w-1", "svc"),
+        ];
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        // Old-style single thread_id still works
+        let q = make_query(
+            &file,
+            SearchFilters {
+                thread_id: Some("w-0".to_string()),
+                ..Default::default()
+            },
+            None,
+        );
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 1);
+        assert_eq!(results.results[0].entry.thread_id, Some("w-0".to_string()));
+    }
+
+    #[test]
+    fn test_extract_ids() {
+        let entries: Vec<String> = vec![
+            json_entry_corr("2024-01-15T10:00:00Z", "INFO", "a", "w-0", "req-1"),
+            json_entry_corr("2024-01-15T10:00:01Z", "INFO", "b", "w-1", "req-1"),
+            json_entry_corr("2024-01-15T10:00:02Z", "INFO", "c", "w-0", "req-2"),
+            json_entry_corr("2024-01-15T10:00:03Z", "ERROR", "d", "w-1", "req-2"),
+        ];
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let result = inv.extract_ids(None).unwrap();
+        assert_eq!(result.total_entries, 4);
+        assert_eq!(result.thread_ids.len(), 2);
+        assert_eq!(result.correlation_ids.len(), 2);
+
+        // Both threads have 2 entries each
+        for tid in &result.thread_ids {
+            assert_eq!(tid.count, 2);
+        }
+        // Both correlation IDs have 2 entries each
+        for cid in &result.correlation_ids {
+            assert_eq!(cid.count, 2);
+        }
     }
 }

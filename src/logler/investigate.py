@@ -184,15 +184,83 @@ def _normalize_context_payload(payload: Dict[str, Any]) -> None:
     _normalize_entries(payload.get("context_after", []))
 
 
+def _build_time_range(
+    after: Optional[str] = None,
+    before: Optional[str] = None,
+    last: Optional[str] = None,
+) -> Optional[Dict[str, str]]:
+    """Build a time_range dict from --after, --before, --last args.
+
+    Returns ``{"start": iso_str, "end": iso_str}`` or ``None``.
+    """
+    if last:
+        from datetime import timedelta
+
+        match = re.match(r"^(\d+)(s|m|h|d)$", last.lower())
+        if not match:
+            raise ValueError(f"Invalid duration: {last}")
+        value = int(match.group(1))
+        unit = match.group(2)
+        delta = {
+            "s": timedelta(seconds=value),
+            "m": timedelta(minutes=value),
+            "h": timedelta(hours=value),
+            "d": timedelta(days=value),
+        }[unit]
+        now = datetime.now().astimezone()
+        return {"start": (now - delta).isoformat(), "end": now.isoformat()}
+
+    result: Dict[str, str] = {}
+    if after:
+        result["start"] = datetime.fromisoformat(after.replace("Z", "+00:00")).isoformat()
+    if before:
+        result["end"] = datetime.fromisoformat(before.replace("Z", "+00:00")).isoformat()
+    return result if result else None
+
+
+_LEVEL_MAP = {
+    "trace": "Trace",
+    "debug": "Debug",
+    "info": "Info",
+    "warn": "Warn",
+    "warning": "Warn",
+    "error": "Error",
+    "fatal": "Fatal",
+    "critical": "Fatal",
+}
+
+
+def _parse_levels(level_str: str) -> List[str]:
+    """Parse a comma-separated level string into Rust-enum names."""
+    result = []
+    for part in level_str.split(","):
+        part = part.strip().lower()
+        if not part:
+            continue
+        mapped = _LEVEL_MAP.get(part)
+        if not mapped:
+            raise ValueError(f"Unknown log level: {part}")
+        result.append(mapped)
+    return result
+
+
 def search(
     files: List[str],
     query: Optional[str] = None,
     level: Optional[str] = None,
+    exclude_level: Optional[str] = None,
+    exclude_query: Optional[str] = None,
     thread_id: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    service_name: Optional[str] = None,
     limit: Optional[int] = None,
+    tail: Optional[int] = None,
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
     context_lines: int = 3,
     output_format: str = "full",
+    fields: Optional[List[str]] = None,
     parser_format: Optional[str] = None,
     custom_regex: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -202,55 +270,25 @@ def search(
     Args:
         files: List of log file paths
         query: Search query string
-        level: Filter by log level (ERROR, WARN, INFO, etc.)
-        thread_id: Filter by thread ID
-        correlation_id: Filter by correlation ID
-        limit: Maximum number of results
+        level: Filter by log level (comma-separated, e.g. "ERROR,WARN")
+        exclude_level: Exclude log levels (comma-separated)
+        exclude_query: Regex pattern to exclude matching entries
+        thread_id: Filter by thread ID (comma-separated for multi)
+        correlation_id: Filter by correlation ID (comma-separated for multi)
+        trace_id: Filter by trace ID (comma-separated for multi)
+        service_name: Filter by service name (comma-separated for multi)
+        limit: Maximum number of results (first N by relevance)
+        tail: Return last N matches by timestamp
+        time_start: Start of time range (ISO8601)
+        time_end: End of time range (ISO8601)
         context_lines: Number of context lines before/after each result
         output_format: Output format - "full", "summary", "count", or "compact"
-                      - "full": Complete log entries (default)
-                      - "summary": Aggregated summary with examples
-                      - "count": Just counts, no log content
-                      - "compact": Essential fields only (no raw logs)
+        fields: List of fields to include in output (projection)
+        parser_format: Optional log format hint
+        custom_regex: Optional custom parsing regex
 
     Returns:
-        Dictionary with search results (format depends on output_format):
-
-        For "full":
-        {
-            "results": [...],  # Full entries
-            "total_matches": 123,
-            "search_time_ms": 45
-        }
-
-        For "summary":
-        {
-            "total_matches": 123,
-            "unique_messages": 15,
-            "log_levels": {"ERROR": 100, "WARN": 23},
-            "top_messages": [
-                {"message": "...", "count": 50, "first_seen": "...", "last_seen": "..."},
-                ...
-            ],
-            "sample_entries": [...]  # 3-5 examples
-        }
-
-        For "count":
-        {
-            "total_matches": 123,
-            "by_level": {"ERROR": 100, "WARN": 23},
-            "by_file": {"app.log": 80, "api.log": 43},
-            "time_range": {"start": "...", "end": "..."}
-        }
-
-        For "compact":
-        {
-            "matches": [
-                {"time": "...", "level": "ERROR", "msg": "...", "thread": "..."},
-                ...
-            ],
-            "total": 123
-        }
+        Dictionary with search results (format depends on output_format)
     """
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
@@ -258,41 +296,74 @@ def search(
     investigator = logler_rs.PyInvestigator()
     _load_files_with_config(investigator, files, parser_format, custom_regex)
 
-    # Build query
-    filters = {"levels": []}
+    # Build filters
+    filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
     if level:
-        level_map = {
-            "trace": "Trace",
-            "debug": "Debug",
-            "info": "Info",
-            "warn": "Warn",
-            "warning": "Warn",
-            "error": "Error",
-            "fatal": "Fatal",
-            "critical": "Fatal",
-        }
-        normalized_level = level_map.get(level.lower())
-        if not normalized_level:
-            raise ValueError(f"Unknown log level: {level}")
-        filters["levels"] = [normalized_level]
-    if thread_id:
-        filters["thread_id"] = thread_id
-    if correlation_id:
-        filters["correlation_id"] = correlation_id
+        filters["levels"] = _parse_levels(level)
+    if exclude_level:
+        filters["exclude_levels"] = _parse_levels(exclude_level)
+    if exclude_query:
+        filters["exclude_pattern"] = exclude_query
 
-    query_dict = {
+    # ID filters — comma-separated → multi-value
+    if thread_id:
+        parts = [p.strip() for p in thread_id.split(",") if p.strip()]
+        if len(parts) == 1:
+            filters["thread_id"] = parts[0]
+        else:
+            filters["thread_ids"] = parts
+    if correlation_id:
+        parts = [p.strip() for p in correlation_id.split(",") if p.strip()]
+        if len(parts) == 1:
+            filters["correlation_id"] = parts[0]
+        else:
+            filters["correlation_ids"] = parts
+    if trace_id:
+        parts = [p.strip() for p in trace_id.split(",") if p.strip()]
+        if len(parts) == 1:
+            filters["trace_id"] = parts[0]
+        else:
+            filters["trace_ids"] = parts
+    if service_name:
+        parts = [p.strip() for p in service_name.split(",") if p.strip()]
+        if len(parts) == 1:
+            filters["service_name"] = parts[0]
+        else:
+            filters["service_names"] = parts
+
+    # Time range — push to Rust
+    if time_start or time_end:
+        tr: Dict[str, str] = {}
+        if time_start:
+            tr["start"] = time_start
+        if time_end:
+            tr["end"] = time_end
+        filters["time_range"] = tr
+
+    query_dict: Dict[str, Any] = {
         "files": files,
         "query": query,
         "filters": filters,
         "limit": limit,
         "context_lines": context_lines,
     }
+    if tail is not None:
+        query_dict["tail"] = tail
 
-    # Call Rust engine with the full query payload
+    # Call Rust engine
     result_json = investigator.search(json.dumps(query_dict))
     result = json.loads(result_json)
     _normalize_search_result_levels(result)
     _apply_custom_regex_to_results(result, custom_regex)
+
+    # Field projection
+    if fields and output_format == "full":
+        field_set = set(fields)
+        for item in result.get("results", []):
+            entry = item.get("entry", {})
+            keys_to_remove = [k for k in entry if k not in field_set]
+            for k in keys_to_remove:
+                del entry[k]
 
     # Transform based on output_format
     if output_format == "full":
@@ -305,6 +376,42 @@ def search(
         return _format_as_compact(result)
     else:
         return result
+
+
+def extract_ids(
+    files: List[str],
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Extract all unique IDs (thread, correlation, trace, service) from files.
+
+    Args:
+        files: List of log file paths
+        time_start: Optional start of time range (ISO8601)
+        time_end: Optional end of time range (ISO8601)
+
+    Returns:
+        Dictionary with thread_ids, correlation_ids, trace_ids, services,
+        total_entries, and time_range.
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    investigator = logler_rs.PyInvestigator()
+    investigator.load_files(files)
+
+    filters_json = None
+    if time_start or time_end:
+        f: Dict[str, Any] = {}
+        tr: Dict[str, str] = {}
+        if time_start:
+            tr["start"] = time_start
+        if time_end:
+            tr["end"] = time_end
+        f["time_range"] = tr
+        filters_json = json.dumps(f)
+
+    return json.loads(investigator.extract_ids(filters_json))
 
 
 def follow_thread(
@@ -1945,46 +2052,91 @@ class Investigator:
         self,
         query: Optional[str] = None,
         level: Optional[str] = None,
+        exclude_level: Optional[str] = None,
+        exclude_query: Optional[str] = None,
         thread_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        service_name: Optional[str] = None,
         limit: Optional[int] = None,
+        tail: Optional[int] = None,
+        time_start: Optional[str] = None,
+        time_end: Optional[str] = None,
         context_lines: int = 3,
     ) -> Dict[str, Any]:
         """Search loaded files."""
-        filters = {"levels": []}
+        filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
         if level:
-            level_map = {
-                "trace": "Trace",
-                "debug": "Debug",
-                "info": "Info",
-                "warn": "Warn",
-                "warning": "Warn",
-                "error": "Error",
-                "fatal": "Fatal",
-                "critical": "Fatal",
-            }
-            normalized_level = level_map.get(level.lower())
-            if not normalized_level:
-                raise ValueError(f"Unknown log level: {level}")
-            filters["levels"] = [normalized_level]
+            filters["levels"] = _parse_levels(level)
+        if exclude_level:
+            filters["exclude_levels"] = _parse_levels(exclude_level)
+        if exclude_query:
+            filters["exclude_pattern"] = exclude_query
         if thread_id:
-            filters["thread_id"] = thread_id
+            parts = [p.strip() for p in thread_id.split(",") if p.strip()]
+            if len(parts) == 1:
+                filters["thread_id"] = parts[0]
+            else:
+                filters["thread_ids"] = parts
         if correlation_id:
-            filters["correlation_id"] = correlation_id
+            parts = [p.strip() for p in correlation_id.split(",") if p.strip()]
+            if len(parts) == 1:
+                filters["correlation_id"] = parts[0]
+            else:
+                filters["correlation_ids"] = parts
+        if trace_id:
+            parts = [p.strip() for p in trace_id.split(",") if p.strip()]
+            if len(parts) == 1:
+                filters["trace_id"] = parts[0]
+            else:
+                filters["trace_ids"] = parts
+        if service_name:
+            parts = [p.strip() for p in service_name.split(",") if p.strip()]
+            if len(parts) == 1:
+                filters["service_name"] = parts[0]
+            else:
+                filters["service_names"] = parts
+        if time_start or time_end:
+            tr: Dict[str, str] = {}
+            if time_start:
+                tr["start"] = time_start
+            if time_end:
+                tr["end"] = time_end
+            filters["time_range"] = tr
 
-        query_dict = {
+        query_dict: Dict[str, Any] = {
             "files": self._files,
             "query": query,
             "filters": filters,
             "limit": limit,
             "context_lines": context_lines,
         }
+        if tail is not None:
+            query_dict["tail"] = tail
 
         result_json = self._investigator.search(json.dumps(query_dict))
         result = json.loads(result_json)
         _normalize_search_result_levels(result)
         _apply_custom_regex_to_results(result, self._custom_regex)
         return result
+
+    def extract_ids(
+        self,
+        time_start: Optional[str] = None,
+        time_end: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Extract all unique IDs from loaded files."""
+        filters_json = None
+        if time_start or time_end:
+            f: Dict[str, Any] = {}
+            tr: Dict[str, str] = {}
+            if time_start:
+                tr["start"] = time_start
+            if time_end:
+                tr["end"] = time_end
+            f["time_range"] = tr
+            filters_json = json.dumps(f)
+        return json.loads(self._investigator.extract_ids(filters_json))
 
     def follow_thread(
         self,
@@ -3614,398 +3766,11 @@ def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str,
 
     return {
         "time_coverage": time_coverage,
-        "level_distribution": dict(level_coverage),
+        "level_coverage": dict(level_coverage),
         "unique_threads_in_sample": len(sample_threads),
         "unique_threads_in_population": len(pop_threads),
         "thread_coverage_pct": thread_coverage_pct,
     }
-
-
-# Automatic Insights and Suggestions
-
-
-def analyze_with_insights(
-    files: List[str], level: Optional[str] = None, auto_investigate: bool = True
-) -> Dict[str, Any]:
-    """
-    Analyze logs and automatically generate insights and suggestions.
-
-    This is the "smart mode" that does the thinking for you - perfect for
-    LLMs that want quick actionable information.
-
-    Args:
-        files: List of log file paths
-        level: Optional log level filter (default: analyzes all levels)
-        auto_investigate: Automatically perform follow-up investigations
-
-    Returns:
-        Dictionary with insights:
-        {
-            "overview": {...},  # Quick stats
-            "insights": [
-                {
-                    "type": "error_spike",
-                    "severity": "high",
-                    "description": "Error rate 10x higher than normal",
-                    "evidence": [...],
-                    "suggestion": "Check database connections"
-                },
-                ...
-            ],
-            "suggestions": [
-                "Follow thread req-12345 - appears to be failing consistently",
-                "Check database connection pool size",
-                ...
-            ],
-            "next_steps": [...]  # Recommended next investigation steps
-        }
-
-    Example:
-        # One-shot analysis with insights
-        result = analyze_with_insights(files=["app.log"])
-
-        for insight in result['insights']:
-            print(f"[{insight['severity']}] {insight['description']}")
-            print(f"  → {insight['suggestion']}")
-    """
-    if not RUST_AVAILABLE:
-        raise RuntimeError("Rust backend not available")
-
-    insights = []
-    suggestions = []
-    next_steps = []
-
-    # Get overview
-    metadata = get_metadata(files)
-    search_results = search(files, level=level, output_format="summary")
-
-    # Insight 1: Error rate analysis
-    total = search_results.get("total_matches", 0)
-    levels = search_results.get("log_levels", {})
-    error_count = levels.get("ERROR", 0) + levels.get("FATAL", 0)
-
-    if total > 0:
-        error_rate = error_count / total
-        if error_rate > 0.1:  # More than 10% errors
-            insights.append(
-                {
-                    "type": "high_error_rate",
-                    "severity": "high",
-                    "description": f"High error rate: {error_rate:.1%} ({error_count}/{total})",
-                    "evidence": {"error_count": error_count, "total": total, "rate": error_rate},
-                    "suggestion": "Investigate most common errors first",
-                }
-            )
-            next_steps.append(
-                'Run: logler llm sql "SELECT message, COUNT(*) FROM logs GROUP BY message ORDER BY COUNT(*) DESC" to find patterns'
-            )
-
-    # Insight 2: Pattern detection
-    if auto_investigate and error_count > 0:
-        patterns = find_patterns(files, min_occurrences=2)
-        if patterns.get("patterns"):
-            pattern_count = len(patterns["patterns"])
-            insights.append(
-                {
-                    "type": "repeated_patterns",
-                    "severity": "medium",
-                    "description": f"Found {pattern_count} repeated error patterns",
-                    "evidence": patterns["patterns"][:3],  # Top 3
-                    "suggestion": "These errors are systematic, not random",
-                }
-            )
-
-            # Suggest investigating the most frequent pattern
-            if patterns["patterns"]:
-                top_pattern = patterns["patterns"][0]
-                suggestions.append(
-                    f"Investigate pattern: '{top_pattern.get('pattern', '')[:50]}...'"
-                )
-
-    # Insight 3: Check for cascading failures
-    if error_count > 5:
-        # Look for timing patterns
-        top_messages = search_results.get("top_messages", [])
-        if top_messages:
-            # Check if errors happened in quick succession
-            time_clustered = any(msg.get("count", 0) > 3 for msg in top_messages)
-            if time_clustered:
-                insights.append(
-                    {
-                        "type": "possible_cascade",
-                        "severity": "high",
-                        "description": "Errors may be cascading (multiple errors in short time)",
-                        "evidence": top_messages[:2],
-                        "suggestion": "Look for root cause - later errors may be symptoms",
-                    }
-                )
-                suggestions.append("Check timestamps - investigate earliest error first")
-
-    # Insight 4: Thread analysis
-    for meta in metadata:
-        unique_correlations = meta.get("unique_correlation_ids", 0)
-
-        if error_count > 0 and unique_correlations > 0:
-            # Some threads are failing
-            insights.append(
-                {
-                    "type": "thread_failures",
-                    "severity": "medium",
-                    "description": f"Errors across {unique_correlations} different requests",
-                    "evidence": {"unique_correlations": unique_correlations},
-                    "suggestion": "Compare successful vs failed requests",
-                }
-            )
-            next_steps.append(
-                "Run: logler llm compare <failed_id> <success_id> to find differences"
-            )
-
-    # Generate suggestions based on insights
-    if not suggestions:
-        if error_count > 0:
-            suggestions.append("Start by examining the first error - it may be the root cause")
-            suggestions.append(
-                "Run: logler llm correlate <correlation_id> to see full request flow"
-            )
-        else:
-            suggestions.append("No errors found - logs look healthy")
-
-    # Overview
-    overview = {
-        "total_logs": total,
-        "error_count": error_count,
-        "error_rate": error_count / total if total > 0 else 0,
-        "files_analyzed": len(files),
-        "log_levels": levels,
-    }
-
-    return {
-        "overview": overview,
-        "insights": insights,
-        "suggestions": suggestions,
-        "next_steps": next_steps,
-        "investigated_automatically": auto_investigate,
-    }
-
-
-def explain(
-    entry: Optional[Dict[str, Any]] = None,
-    error_message: Optional[str] = None,
-    context: str = "general",
-) -> str:
-    """
-    Explain a log entry or error message in simple terms.
-
-    Perfect for when you encounter cryptic errors or need to understand
-    what's happening. Provides human-friendly explanations and next steps.
-
-    Args:
-        entry: Log entry dictionary to explain
-        error_message: Or just provide an error message string
-        context: Context for explanation ("production", "development", "general")
-
-    Returns:
-        Human-friendly explanation string
-
-    Example:
-        # Explain a log entry
-        explanation = explain(
-            entry=error_entry,
-            context="production"
-        )
-        print(explanation)
-
-        # Explain just a message
-        explanation = explain(
-            error_message="Connection pool exhausted",
-            context="production"
-        )
-    """
-    if entry:
-        message = entry.get("message", "")
-        level = entry.get("level", "INFO")
-    elif error_message:
-        message = error_message
-        level = "ERROR"
-    else:
-        return "No entry or message provided to explain"
-
-    # Build explanation
-    lines = []
-
-    # What happened
-    lines.append("## What This Means\n")
-
-    # Pattern matching for common errors
-    message_lower = message.lower()
-
-    if "timeout" in message_lower or "timed out" in message_lower:
-        lines.append("A timeout means an operation took too long and was cancelled.")
-        lines.append("\n**Common causes:**")
-        lines.append("- Database query is too slow")
-        lines.append("- Network latency issues")
-        lines.append("- Service is overloaded")
-        lines.append("- Deadlock or infinite loop")
-        lines.append("\n**Next steps:**")
-        lines.append("1. Check what operation was timing out")
-        lines.append("2. Look at the service being called - is it slow or down?")
-        lines.append("3. Review timeout configuration - is it too short?")
-
-    elif "connection" in message_lower and (
-        "refused" in message_lower or "failed" in message_lower
-    ):
-        lines.append("A connection failure means the application couldn't reach another service.")
-        lines.append("\n**Common causes:**")
-        lines.append("- Service is down or not responding")
-        lines.append("- Network connectivity issues")
-        lines.append("- Firewall blocking the connection")
-        lines.append("- Wrong hostname/port configuration")
-        lines.append("\n**Next steps:**")
-        lines.append("1. Check if the target service is running")
-        lines.append("2. Verify network connectivity")
-        lines.append("3. Check configuration (hostname, port, etc.)")
-
-    elif "pool exhausted" in message_lower or "too many connections" in message_lower:
-        lines.append("The connection pool is exhausted - all available connections are in use.")
-        lines.append("\n**Common causes:**")
-        lines.append("- Traffic spike overwhelming the system")
-        lines.append("- Connection leaks (not closing connections)")
-        lines.append("- Pool size too small for the load")
-        lines.append("- Slow queries holding connections too long")
-        lines.append("\n**Next steps:**")
-        lines.append("1. Check connection pool size configuration")
-        lines.append("2. Look for connection leaks in code")
-        lines.append("3. Identify slow operations holding connections")
-        lines.append("4. Consider increasing pool size if load is legitimate")
-
-    elif "out of memory" in message_lower or "outofmemoryerror" in message_lower:
-        lines.append("The application ran out of available memory.")
-        lines.append("\n**Common causes:**")
-        lines.append("- Memory leak (memory not being freed)")
-        lines.append("- Processing too much data at once")
-        lines.append("- Insufficient memory allocated")
-        lines.append("- Caching too aggressively")
-        lines.append("\n**Next steps:**")
-        lines.append("1. Check memory allocation settings")
-        lines.append("2. Look for memory leaks")
-        lines.append("3. Review data processing - can it be batched/streamed?")
-        lines.append("4. Check garbage collection logs")
-
-    elif "null" in message_lower and ("pointer" in message_lower or "reference" in message_lower):
-        lines.append("Tried to use something that doesn't exist (null/None).")
-        lines.append("\n**Common causes:**")
-        lines.append("- Missing input validation")
-        lines.append("- Unexpected missing data")
-        lines.append("- Race condition")
-        lines.append("- API returned unexpected null")
-        lines.append("\n**Next steps:**")
-        lines.append("1. Check the stack trace to find where it happened")
-        lines.append("2. Add null checks and validation")
-        lines.append("3. Review why the value was null")
-
-    elif (
-        "permission" in message_lower
-        or "access denied" in message_lower
-        or "forbidden" in message_lower
-    ):
-        lines.append("The application doesn't have permission to perform this action.")
-        lines.append("\n**Common causes:**")
-        lines.append("- Incorrect file/resource permissions")
-        lines.append("- Wrong user/service account")
-        lines.append("- Missing IAM roles or policies")
-        lines.append("- Authentication token expired")
-        lines.append("\n**Next steps:**")
-        lines.append("1. Check file/resource permissions")
-        lines.append("2. Verify the application is running as the correct user")
-        lines.append("3. Review access control policies")
-
-    else:
-        # Generic explanation
-        if level == "ERROR" or level == "FATAL":
-            lines.append("This is an error that prevented normal operation.")
-            lines.append(f"\nError message: `{message}`")
-            lines.append("\n**Next steps:**")
-            lines.append("1. Look at the full stack trace if available")
-            lines.append("2. Check what operation was being performed")
-            lines.append("3. Look for similar errors - is this a pattern?")
-            lines.append("4. Check if there were recent changes (deployment, config)")
-        elif level == "WARN":
-            lines.append("This is a warning - not critical but worth investigating.")
-            lines.append(f"\nMessage: `{message}`")
-            lines.append("\n**Next steps:**")
-            lines.append("1. Determine if this warning is expected")
-            lines.append("2. Check if it's happening frequently")
-            lines.append("3. Consider if it could become a problem")
-        else:
-            lines.append("This is an informational message.")
-            lines.append(f"\nMessage: `{message}`")
-
-    # Context-specific advice
-    if context == "production":
-        lines.append("\n**Production Context:**")
-        lines.append("- Check monitoring dashboards for patterns")
-        lines.append("- Review recent deployments")
-        lines.append("- Consider impact on users")
-        lines.append("- Prepare rollback plan if needed")
-
-    return "\n".join(lines)
-
-
-def suggest_next_action(
-    current_results: Dict[str, Any], investigation_context: Optional[Dict] = None
-) -> List[str]:
-    """
-    Suggest what to investigate next based on current results.
-
-    Args:
-        current_results: Results from previous operation (search, pattern finding, etc.)
-        investigation_context: Optional context about what's been investigated so far
-
-    Returns:
-        List of suggested next actions with example code
-    """
-    suggestions = []
-
-    # Based on search results
-    if "total_matches" in current_results:
-        total = current_results["total_matches"]
-        if total == 0:
-            suggestions.append("No matches found. Try:")
-            suggestions.append("  - Broaden search (remove filters)")
-            suggestions.append("  - Check different log files")
-            suggestions.append("  - Verify time range")
-        elif total > 1000:
-            suggestions.append(f"Large result set ({total} matches). Consider:")
-            suggestions.append("  - Use output_format='summary' for token efficiency")
-            suggestions.append("  - Add more filters (level, time range, thread_id)")
-            suggestions.append("  - Use smart_sample() to get representative sample")
-        elif total > 0:
-            # Good result size, suggest next steps
-            if "top_messages" in current_results:
-                top_msg = (
-                    current_results["top_messages"][0] if current_results["top_messages"] else None
-                )
-                if top_msg and top_msg.get("count", 0) > 3:
-                    suggestions.append("Repeated errors detected. Next:")
-                    suggestions.append("  - find_patterns(files, min_occurrences=3)")
-                    suggestions.append("  - Follow one of these threads to see full context")
-
-    # Based on patterns
-    if "patterns" in current_results:
-        pattern_count = len(current_results.get("patterns", []))
-        if pattern_count > 0:
-            suggestions.append(f"Found {pattern_count} patterns. Next:")
-            suggestions.append("  - Compare successful vs failed requests")
-            suggestions.append("  - Check timestamps - are they clustered?")
-
-    # Default suggestions
-    if not suggestions:
-        suggestions.append("Continue investigation:")
-        suggestions.append("  - analyze_with_insights(files) - Get automatic insights")
-        suggestions.append("  - find_patterns(files) - Find repeated issues")
-        suggestions.append("  - compare_time_periods() - Before/after analysis")
-
-    return suggestions
 
 
 def _load_files_with_config(

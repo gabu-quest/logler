@@ -529,21 +529,13 @@ class TestMixedScenarios:
         Path(temp_path).unlink()
 
     def test_handles_messy_production_data(self, messy_production_log):
-        """Should handle messy production-like data without crashing"""
-        try:
-            result = search(files=[messy_production_log], query="", limit=100)
+        """Should handle messy production-like data without crashing.
 
-            # Should process file without crashing
-            assert isinstance(result, dict)
-            # Should find at least the valid entries
-            total = result.get("total_matches", len(result.get("results", [])))
-            assert total > 0, "Should find some entries despite messy data"
-        except BaseException as e:
-            # Known issue: Some messy data patterns can cause sorting issues in Rust
-            # PanicException is a BaseException, not Exception
-            if "total order" in str(e) or "PanicException" in type(e).__name__:
-                pytest.skip(f"Known Rust sorting issue with malformed data: {e}")
-            raise
+        Previously skipped due to Rust panic on NaN in f64::partial_cmp during sort.
+        Fixed by switching to f64::total_cmp which handles NaN deterministically.
+        """
+        result = search(files=[messy_production_log], query="", limit=100)
+        assert result["total_matches"] > 0, "Should find some entries despite messy data"
 
     def test_unicode_search_in_messy_data(self, messy_production_log):
         """Should find unicode content in messy data"""
