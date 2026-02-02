@@ -1,0 +1,150 @@
+240315 080000 4000 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.10:50010 is added to blk_1073741825 size 67108864
+240315 080012 4001 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073741832 terminating
+240315 080024 4002 INFO dfs.DataNode$DataXceiver: Received block blk_1073741839 of size 67133554 from /10.0.1.12:50010
+240315 080036 4003 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.13:50010 to delete blk_1073741846
+240315 080048 4004 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.14:50010 to replicate blk_1073741853 to datanode(s) 10.0.1.34:50010
+240315 080100 4005 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073741860 src: /10.0.1.15:50010 dest: /10.0.1.35:50010
+240315 080112 4006 INFO dfs.FSNamesystem: Verification succeeded for blk_1073741867
+240315 080124 4007 INFO dfs.DataNode$DataXceiver: Received block blk_1073741874 of size 67195279 from /10.0.1.17:50010
+240315 080136 4008 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073741881 file /data/dfs/blk_1073741881
+240315 080148 4009 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00009. blk_1073741888
+240315 080200 4000 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073741895 src: /10.0.1.20:50010 dest: /10.0.1.40:50010
+240315 080212 4001 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073741902 terminating
+240315 080224 4002 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.22:50010 is added to blk_1073741909 size 67257004
+240315 080236 4003 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073741916 file /data/dfs/blk_1073741916
+240315 080248 4004 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.24:50010 to replicate blk_1073741923 to datanode(s) 10.0.1.44:50010
+240315 080300 4005 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.25:50010 to delete blk_1073741930
+240315 080312 4006 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073741937 terminating
+240315 080324 4007 INFO dfs.DataNode$DataXceiver: Received block blk_1073741944 of size 67318729 from /10.0.1.27:50010
+240315 080336 4008 INFO dfs.FSNamesystem: Verification succeeded for blk_1073741951
+240315 080348 4009 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.29:50010 to replicate blk_1073741958 to datanode(s) 10.0.1.34:50010
+240315 080400 4000 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073741965 src: /10.0.1.10:50010 dest: /10.0.1.35:50010
+240315 080412 4001 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00021. blk_1073741972
+240315 080424 4002 INFO dfs.DataNode$DataXceiver: Received block blk_1073741979 of size 67380454 from /10.0.1.12:50010
+240315 080436 4003 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073741986 file /data/dfs/blk_1073741986
+240315 080448 4004 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.14:50010 is added to blk_1073741993 size 67405144
+240315 080500 4005 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742000 src: /10.0.1.15:50010 dest: /10.0.1.40:50010
+240315 080512 4006 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742007 terminating
+240315 080524 4007 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.17:50010 to delete blk_1073742014
+240315 080536 4008 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742021 file /data/dfs/blk_1073742021
+240315 080548 4009 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.19:50010 to replicate blk_1073742028 to datanode(s) 10.0.1.44:50010
+240315 080600 4000 INFO dfs.FSNamesystem: Verification succeeded for blk_1073742035
+240315 080612 4001 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742042 terminating
+240315 080624 4002 INFO dfs.DataNode$DataXceiver: Received block blk_1073742049 of size 67503904 from /10.0.1.22:50010
+240315 080636 4003 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00033. blk_1073742056
+240315 080648 4004 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.24:50010 to replicate blk_1073742063 to datanode(s) 10.0.1.34:50010
+240315 080700 4005 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742070 src: /10.0.1.25:50010 dest: /10.0.1.35:50010
+240315 080712 4006 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.26:50010 is added to blk_1073742077 size 67553284
+240315 080724 4007 INFO dfs.DataNode$DataXceiver: Received block blk_1073742084 of size 67565629 from /10.0.1.27:50010
+240315 080736 4008 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742091 file /data/dfs/blk_1073742091
+240315 080748 4009 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.29:50010 to delete blk_1073742098
+240315 080800 4000 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742105 src: /10.0.1.10:50010 dest: /10.0.1.40:50010
+240315 080812 4001 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742112 terminating
+240315 080824 4002 INFO dfs.FSNamesystem: Verification succeeded for blk_1073742119
+240315 080836 4003 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742126 file /data/dfs/blk_1073742126
+240315 080848 4004 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.14:50010 to replicate blk_1073742133 to datanode(s) 10.0.1.44:50010
+240315 080900 4005 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00045. blk_1073742140
+240315 080912 4006 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742147 terminating
+240315 080924 4007 INFO dfs.DataNode$DataXceiver: Received block blk_1073742154 of size 67689079 from /10.0.1.17:50010
+240315 080936 4008 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.18:50010 is added to blk_1073742161 size 67701424
+240315 080948 4009 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.19:50010 to replicate blk_1073742168 to datanode(s) 10.0.1.34:50010
+240315 081000 4000 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742175 src: /10.0.1.20:50010 dest: /10.0.1.35:50010
+240315 081012 4001 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.21:50010 to delete blk_1073742182
+240315 081024 4002 INFO dfs.DataNode$DataXceiver: Received block blk_1073742189 of size 67750804 from /10.0.1.22:50010
+240315 081036 4003 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742196 file /data/dfs/blk_1073742196
+240315 081048 4004 INFO dfs.FSNamesystem: Verification succeeded for blk_1073742203
+240315 081100 4005 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742210 src: /10.0.1.25:50010 dest: /10.0.1.40:50010
+240315 081112 4006 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742217 terminating
+240315 081124 4007 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00007. blk_1073742224
+240315 081136 4008 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742231 file /data/dfs/blk_1073742231
+240315 081148 4009 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.29:50010 to replicate blk_1073742238 to datanode(s) 10.0.1.44:50010
+240315 081200 4000 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.10:50010 is added to blk_1073742245 size 67849564
+240315 081212 4001 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742252 terminating
+240315 081224 4002 INFO dfs.DataNode$DataXceiver: Received block blk_1073742259 of size 67874254 from /10.0.1.12:50010
+240315 081236 4003 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.13:50010 to delete blk_1073742266
+240315 081248 4004 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.14:50010 to replicate blk_1073742273 to datanode(s) 10.0.1.34:50010
+240315 081300 4005 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742280 src: /10.0.1.15:50010 dest: /10.0.1.35:50010
+240315 081312 4006 INFO dfs.FSNamesystem: Verification succeeded for blk_1073742287
+240315 081324 4007 INFO dfs.DataNode$DataXceiver: Received block blk_1073742294 of size 67935979 from /10.0.1.17:50010
+240315 081336 4008 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742301 file /data/dfs/blk_1073742301
+240315 081348 4009 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00019. blk_1073742308
+240315 081400 4000 WARN dfs.DataNode$DataXceiver: Receiving block blk_1073742315 src: /10.0.1.20:50010 dest: /10.0.1.40:50010
+240315 081412 4001 WARN dfs.DataNode$DataXceiver: PacketResponder: blk_1073742322 terminating
+240315 081424 4002 WARN dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.22:50010 is added to blk_1073741829 size 67997704
+240315 081436 4003 WARN dfs.DataNode$DataXceiver: Deleting block blk_1073741836 file /data/dfs/blk_1073741836
+240315 081448 4004 WARN dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.24:50010 to replicate blk_1073741843 to datanode(s) 10.0.1.44:50010
+240315 081500 4005 WARN dfs.FSNamesystem: BLOCK* ask 10.0.1.25:50010 to delete blk_1073741850
+240315 081512 4006 WARN dfs.DataNode$DataXceiver: PacketResponder: blk_1073741857 terminating
+240315 081524 4007 WARN dfs.DataNode$DataXceiver: Received block blk_1073741864 of size 68059429 from /10.0.1.27:50010
+240315 081536 4008 WARN dfs.FSNamesystem: Verification succeeded for blk_1073741871
+240315 081548 4009 WARN dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.29:50010 to replicate blk_1073741878 to datanode(s) 10.0.1.34:50010
+240315 081600 4000 WARN dfs.DataNode$DataXceiver: Receiving block blk_1073741885 src: /10.0.1.10:50010 dest: /10.0.1.35:50010
+240315 081612 4001 WARN dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00031. blk_1073741892
+240315 081624 4002 WARN dfs.DataNode$DataXceiver: Received block blk_1073741899 of size 68121154 from /10.0.1.12:50010
+240315 081636 4003 WARN dfs.DataNode$DataXceiver: Deleting block blk_1073741906 file /data/dfs/blk_1073741906
+240315 081648 4004 WARN dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.14:50010 is added to blk_1073741913 size 68145844
+240315 081700 4005 ERROR dfs.FSNamesystem: writeBlock blk_1073741920 received exception java.io.IOException: Could not read from stream
+240315 081712 4006 ERROR dfs.FSNamesystem: PacketResponder blk_1073741927 Exception: java.io.IOException: Broken pipe
+240315 081724 4007 ERROR dfs.FSNamesystem: DataXceiver: java.io.IOException: Connection reset by peer while receiving blk_1073741934
+240315 081736 4008 ERROR dfs.FSNamesystem: Exception in receiveBlock for blk_1073741941: java.io.IOException: Connection reset by peer
+240315 081748 4009 ERROR dfs.FSNamesystem: writeBlock blk_1073741948 received exception java.io.IOException: Could not read from stream
+240315 081800 4000 ERROR dfs.FSNamesystem: PacketResponder blk_1073741955 Exception: java.io.IOException: Broken pipe
+240315 081812 4001 ERROR dfs.FSNamesystem: DataXceiver: java.io.IOException: Connection reset by peer while receiving blk_1073741962
+240315 081824 4002 ERROR dfs.FSNamesystem: Exception in receiveBlock for blk_1073741969: java.io.IOException: Connection reset by peer
+240315 081836 4003 ERROR dfs.FSNamesystem: writeBlock blk_1073741976 received exception java.io.IOException: Could not read from stream
+240315 081848 4004 ERROR dfs.FSNamesystem: PacketResponder blk_1073741983 Exception: java.io.IOException: Broken pipe
+240315 081900 4005 DEBUG dfs.DataNode$DataXceiver: Receiving block blk_1073741990 src: /10.0.1.25:50010 dest: /10.0.1.35:50010
+240315 081912 4006 DEBUG dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.26:50010 is added to blk_1073741997 size 68293984
+240315 081924 4007 DEBUG dfs.DataNode$DataXceiver: Received block blk_1073742004 of size 68306329 from /10.0.1.27:50010
+240315 081936 4008 DEBUG dfs.DataNode$DataXceiver: Deleting block blk_1073742011 file /data/dfs/blk_1073742011
+240315 081948 4009 DEBUG dfs.FSNamesystem: BLOCK* ask 10.0.1.29:50010 to delete blk_1073742018
+240315 082000 4000 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742025 src: /10.0.1.10:50010 dest: /10.0.1.40:50010
+240315 082012 4001 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742032 terminating
+240315 082024 4002 INFO dfs.FSNamesystem: Verification succeeded for blk_1073742039
+240315 082036 4003 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742046 file /data/dfs/blk_1073742046
+240315 082048 4004 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.14:50010 to replicate blk_1073742053 to datanode(s) 10.0.1.44:50010
+240315 082100 4005 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00005. blk_1073742060
+240315 082112 4006 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742067 terminating
+240315 082124 4007 INFO dfs.DataNode$DataXceiver: Received block blk_1073742074 of size 68429779 from /10.0.1.17:50010
+240315 082136 4008 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.18:50010 is added to blk_1073742081 size 68442124
+240315 082148 4009 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.19:50010 to replicate blk_1073742088 to datanode(s) 10.0.1.34:50010
+240315 082200 4000 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742095 src: /10.0.1.20:50010 dest: /10.0.1.35:50010
+240315 082212 4001 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.21:50010 to delete blk_1073742102
+240315 082224 4002 INFO dfs.DataNode$DataXceiver: Received block blk_1073742109 of size 68491504 from /10.0.1.22:50010
+240315 082236 4003 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742116 file /data/dfs/blk_1073742116
+240315 082248 4004 INFO dfs.FSNamesystem: Verification succeeded for blk_1073742123
+240315 082300 4005 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742130 src: /10.0.1.25:50010 dest: /10.0.1.40:50010
+240315 082312 4006 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742137 terminating
+240315 082324 4007 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00017. blk_1073742144
+240315 082336 4008 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742151 file /data/dfs/blk_1073742151
+240315 082348 4009 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.29:50010 to replicate blk_1073742158 to datanode(s) 10.0.1.44:50010
+240315 082400 4000 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.10:50010 is added to blk_1073742165 size 68590264
+240315 082412 4001 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742172 terminating
+240315 082424 4002 INFO dfs.DataNode$DataXceiver: Received block blk_1073742179 of size 68614954 from /10.0.1.12:50010
+240315 082436 4003 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.13:50010 to delete blk_1073742186
+240315 082448 4004 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.14:50010 to replicate blk_1073742193 to datanode(s) 10.0.1.34:50010
+240315 082500 4005 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742200 src: /10.0.1.15:50010 dest: /10.0.1.35:50010
+240315 082512 4006 INFO dfs.FSNamesystem: Verification succeeded for blk_1073742207
+240315 082524 4007 INFO dfs.DataNode$DataXceiver: Received block blk_1073742214 of size 68676679 from /10.0.1.17:50010
+240315 082536 4008 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742221 file /data/dfs/blk_1073742221
+240315 082548 4009 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00029. blk_1073742228
+240315 082600 4000 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742235 src: /10.0.1.20:50010 dest: /10.0.1.40:50010
+240315 082612 4001 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742242 terminating
+240315 082624 4002 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.22:50010 is added to blk_1073742249 size 68738404
+240315 082636 4003 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073742256 file /data/dfs/blk_1073742256
+240315 082648 4004 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.24:50010 to replicate blk_1073742263 to datanode(s) 10.0.1.44:50010
+240315 082700 4005 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.25:50010 to delete blk_1073742270
+240315 082712 4006 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073742277 terminating
+240315 082724 4007 INFO dfs.DataNode$DataXceiver: Received block blk_1073742284 of size 68800129 from /10.0.1.27:50010
+240315 082736 4008 INFO dfs.FSNamesystem: Verification succeeded for blk_1073742291
+240315 082748 4009 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.29:50010 to replicate blk_1073742298 to datanode(s) 10.0.1.34:50010
+240315 082800 4000 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073742305 src: /10.0.1.10:50010 dest: /10.0.1.35:50010
+240315 082812 4001 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: /user/hadoop/output/part-r-00041. blk_1073742312
+240315 082824 4002 INFO dfs.DataNode$DataXceiver: Received block blk_1073742319 of size 68861854 from /10.0.1.12:50010
+240315 082836 4003 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073741826 file /data/dfs/blk_1073741826
+240315 082848 4004 INFO dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: blockMap updated: 10.0.1.14:50010 is added to blk_1073741833 size 68886544
+240315 082900 4005 INFO dfs.DataNode$DataXceiver: Receiving block blk_1073741840 src: /10.0.1.15:50010 dest: /10.0.1.40:50010
+240315 082912 4006 INFO dfs.DataNode$DataXceiver: PacketResponder: blk_1073741847 terminating
+240315 082924 4007 INFO dfs.FSNamesystem: BLOCK* ask 10.0.1.17:50010 to delete blk_1073741854
+240315 082936 4008 INFO dfs.DataNode$DataXceiver: Deleting block blk_1073741861 file /data/dfs/blk_1073741861
+240315 082948 4009 INFO dfs.DataNode$DataXceiver: BLOCK* ask 10.0.1.19:50010 to replicate blk_1073741868 to datanode(s) 10.0.1.44:50010
