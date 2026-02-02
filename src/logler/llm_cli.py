@@ -100,6 +100,10 @@ def _apply_max_bytes(data: Dict[str, Any], max_bytes: int) -> Dict[str, Any]:
         mid = (lo + hi) // 2
         trial = dict(data)
         trial[results_key] = data[results_key][:mid]
+        # Include truncation metadata in size estimate (it will be in final output)
+        trial["truncated"] = True
+        trial["truncated_at"] = mid
+        trial["original_count"] = original_count
         trial_size = len(json.dumps(trial, default=str).encode("utf-8"))
         if trial_size <= max_bytes:
             best = mid

@@ -129,10 +129,12 @@ class TestTail:
         assert len(result["results"]) == 10
         assert result["total_matches"] == 200
 
-        # Verify they are the LAST 10 by timestamp
-        timestamps = [item.get("entry", item).get("timestamp") for item in result["results"]]
-        # Should be sorted ascending (chronological)
+        # Verify they are the LAST 10 by timestamp value
+        timestamps = [item["entry"]["timestamp"] for item in result["results"]]
         assert timestamps == sorted(timestamps)
+        # Entries 190-199: mm=3, ss=10..19 → timestamps 10:03:10Z through 10:03:19Z
+        assert timestamps[0] == "2024-01-15T10:03:10Z"
+        assert timestamps[-1] == "2024-01-15T10:03:19Z"
 
     def test_tail_with_level_filter(self, filtering_log_file):
         result = search(files=[filtering_log_file], level="ERROR", tail=5)
@@ -205,13 +207,8 @@ class TestFieldProjection:
 
         for item in result["results"]:
             entry = item.get("entry", item)
-            # Should have exactly the requested fields
-            assert "timestamp" in entry
-            assert "level" in entry
-            assert "message" in entry
-            # Should NOT have non-requested fields
-            assert "thread_id" not in entry
-            assert "correlation_id" not in entry
+            # Should have EXACTLY the requested fields — no more, no less
+            assert set(entry.keys()) == {"timestamp", "level", "message"}
 
 
 class TestMaxBytes:
@@ -227,14 +224,17 @@ class TestMaxBytes:
         }
 
         original_size = len(json.dumps(data, default=str).encode("utf-8"))
-        assert original_size > 2000  # Verify it's actually large
+        assert original_size > 2000
 
         truncated = _apply_max_bytes(data, 2000)
         assert truncated["truncated"] is True
-        assert truncated["truncated_at"] < 100
         assert truncated["original_count"] == 100
-        # Results list should be shorter
-        assert len(truncated["results"]) < 100
+        # Must have fewer results but not zero
+        assert 0 < truncated["truncated_at"] < 100
+        assert len(truncated["results"]) == truncated["truncated_at"]
+        # Actually verify the constraint: serialized output fits budget
+        truncated_size = len(json.dumps(truncated, default=str).encode("utf-8"))
+        assert truncated_size <= 2000
 
     def test_no_truncation_when_under(self, filtering_log_file):
         from logler.llm_cli import _apply_max_bytes
@@ -244,6 +244,9 @@ class TestMaxBytes:
             "total_matches": 1,
         }
         result = _apply_max_bytes(data, 100000)
+        # Should return data unchanged — same structure, same content
+        assert result["results"] == [{"entry": {"message": "short"}}]
+        assert result["total_matches"] == 1
         assert "truncated" not in result
 
 
@@ -277,3 +280,28 @@ class TestCombinedFilters:
         for item in result["results"]:
             entry = item.get("entry", item)
             assert entry["level"] in ("WARN", "ERROR")
+
+    def test_all_filters_combined(self, filtering_log_file):
+        """Kitchen-sink: multiple filters compose correctly."""
+        result = search(
+            files=[filtering_log_file],
+            level="ERROR,WARN",
+            service_name="svc-alpha",
+            thread_id="worker-2,worker-3",
+            exclude_query="health",
+            tail=5,
+            fields=["timestamp", "level", "message", "service_name"],
+        )
+        # svc-alpha: entries 0-99
+        # WARN|ERROR: i%4 in {2,3}, same indices as worker-2|worker-3
+        # Within svc-alpha: entries 2,3,6,7,...,98,99 = 50 entries
+        # Exclude "health": i%10==0 and i%4 in {2,3} → 10,30,50,70,90 = 5 entries
+        # 50 - 5 = 45
+        assert result["total_matches"] == 45
+        assert len(result["results"]) == 5
+
+        for item in result["results"]:
+            entry = item.get("entry", item)
+            assert entry["level"] in ("WARN", "ERROR")
+            assert set(entry.keys()) == {"timestamp", "level", "message", "service_name"}
+            assert "health" not in entry["message"].lower()
