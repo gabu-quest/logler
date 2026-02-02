@@ -69,18 +69,55 @@ pub struct SearchQuery {
     pub query: Option<String>,
     pub filters: SearchFilters,
     pub limit: Option<usize>,
+    #[serde(default)]
+    pub tail: Option<usize>,
     pub context_lines: Option<usize>,
 }
 
 /// Filters for searching logs
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SearchFilters {
+    #[serde(default)]
     pub levels: Vec<LogLevel>,
+    #[serde(default)]
+    pub exclude_levels: Vec<LogLevel>,
     pub time_range: Option<TimeRange>,
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub thread_ids: Option<Vec<String>>,
     pub correlation_id: Option<String>,
+    #[serde(default)]
+    pub correlation_ids: Option<Vec<String>>,
     pub trace_id: Option<String>,
+    #[serde(default)]
+    pub trace_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub service_name: Option<String>,
+    #[serde(default)]
+    pub service_names: Option<Vec<String>>,
     pub has_correlation_id: Option<bool>,
+    #[serde(default)]
+    pub exclude_pattern: Option<String>,
+}
+
+/// Information about a discovered ID
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdInfo {
+    pub id: String,
+    pub count: usize,
+    pub first_seen: Option<DateTime<Utc>>,
+    pub last_seen: Option<DateTime<Utc>>,
+}
+
+/// Result of ID extraction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdsResult {
+    pub thread_ids: Vec<IdInfo>,
+    pub correlation_ids: Vec<IdInfo>,
+    pub trace_ids: Vec<IdInfo>,
+    pub services: Vec<IdInfo>,
+    pub total_entries: usize,
+    pub time_range: Option<TimeRange>,
 }
 
 /// Time range for filtering
@@ -230,8 +267,6 @@ pub struct Pattern {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PatternType {
     RepeatedError,
-    CascadingFailure,
-    PeriodicEvent,
 }
 
 /// Error analysis result

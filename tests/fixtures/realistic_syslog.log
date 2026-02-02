@@ -1,0 +1,150 @@
+Mar 15 03:00:00 web-prod-01 sshd[1000]: Accepted publickey for deploy from 10.0.1.50 port 52341 ssh2: RSA SHA256:abc123
+Mar 15 03:00:24 web-prod-02 sshd[1001]: Failed password for invalid user admin from 192.168.1.100 port 43210 ssh2
+Mar 15 03:00:48 db-primary sshd[1002]: authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.42
+Mar 15 03:01:12 lb-01 sshd[1003]: Connection closed by authenticating user root 203.0.113.42 port 55123 [preauth]
+Mar 15 03:01:36 web-prod-01 sshd[1004]: Received disconnect from 10.0.2.30 port 48123:11: disconnected by user
+Mar 15 03:02:00 web-prod-02 sshd[1005]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.23 user=root
+Mar 15 03:02:24 db-primary sshd[1006]: Failed password for root from 198.51.100.23 port 41234 ssh2
+Mar 15 03:02:48 lb-01 sshd[1007]: Invalid user admin from 203.0.113.50 port 39876
+Mar 15 03:03:12 web-prod-01 kernel: Out of memory: Kill process 12345 (java) score 950 or sacrifice child
+Mar 15 03:03:36 web-prod-02 kernel: TCP: request_sock_TCP: Possible SYN flooding on port 443. Sending cookies.
+Mar 15 03:04:00 db-primary kernel: [UFW BLOCK] IN=eth0 OUT= MAC=aa:bb:cc:dd:ee:ff SRC=203.0.113.100 DST=10.0.1.10 PROTO=TCP DPT=22
+Mar 15 03:04:24 lb-01 kernel: EXT4-fs (sda1): mounted filesystem with ordered data mode. Opts: (null)
+Mar 15 03:04:48 web-prod-01 kernel: nf_conntrack: table full, dropping packet
+Mar 15 03:05:12 web-prod-02 kernel: EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0
+Mar 15 03:05:36 db-primary CRON[5014]: (root) CMD (/usr/bin/certbot renew --quiet)
+Mar 15 03:06:00 lb-01 CRON[5015]: (deploy) CMD (/opt/scripts/health-check.sh)
+Mar 15 03:06:24 web-prod-01 CRON[5016]: (root) CMD (/usr/local/bin/backup.sh >> /var/log/backup.log 2>&1)
+Mar 15 03:06:48 web-prod-02 systemd[1]: docker.service: Failed with result 'exit-code'.
+Mar 15 03:07:12 db-primary systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+Mar 15 03:07:36 lb-01 systemd[1]: Stopping postgresql@14-main.service - PostgreSQL Cluster 14-main...
+Mar 15 03:08:00 web-prod-01 sshd[1020]: Received disconnect from 10.0.2.30 port 48123:11: disconnected by user
+Mar 15 03:08:24 web-prod-02 sshd[1021]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.23 user=root
+Mar 15 03:08:48 db-primary sshd[1022]: Failed password for root from 198.51.100.23 port 41234 ssh2
+Mar 15 03:09:12 lb-01 sshd[1023]: Invalid user admin from 203.0.113.50 port 39876
+Mar 15 03:09:36 web-prod-01 sshd[1024]: Accepted publickey for deploy from 10.0.1.50 port 52341 ssh2: RSA SHA256:abc123
+Mar 15 03:10:00 web-prod-02 sshd[1025]: Failed password for invalid user admin from 192.168.1.100 port 43210 ssh2
+Mar 15 03:10:24 db-primary sshd[1026]: authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.42
+Mar 15 03:10:48 lb-01 sshd[1027]: Connection closed by authenticating user root 203.0.113.42 port 55123 [preauth]
+Mar 15 03:11:12 web-prod-01 kernel: nf_conntrack: table full, dropping packet
+Mar 15 03:11:36 web-prod-02 kernel: EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0
+Mar 15 03:12:00 db-primary kernel: e1000e 0000:00:1f.6 eth0: Reset adapter unexpectedly
+Mar 15 03:12:24 lb-01 kernel: segfault at 0 ip 00007f8a1234abcd sp 00007fff5678ef00 error 4 in libpthread-2.31.so
+Mar 15 03:12:48 web-prod-01 kernel: Out of memory: Kill process 12345 (java) score 950 or sacrifice child
+Mar 15 03:13:12 web-prod-02 kernel: TCP: request_sock_TCP: Possible SYN flooding on port 443. Sending cookies.
+Mar 15 03:13:36 db-primary CRON[5004]: (root) CMD (/usr/bin/certbot renew --quiet)
+Mar 15 03:14:00 lb-01 CRON[5005]: (deploy) CMD (/opt/scripts/health-check.sh)
+Mar 15 03:14:24 web-prod-01 CRON[5006]: (root) CMD (/usr/local/bin/backup.sh >> /var/log/backup.log 2>&1)
+Mar 15 03:14:48 web-prod-02 systemd[1]: Stopping postgresql@14-main.service - PostgreSQL Cluster 14-main...
+Mar 15 03:15:12 db-primary systemd[1]: redis-server.service: Main process exited, code=exited, status=1/FAILURE
+Mar 15 03:15:36 lb-01 systemd[1]: Started Session 1234 of user deploy.
+Mar 15 03:16:00 web-prod-01 sshd[1040]: Accepted publickey for deploy from 10.0.1.50 port 52341 ssh2: RSA SHA256:abc123
+Mar 15 03:16:24 web-prod-02 sshd[1041]: Failed password for invalid user admin from 192.168.1.100 port 43210 ssh2
+Mar 15 03:16:48 db-primary sshd[1042]: authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.42
+Mar 15 03:17:12 lb-01 sshd[1043]: Connection closed by authenticating user root 203.0.113.42 port 55123 [preauth]
+Mar 15 03:17:36 web-prod-01 sshd[1044]: Received disconnect from 10.0.2.30 port 48123:11: disconnected by user
+Mar 15 03:18:00 web-prod-02 sshd[1045]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.23 user=root
+Mar 15 03:18:24 db-primary sshd[1046]: Failed password for root from 198.51.100.23 port 41234 ssh2
+Mar 15 03:18:48 lb-01 sshd[1047]: Invalid user admin from 203.0.113.50 port 39876
+Mar 15 03:19:12 web-prod-01 kernel: Out of memory: Kill process 12345 (java) score 950 or sacrifice child
+Mar 15 03:19:36 web-prod-02 kernel: TCP: request_sock_TCP: Possible SYN flooding on port 443. Sending cookies.
+Mar 15 03:20:00 db-primary kernel: [UFW BLOCK] IN=eth0 OUT= MAC=aa:bb:cc:dd:ee:ff SRC=203.0.113.100 DST=10.0.1.10 PROTO=TCP DPT=22
+Mar 15 03:20:24 lb-01 kernel: EXT4-fs (sda1): mounted filesystem with ordered data mode. Opts: (null)
+Mar 15 03:20:48 web-prod-01 kernel: nf_conntrack: table full, dropping packet
+Mar 15 03:21:12 web-prod-02 kernel: EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0
+Mar 15 03:21:36 db-primary CRON[5024]: (root) CMD (/usr/bin/certbot renew --quiet)
+Mar 15 03:22:00 lb-01 CRON[5025]: (deploy) CMD (/opt/scripts/health-check.sh)
+Mar 15 03:22:24 web-prod-01 CRON[5026]: (root) CMD (/usr/local/bin/backup.sh >> /var/log/backup.log 2>&1)
+Mar 15 03:22:48 web-prod-02 systemd[1]: Started Session 1234 of user deploy.
+Mar 15 03:23:12 db-primary systemd[1]: systemd-resolved[567]: Server returned error NXDOMAIN, mitigating potential DNS violation DVE-2018-0001
+Mar 15 03:23:36 lb-01 systemd[1]: docker.service: Failed with result 'exit-code'.
+Mar 15 03:24:00 web-prod-01 sshd[1010]: Received disconnect from 10.0.2.30 port 48123:11: disconnected by user
+Mar 15 03:24:24 web-prod-02 sshd[1011]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.23 user=root
+Mar 15 03:24:48 db-primary sshd[1012]: Failed password for root from 198.51.100.23 port 41234 ssh2
+Mar 15 03:25:12 lb-01 sshd[1013]: Invalid user admin from 203.0.113.50 port 39876
+Mar 15 03:25:36 web-prod-01 sshd[1014]: Accepted publickey for deploy from 10.0.1.50 port 52341 ssh2: RSA SHA256:abc123
+Mar 15 03:26:00 web-prod-02 sshd[1015]: Failed password for invalid user admin from 192.168.1.100 port 43210 ssh2
+Mar 15 03:26:24 db-primary sshd[1016]: authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.42
+Mar 15 03:26:48 lb-01 sshd[1017]: Connection closed by authenticating user root 203.0.113.42 port 55123 [preauth]
+Mar 15 03:27:12 web-prod-01 kernel: nf_conntrack: table full, dropping packet
+Mar 15 03:27:36 web-prod-02 kernel: EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0
+Mar 15 03:28:00 db-primary kernel: e1000e 0000:00:1f.6 eth0: Reset adapter unexpectedly
+Mar 15 03:28:24 lb-01 kernel: segfault at 0 ip 00007f8a1234abcd sp 00007fff5678ef00 error 4 in libpthread-2.31.so
+Mar 15 03:28:48 web-prod-01 kernel: Out of memory: Kill process 12345 (java) score 950 or sacrifice child
+Mar 15 03:29:12 web-prod-02 kernel: TCP: request_sock_TCP: Possible SYN flooding on port 443. Sending cookies.
+Mar 15 03:29:36 db-primary CRON[5014]: (root) CMD (/usr/bin/certbot renew --quiet)
+Mar 15 03:30:00 lb-01 CRON[5015]: (deploy) CMD (/opt/scripts/health-check.sh)
+Mar 15 03:30:24 web-prod-01 CRON[5016]: (root) CMD (/usr/local/bin/backup.sh >> /var/log/backup.log 2>&1)
+Mar 15 03:30:48 web-prod-02 systemd[1]: docker.service: Failed with result 'exit-code'.
+Mar 15 03:31:12 db-primary systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+Mar 15 03:31:36 lb-01 systemd[1]: Stopping postgresql@14-main.service - PostgreSQL Cluster 14-main...
+Mar 15 03:32:00 web-prod-01 sshd[1030]: Accepted publickey for deploy from 10.0.1.50 port 52341 ssh2: RSA SHA256:abc123
+Mar 15 03:32:24 web-prod-02 sshd[1031]: Failed password for invalid user admin from 192.168.1.100 port 43210 ssh2
+Mar 15 03:32:48 db-primary sshd[1032]: authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.42
+Mar 15 03:33:12 lb-01 sshd[1033]: Connection closed by authenticating user root 203.0.113.42 port 55123 [preauth]
+Mar 15 03:33:36 web-prod-01 sshd[1034]: Received disconnect from 10.0.2.30 port 48123:11: disconnected by user
+Mar 15 03:34:00 web-prod-02 sshd[1035]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.23 user=root
+Mar 15 03:34:24 db-primary sshd[1036]: Failed password for root from 198.51.100.23 port 41234 ssh2
+Mar 15 03:34:48 lb-01 sshd[1037]: Invalid user admin from 203.0.113.50 port 39876
+Mar 15 03:35:12 web-prod-01 kernel: Out of memory: Kill process 12345 (java) score 950 or sacrifice child
+Mar 15 03:35:36 web-prod-02 kernel: TCP: request_sock_TCP: Possible SYN flooding on port 443. Sending cookies.
+Mar 15 03:36:00 db-primary kernel: [UFW BLOCK] IN=eth0 OUT= MAC=aa:bb:cc:dd:ee:ff SRC=203.0.113.100 DST=10.0.1.10 PROTO=TCP DPT=22
+Mar 15 03:36:24 lb-01 kernel: EXT4-fs (sda1): mounted filesystem with ordered data mode. Opts: (null)
+Mar 15 03:36:48 web-prod-01 kernel: nf_conntrack: table full, dropping packet
+Mar 15 03:37:12 web-prod-02 kernel: EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0
+Mar 15 03:37:36 db-primary CRON[5004]: (root) CMD (/usr/bin/certbot renew --quiet)
+Mar 15 03:38:00 lb-01 CRON[5005]: (deploy) CMD (/opt/scripts/health-check.sh)
+Mar 15 03:38:24 web-prod-01 CRON[5006]: (root) CMD (/usr/local/bin/backup.sh >> /var/log/backup.log 2>&1)
+Mar 15 03:38:48 web-prod-02 systemd[1]: Stopping postgresql@14-main.service - PostgreSQL Cluster 14-main...
+Mar 15 03:39:12 db-primary systemd[1]: redis-server.service: Main process exited, code=exited, status=1/FAILURE
+Mar 15 03:39:36 lb-01 systemd[1]: Started Session 1234 of user deploy.
+Mar 15 03:40:00 web-prod-01 sshd[1000]: Received disconnect from 10.0.2.30 port 48123:11: disconnected by user
+Mar 15 03:40:24 web-prod-02 sshd[1001]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.23 user=root
+Mar 15 03:40:48 db-primary sshd[1002]: Failed password for root from 198.51.100.23 port 41234 ssh2
+Mar 15 03:41:12 lb-01 sshd[1003]: Invalid user admin from 203.0.113.50 port 39876
+Mar 15 03:41:36 web-prod-01 sshd[1004]: Accepted publickey for deploy from 10.0.1.50 port 52341 ssh2: RSA SHA256:abc123
+Mar 15 03:42:00 web-prod-02 sshd[1005]: Failed password for invalid user admin from 192.168.1.100 port 43210 ssh2
+Mar 15 03:42:24 db-primary sshd[1006]: authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.42
+Mar 15 03:42:48 lb-01 sshd[1007]: Connection closed by authenticating user root 203.0.113.42 port 55123 [preauth]
+Mar 15 03:43:12 web-prod-01 kernel: nf_conntrack: table full, dropping packet
+Mar 15 03:43:36 web-prod-02 kernel: EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0
+Mar 15 03:44:00 db-primary kernel: e1000e 0000:00:1f.6 eth0: Reset adapter unexpectedly
+Mar 15 03:44:24 lb-01 kernel: segfault at 0 ip 00007f8a1234abcd sp 00007fff5678ef00 error 4 in libpthread-2.31.so
+Mar 15 03:44:48 web-prod-01 kernel: Out of memory: Kill process 12345 (java) score 950 or sacrifice child
+Mar 15 03:45:12 web-prod-02 kernel: TCP: request_sock_TCP: Possible SYN flooding on port 443. Sending cookies.
+Mar 15 03:45:36 db-primary CRON[5024]: (root) CMD (/usr/bin/certbot renew --quiet)
+Mar 15 03:46:00 lb-01 CRON[5025]: (deploy) CMD (/opt/scripts/health-check.sh)
+Mar 15 03:46:24 web-prod-01 CRON[5026]: (root) CMD (/usr/local/bin/backup.sh >> /var/log/backup.log 2>&1)
+Mar 15 03:46:48 web-prod-02 systemd[1]: Started Session 1234 of user deploy.
+Mar 15 03:47:12 db-primary systemd[1]: systemd-resolved[567]: Server returned error NXDOMAIN, mitigating potential DNS violation DVE-2018-0001
+Mar 15 03:47:36 lb-01 systemd[1]: docker.service: Failed with result 'exit-code'.
+Mar 15 03:48:00 web-prod-01 sshd[1020]: Accepted publickey for deploy from 10.0.1.50 port 52341 ssh2: RSA SHA256:abc123
+Mar 15 03:48:24 web-prod-02 sshd[1021]: Failed password for invalid user admin from 192.168.1.100 port 43210 ssh2
+Mar 15 03:48:48 db-primary sshd[1022]: authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.42
+Mar 15 03:49:12 lb-01 sshd[1023]: Connection closed by authenticating user root 203.0.113.42 port 55123 [preauth]
+Mar 15 03:49:36 web-prod-01 sshd[1024]: Received disconnect from 10.0.2.30 port 48123:11: disconnected by user
+Mar 15 03:50:00 web-prod-02 sshd[1025]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.23 user=root
+Mar 15 03:50:24 db-primary sshd[1026]: Failed password for root from 198.51.100.23 port 41234 ssh2
+Mar 15 03:50:48 lb-01 sshd[1027]: Invalid user admin from 203.0.113.50 port 39876
+Mar 15 03:51:12 web-prod-01 kernel: Out of memory: Kill process 12345 (java) score 950 or sacrifice child
+Mar 15 03:51:36 web-prod-02 kernel: TCP: request_sock_TCP: Possible SYN flooding on port 443. Sending cookies.
+Mar 15 03:52:00 db-primary kernel: [UFW BLOCK] IN=eth0 OUT= MAC=aa:bb:cc:dd:ee:ff SRC=203.0.113.100 DST=10.0.1.10 PROTO=TCP DPT=22
+Mar 15 03:52:24 lb-01 kernel: EXT4-fs (sda1): mounted filesystem with ordered data mode. Opts: (null)
+Mar 15 03:52:48 web-prod-01 kernel: nf_conntrack: table full, dropping packet
+Mar 15 03:53:12 web-prod-02 kernel: EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0
+Mar 15 03:53:36 db-primary CRON[5014]: (root) CMD (/usr/bin/certbot renew --quiet)
+Mar 15 03:54:00 lb-01 CRON[5015]: (deploy) CMD (/opt/scripts/health-check.sh)
+Mar 15 03:54:24 web-prod-01 CRON[5016]: (root) CMD (/usr/local/bin/backup.sh >> /var/log/backup.log 2>&1)
+Mar 15 03:54:48 web-prod-02 systemd[1]: docker.service: Failed with result 'exit-code'.
+Mar 15 03:55:12 db-primary systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+Mar 15 03:55:36 lb-01 systemd[1]: Stopping postgresql@14-main.service - PostgreSQL Cluster 14-main...
+Mar 15 03:56:00 web-prod-01 sshd[1040]: Received disconnect from 10.0.2.30 port 48123:11: disconnected by user
+Mar 15 03:56:24 web-prod-02 sshd[1041]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.23 user=root
+Mar 15 03:56:48 db-primary sshd[1042]: Failed password for root from 198.51.100.23 port 41234 ssh2
+Mar 15 03:57:12 lb-01 sshd[1043]: Invalid user admin from 203.0.113.50 port 39876
+Mar 15 03:57:36 web-prod-01 sshd[1044]: Accepted publickey for deploy from 10.0.1.50 port 52341 ssh2: RSA SHA256:abc123
+Mar 15 03:58:00 web-prod-02 sshd[1045]: Failed password for invalid user admin from 192.168.1.100 port 43210 ssh2
+Mar 15 03:58:24 db-primary sshd[1046]: authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.42
+Mar 15 03:58:48 lb-01 sshd[1047]: Connection closed by authenticating user root 203.0.113.42 port 55123 [preauth]
+Mar 15 03:59:12 web-prod-01 kernel: nf_conntrack: table full, dropping packet
+Mar 15 03:59:36 web-prod-02 kernel: EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#1_DIMM#0

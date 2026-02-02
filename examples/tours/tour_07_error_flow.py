@@ -384,7 +384,7 @@ def _(error_analysis, format_error_flow):
 def _(mo):
     mo.md(
         r"""
-    ## Summary
+    --- also the ## Summary
 
     You've learned how to analyze error flow:
 

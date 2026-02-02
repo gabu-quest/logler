@@ -6,21 +6,20 @@ Interactive marimo notebook tours for learning logler's LLM-optimized log invest
 
 ```
 examples/
-├── tours/              # Interactive marimo notebook tours (14 tours)
+├── tours/              # Interactive marimo notebook tours (12 tours)
 │   ├── tour_01_fundamentals.py
 │   ├── tour_02_thread_tracking.py
 │   ├── tour_03_hierarchy.py
 │   ├── tour_04_investigation.py
-│   ├── tour_05_patterns.py
 │   ├── tour_06_flamegraph.py
 │   ├── tour_07_error_flow.py
 │   ├── tour_08_comparison.py
 │   ├── tour_09_tracing_exports.py
 │   ├── tour_10_sampling.py
-│   ├── tour_11_ai_insights.py
 │   ├── tour_12_multi_file_interleaving.py
 │   ├── tour_13_live_watching.py
-│   └── tour_14_performance.py
+│   ├── tour_14_performance.py
+│   └── tour_15_filtering.py
 └── logs/               # Sample log files for tours
 ```
 
@@ -42,16 +41,15 @@ uv run marimo edit examples/tours/tour_01_fundamentals.py
 | 02 | Thread Tracking | Thread grouping, correlation IDs, follow_thread |
 | 03 | Hierarchy | Tree visualization, waterfall views, bottleneck detection |
 | 04 | Investigation | Sessions, history tracking, report generation |
-| 05 | Patterns | Pattern detection, min_occurrences, anomaly finding |
 | 06 | Flamegraph | Performance visualization, time distribution |
 | 07 | Error Flow | Root cause analysis, error propagation chains |
 | 08 | Comparison | Diff hierarchies, compare threads/time periods |
 | 09 | Tracing Exports | Export to Jaeger and Zipkin formats |
 | 10 | Sampling | Smart sampling strategies (diverse, errors-focused, etc.) |
-| 11 | AI Insights | analyze_with_insights, explain, suggest_next_action |
 | 12 | Multi-File | Load 5+ services, cross-service timeline, distributed tracing |
 | 13 | Live Watching | Real-time tailing, anomaly detection, streaming |
 | 14 | Performance | 10K+ entries, benchmarks, token efficiency comparison |
+| 15 | Filtering | Multi-level, exclude patterns, tail, ids, service, max-bytes |
 
 Each tour is self-contained with sample data - no external files needed.
 
@@ -59,8 +57,8 @@ Each tour is self-contained with sample data - no external files needed.
 
 ### Beginners
 1. Start with `tour_01_fundamentals.py`
-2. Work through tours 02-05 for core concepts
-3. Try tour 11 for AI-powered insights
+2. Work through tours 02-04 for core concepts
+3. Try tour 06 for performance visualization
 
 ### Advanced Users
 - Tours 12-14 showcase logler's full power

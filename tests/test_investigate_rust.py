@@ -56,15 +56,3 @@ def test_rust_follow_thread_has_duration(inv):
     assert timeline["unique_spans"]
     assert all(entry["correlation_id"] == SAMPLE_CORRELATION for entry in timeline["entries"])
     assert all(entry.get("service_name") for entry in timeline["entries"])
-
-
-@requires_huge_log
-def test_rust_patterns_detect_errors(inv):
-    patterns = inv.find_patterns([str(HUGE_LOG)], min_occurrences=3)
-    pattern_list = patterns.get("patterns", [])
-    assert pattern_list, "Rust pattern detection returned nothing"
-    assert any(p["occurrences"] >= 3 for p in pattern_list)
-
-    sample_examples = pattern_list[0].get("examples") or []
-    assert sample_examples, "pattern examples missing"
-    assert any(example.get("service_name") for example in sample_examples)

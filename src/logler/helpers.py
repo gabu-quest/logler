@@ -46,21 +46,6 @@ def quick_summary(files: List[str]) -> Dict[str, Any]:
     }
 
 
-def find_top_errors(files: List[str], limit: int = 10) -> List[Dict[str, Any]]:
-    """
-    Find the most common error patterns.
-
-    Returns a list of error patterns sorted by frequency.
-
-    Example:
-        errors = find_top_errors(["app.log"], limit=5)
-        for err in errors:
-            print(f"{err['occurrences']}x: {err['pattern']}")
-    """
-    patterns = investigate.find_patterns(files, min_occurrences=2)
-    return sorted(patterns["patterns"], key=lambda x: x["occurrences"], reverse=True)[:limit]
-
-
 def search_errors(
     files: List[str], query: Optional[str] = None, limit: int = 100
 ) -> List[Dict[str, Any]]:
@@ -111,38 +96,6 @@ def trace_request(files: List[str], correlation_id: str) -> Dict[str, Any]:
     }
 
 
-def detect_spikes(files: List[str], window_minutes: int = 5) -> List[Dict[str, Any]]:
-    """
-    Detect error rate spikes.
-
-    Note: This requires the SQL feature to be enabled.
-
-    Returns list of time windows with abnormally high error rates.
-
-    Example:
-        spikes = detect_spikes(["app.log"], window_minutes=5)
-        for spike in spikes:
-            print(f"Spike at {spike['time']}: {spike['errors']} errors")
-    """
-    # This would require SQL queries to implement properly
-    # For now, use pattern detection as a simpler alternative
-    patterns = investigate.find_patterns(files, min_occurrences=3)
-
-    spikes = []
-    for pattern in patterns["patterns"]:
-        if pattern["occurrences"] >= 5:  # Threshold for "spike"
-            spikes.append(
-                {
-                    "pattern": pattern["pattern"],
-                    "occurrences": pattern["occurrences"],
-                    "first_seen": pattern["first_seen"],
-                    "last_seen": pattern["last_seen"],
-                }
-            )
-
-    return spikes
-
-
 def get_error_context(file: str, line_number: int, lines: int = 10) -> Dict[str, Any]:
     """
     Get context around an error line.
@@ -188,39 +141,6 @@ def analyze_thread_health(files: List[str]) -> Dict[str, Dict[str, int]]:
         "note": "Thread health analysis requires SQL queries for full implementation",
         "total_threads": metadata[0].get("unique_threads", 0),
     }
-
-
-def find_cascading_failures(files: List[str]) -> List[Dict[str, Any]]:
-    """
-    Find patterns that suggest cascading failures.
-
-    Looks for:
-    - Multiple errors in quick succession
-    - Errors across multiple threads/services
-    - Increasing error rates over time
-
-    Example:
-        cascades = find_cascading_failures(["app.log"])
-        for cascade in cascades:
-            print(f"Cascade: {cascade['pattern']} across {len(cascade['threads'])} threads")
-    """
-    patterns = investigate.find_patterns(files, min_occurrences=3)
-
-    cascades = []
-    for pattern in patterns["patterns"]:
-        # Cascading failures typically affect multiple threads
-        if len(pattern["affected_threads"]) >= 3:
-            cascades.append(
-                {
-                    "pattern": pattern["pattern"],
-                    "occurrences": pattern["occurrences"],
-                    "threads": pattern["affected_threads"],
-                    "first_seen": pattern["first_seen"],
-                    "last_seen": pattern["last_seen"],
-                }
-            )
-
-    return cascades
 
 
 def get_timeline_summary(files: List[str], correlation_id: str) -> str:
@@ -275,8 +195,3 @@ def trace(files: List[str], correlation_id: str) -> Dict[str, Any]:
 def summary(files: List[str]) -> Dict[str, Any]:
     """Shorthand for quick_summary()"""
     return quick_summary(files)
-
-
-def patterns(files: List[str], limit: int = 10) -> List[Dict[str, Any]]:
-    """Shorthand for find_top_errors()"""
-    return find_top_errors(files, limit)

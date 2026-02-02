@@ -30,7 +30,6 @@ def _(mo):
     2. Benchmark indexing speed
     3. Benchmark search operations
     4. Compare output formats (token efficiency)
-    5. Pattern detection at scale
     """
     )
     return
@@ -315,16 +314,29 @@ def _(large_log):
     print("=" * 60)
     print("OUTPUT FORMAT COMPARISON")
     print("=" * 60)
-    print(f"{'Format':<15} {'Approx Tokens':>15} {'Reduction':>15}")
+    print(f"{'Format':<15} {'Tokens':>15} {'Reduction':>15}")
     print("-" * 60)
 
-    # Estimate token count (rough: 1 token ≈ 4 chars)
+    # Use tiktoken for accurate token counts (cl100k_base = GPT-4 encoding)
     import json as json_mod
 
-    full_tokens = len(json_mod.dumps(full_result)) // 4
-    compact_tokens = len(json_mod.dumps(compact_result)) // 4
+    try:
+        import tiktoken
+
+        enc = tiktoken.get_encoding("cl100k_base")
+
+        def count_tokens(obj):
+            return len(enc.encode(json_mod.dumps(obj)))
+
+    except ImportError:
+        # Fallback to char/4 estimate if tiktoken not installed
+        def count_tokens(obj):
+            return len(json_mod.dumps(obj)) // 4
+
+    full_tokens = count_tokens(full_result)
+    compact_tokens = count_tokens(compact_result)
     for _fmt, _result in formats.items():
-        _tokens = len(json_mod.dumps(_result)) // 4
+        _tokens = count_tokens(_result)
         _reduction = (1 - _tokens / full_tokens) * 100 if full_tokens > 0 else 0
         print(f"{_fmt:<15} {_tokens:>15,} {_reduction:>14.1f}%")
     return compact_tokens, full_tokens
@@ -334,36 +346,7 @@ def _(large_log):
 def _(mo):
     mo.md(
         r"""
-    ## 5. Pattern Detection at Scale
-
-    Find recurring patterns in 10,000 entries. This is computationally intensive!
-    """
-    )
-    return
-
-
-@app.cell
-def _(inv, time):
-    print("Running pattern detection on 10,000 entries...")
-    start_pattern = time.perf_counter()
-
-    patterns = inv.find_patterns(min_occurrences=10)
-
-    pattern_time = time.perf_counter() - start_pattern
-
-    print(f"\n🔍 Pattern detection completed in {pattern_time * 1000:.1f}ms")
-    print(f"\nFound {len(patterns.get('patterns', []))} recurring patterns:\n")
-
-    for _p in patterns.get("patterns", [])[:10]:  # Show top 10
-        print(f"  [{_p.get('occurrences', 0):4}x] {_p.get('pattern', '')[:60]}")
-    return (pattern_time,)
-
-
-@app.cell
-def _(mo):
-    mo.md(
-        r"""
-    ## 6. Performance Summary
+    ## 5. Performance Summary
     """
     )
     return
@@ -377,7 +360,6 @@ def _(
     file_size,
     full_tokens,
     index_time,
-    pattern_time,
 ):
     print("=" * 60)
     print("PERFORMANCE SUMMARY")
@@ -393,12 +375,9 @@ def _(
     print(f"   Time: {avg_time * 1000:.2f}ms")
     print(f"   Throughput: {NUM_ENTRIES / avg_time:,.0f} entries/sec")
 
-    print("\n🧩 Pattern Detection:")
-    print(f"   Time: {pattern_time * 1000:.1f}ms")
-
     print("\n💾 Token Efficiency (compact vs full):")
-    print(f"   Full: ~{full_tokens:,} tokens")
-    print(f"   Compact: ~{compact_tokens:,} tokens")
+    print(f"   Full: {full_tokens:,} tokens")
+    print(f"   Compact: {compact_tokens:,} tokens")
     print(f"   Savings: {(1 - compact_tokens / full_tokens) * 100:.1f}%")
 
     print("\n" + "=" * 60)
@@ -418,7 +397,6 @@ def _(mo):
     - **10,000 entries indexed** in milliseconds
     - **Sub-millisecond searches** on indexed data
     - **Token-efficient output** for LLM agents
-    - **Pattern detection** that scales
 
     **Example scaling (varies by machine):**
     - 100K entries: ~500ms index, ~5ms search
