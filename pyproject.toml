@@ -81,5 +81,6 @@ testpaths = ["tests"]
 [dependency-groups]
 dev = [
     "marimo>=0.17.6",
+    "pre-commit>=4.3.0",
     "tiktoken>=0.12.0",
 ]

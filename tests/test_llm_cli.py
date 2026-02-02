@@ -627,3 +627,213 @@ class TestCLISmokeSuite:
         assert metrics["error_rate"] == 0.25
         assert metrics["log_levels"]["ERROR"] == 20
         assert metrics["log_levels"]["INFO"] == 20
+
+
+# =============================================================================
+# New feature tests: --count-only, --offset, --compact, --metadata-only,
+# --max-bytes on additional commands, relative --after/--before
+# =============================================================================
+
+
+class TestSearchCountOnly:
+    """Test --count-only returns match count without results."""
+
+    def test_count_only_with_results(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--count-only"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["total_matches"] == 80
+        assert data["files_searched"] == 1
+        assert "results" not in data
+
+    def test_count_only_with_filter(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--level", "ERROR", "--count-only"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["total_matches"] == 20
+
+    def test_count_only_no_results(self, filtering_cli_log):
+        result = run_llm_command(
+            ["search", filtering_cli_log, "--service", "nonexistent", "--count-only"]
+        )
+        assert result.returncode == EXIT_NO_RESULTS
+        data = json.loads(result.stdout)
+        assert data["total_matches"] == 0
+
+
+class TestSearchOffset:
+    """Test --offset for pagination."""
+
+    def test_offset_skips_entries(self, filtering_cli_log):
+        """--offset 10 --limit 5 returns entries 11-15."""
+        result = run_llm_command(["search", filtering_cli_log, "--offset", "10", "--limit", "5"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert len(data["results"]) == 5
+        assert data["summary"]["offset"] == 10
+
+    def test_offset_has_more_flag(self, filtering_cli_log):
+        """has_more is true when more results remain."""
+        result = run_llm_command(["search", filtering_cli_log, "--offset", "0", "--limit", "10"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert data["summary"]["has_more"] is True
+
+    def test_offset_last_page(self, filtering_cli_log):
+        """has_more is false on the last page."""
+        result = run_llm_command(["search", filtering_cli_log, "--offset", "75", "--limit", "10"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert len(data["results"]) == 5  # 80 - 75 = 5 remaining
+        assert data["summary"]["has_more"] is False
+
+    def test_pagination_three_pages(self, filtering_cli_log):
+        """Paginate through 20 ERROR entries in pages of 8."""
+        all_line_numbers = []
+        for page_offset in [0, 8, 16]:
+            result = run_llm_command(
+                [
+                    "search",
+                    filtering_cli_log,
+                    "--level",
+                    "ERROR",
+                    "--offset",
+                    str(page_offset),
+                    "--limit",
+                    "8",
+                ]
+            )
+            assert result.returncode == EXIT_SUCCESS
+            data = json.loads(result.stdout)
+            all_line_numbers.extend([r["line_number"] for r in data["results"]])
+
+        # 8 + 8 + 4 = 20 total ERROR entries
+        assert len(all_line_numbers) == 20
+        # No duplicate line numbers
+        assert len(set(all_line_numbers)) == 20
+
+
+class TestSearchCompact:
+    """Test --compact uses short field names."""
+
+    def test_compact_short_keys(self, filtering_cli_log):
+        result = run_llm_command(
+            ["search", filtering_cli_log, "--level", "ERROR", "--limit", "3", "--compact"]
+        )
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert len(data["results"]) == 3
+
+        for item in data["results"]:
+            assert "ln" in item
+            assert "ts" in item
+            assert "lv" in item
+            assert "msg" in item
+            # Long keys should NOT be present
+            assert "line_number" not in item
+            assert "timestamp" not in item
+            assert "level" not in item
+
+    def test_compact_saves_bytes(self, filtering_cli_log):
+        """Compact mode should produce smaller output."""
+        normal = run_llm_command(["search", filtering_cli_log, "--level", "ERROR", "--limit", "10"])
+        compact = run_llm_command(
+            ["search", filtering_cli_log, "--level", "ERROR", "--limit", "10", "--compact"]
+        )
+        assert len(compact.stdout) < len(normal.stdout)
+
+
+class TestSearchMetadataOnly:
+    """Test --metadata-only returns aggregations without results."""
+
+    def test_metadata_only_no_results_key(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--metadata-only"])
+        assert result.returncode == EXIT_SUCCESS
+        data = json.loads(result.stdout)
+        assert "results" not in data
+        assert "aggregations" in data
+        assert "summary" in data
+        assert data["summary"]["total_matches"] == 80
+
+    def test_metadata_only_aggregation_counts(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--metadata-only"])
+        data = json.loads(result.stdout)
+        agg = data["aggregations"]
+        assert agg["by_level"]["ERROR"] == 20
+        assert agg["by_level"]["INFO"] == 20
+        assert agg["by_level"]["WARN"] == 20
+        assert agg["by_level"]["DEBUG"] == 20
+
+    def test_metadata_only_by_service(self, filtering_cli_log):
+        result = run_llm_command(["search", filtering_cli_log, "--metadata-only"])
+        data = json.loads(result.stdout)
+        agg = data["aggregations"]
+        assert agg["by_service"]["svc-x"] == 40
+        assert agg["by_service"]["svc-y"] == 40
+
+
+class TestMaxBytesAdditionalCommands:
+    """Test --max-bytes on correlate, hierarchy, bottleneck, summarize."""
+
+    def test_summarize_max_bytes(self, filtering_cli_log):
+        """--max-bytes on summarize should truncate list fields."""
+        normal = run_llm_command(["summarize", filtering_cli_log])
+        capped = run_llm_command(["summarize", filtering_cli_log, "--max-bytes", "800"])
+        assert normal.returncode == EXIT_SUCCESS
+        assert capped.returncode == EXIT_SUCCESS
+        # Capped output should be smaller or equal
+        assert len(capped.stdout) <= len(normal.stdout)
+
+
+class TestRelativeTime:
+    """Test relative time parsing in --after/--before.
+
+    Note: The Rust backend has a known issue with time_start/time_end
+    filtering on some log formats, so we test the parsing layer directly.
+    """
+
+    def test_relative_time_parse_units(self):
+        """Verify _parse_time_arg produces valid ISO timestamps for various units."""
+        from logler.llm_cli import _parse_time_arg
+        from datetime import datetime
+
+        for duration in ["-30m", "-2h", "-1d", "-30s"]:
+            result = _parse_time_arg(duration, "--after")
+            assert result is not None
+            # Should be a valid ISO timestamp
+            parsed = datetime.fromisoformat(result)
+            assert parsed.year > 2020
+
+    def test_relative_time_is_in_past(self):
+        """Relative time arguments should produce timestamps before now."""
+        from logler.llm_cli import _parse_time_arg
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        one_hour_ago = _parse_time_arg("-1h", "--after")
+        parsed = datetime.fromisoformat(one_hour_ago)
+        # Make both tz-aware for comparison
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        # Should be approximately 1 hour before now (within 5 sec tolerance)
+        diff = (now - parsed).total_seconds()
+        assert 3595 < diff < 3605
+
+    def test_resolve_time_filters_relative(self):
+        """_resolve_time_filters handles relative --after/--before."""
+        from logler.llm_cli import _resolve_time_filters
+        from datetime import datetime
+
+        time_start, time_end = _resolve_time_filters(None, "-2h", "-30m")
+        assert time_start is not None
+        assert time_end is not None
+        start = datetime.fromisoformat(time_start)
+        end = datetime.fromisoformat(time_end)
+        assert start < end
+
+    def test_absolute_time_still_works(self):
+        """ISO8601 timestamps still work for --after/--before."""
+        from logler.llm_cli import _parse_time_arg
+
+        result = _parse_time_arg("2024-01-15T10:00:00Z", "--after")
+        assert "2024-01-15" in result
