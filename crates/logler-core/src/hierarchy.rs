@@ -911,3 +911,99 @@ impl HierarchyBuilder {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn make_entry_with_fields(
+        ts: Option<DateTime<Utc>>,
+        fields: HashMap<String, serde_json::Value>,
+    ) -> LogEntry {
+        LogEntry {
+            id: Uuid::new_v4(),
+            file: "test.log".to_string(),
+            line_number: 1,
+            raw: String::new(),
+            timestamp: ts,
+            level: Some(LogLevel::Info),
+            format: crate::types::LogFormat::Json,
+            message: "test".to_string(),
+            thread_id: None,
+            correlation_id: None,
+            trace_id: None,
+            span_id: None,
+            parent_span_id: None,
+            service_name: None,
+            fields,
+        }
+    }
+
+    #[test]
+    fn test_duration_prefers_explicit_duration_ms_field() {
+        let builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let ts = chrono::Utc::now();
+        let mut fields = HashMap::new();
+        fields.insert("duration_ms".to_string(), json!(150));
+        let entry = make_entry_with_fields(Some(ts), fields);
+
+        // start == end means timestamp diff would be 0
+        let start = Some(ts);
+        let end = Some(ts);
+        let result = builder.calculate_duration_for_node(&[&entry], &start, &end);
+        assert_eq!(
+            result,
+            Some(150),
+            "should use duration_ms field, not timestamp diff"
+        );
+    }
+
+    #[test]
+    fn test_duration_uses_duration_field() {
+        let builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let ts = chrono::Utc::now();
+        let mut fields = HashMap::new();
+        fields.insert("duration".to_string(), json!(250));
+        let entry = make_entry_with_fields(Some(ts), fields);
+
+        let start = Some(ts);
+        let end = Some(ts);
+        let result = builder.calculate_duration_for_node(&[&entry], &start, &end);
+        assert_eq!(result, Some(250), "should use duration field");
+    }
+
+    #[test]
+    fn test_duration_parses_string_encoded_value() {
+        let builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let ts = chrono::Utc::now();
+        let mut fields = HashMap::new();
+        fields.insert("duration_ms".to_string(), json!("300"));
+        let entry = make_entry_with_fields(Some(ts), fields);
+
+        let start = Some(ts);
+        let end = Some(ts);
+        let result = builder.calculate_duration_for_node(&[&entry], &start, &end);
+        assert_eq!(result, Some(300), "should parse string-encoded duration_ms");
+    }
+
+    #[test]
+    fn test_duration_falls_back_to_timestamp_diff() {
+        let builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let start_ts = chrono::DateTime::parse_from_rfc3339("2024-01-15T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let end_ts = chrono::DateTime::parse_from_rfc3339("2024-01-15T10:00:01Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let entry = make_entry_with_fields(Some(start_ts), HashMap::new());
+
+        let result = builder.calculate_duration_for_node(&[&entry], &Some(start_ts), &Some(end_ts));
+        assert_eq!(
+            result,
+            Some(1000),
+            "should fall back to timestamp diff of 1000ms"
+        );
+    }
+}

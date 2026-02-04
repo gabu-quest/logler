@@ -467,8 +467,14 @@ impl Investigator {
 
         for (pattern, entries) in error_messages {
             if entries.len() >= min_occurrences {
-                let first_seen = entries.iter().filter_map(|e| e.timestamp).min().unwrap();
-                let last_seen = entries.iter().filter_map(|e| e.timestamp).max().unwrap();
+                let first_seen = match entries.iter().filter_map(|e| e.timestamp).min() {
+                    Some(ts) => ts,
+                    None => continue,
+                };
+                let last_seen = match entries.iter().filter_map(|e| e.timestamp).max() {
+                    Some(ts) => ts,
+                    None => continue,
+                };
                 let affected_threads: HashSet<String> =
                     entries.iter().filter_map(|e| e.thread_id.clone()).collect();
 
@@ -948,6 +954,68 @@ mod tests {
         assert_eq!(results.results[0].entry.thread_id, Some("w-0".to_string()));
     }
 
+    fn json_entry_corr_trace(
+        ts: &str,
+        level: &str,
+        msg: &str,
+        thread: &str,
+        corr: &str,
+        trace: &str,
+    ) -> String {
+        format!(
+            r#"{{"timestamp":"{}","level":"{}","message":"{}","thread_id":"{}","correlation_id":"{}","trace_id":"{}"}}"#,
+            ts, level, msg, thread, corr, trace
+        )
+    }
+
+    #[test]
+    fn test_follow_thread_deduplicates_corr_and_trace() {
+        let entries: Vec<String> = vec![
+            json_entry_corr_trace(
+                "2024-01-15T10:00:00Z",
+                "INFO",
+                "start request",
+                "w-0",
+                "req-1",
+                "trace-1",
+            ),
+            json_entry_corr_trace(
+                "2024-01-15T10:00:01Z",
+                "INFO",
+                "processing",
+                "w-0",
+                "req-1",
+                "trace-1",
+            ),
+            json_entry_corr_trace(
+                "2024-01-15T10:00:02Z",
+                "INFO",
+                "done",
+                "w-0",
+                "req-1",
+                "trace-1",
+            ),
+        ];
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let timeline = inv
+            .follow_thread(
+                &[file.path().to_path_buf()],
+                None,
+                Some("req-1".to_string()),
+                Some("trace-1".to_string()),
+            )
+            .unwrap();
+
+        assert_eq!(
+            timeline.entries.len(),
+            3,
+            "entries should be deduplicated when matching both correlation_id and trace_id"
+        );
+    }
+
     #[test]
     fn test_extract_ids() {
         let entries: Vec<String> = vec![
@@ -973,5 +1041,82 @@ mod tests {
         for cid in &result.correlation_ids {
             assert_eq!(cid.count, 2);
         }
+    }
+
+    #[test]
+    fn test_find_patterns_no_panic_when_timestamps_missing() {
+        // BSD syslog entries may have no parsed timestamps
+        // Repeated errors without timestamps should not crash
+        let entries: Vec<String> = vec![
+            r#"{"level":"ERROR","message":"connection refused to database","thread_id":"w-0"}"#
+                .to_string(),
+            r#"{"level":"ERROR","message":"connection refused to database","thread_id":"w-0"}"#
+                .to_string(),
+            r#"{"level":"ERROR","message":"connection refused to database","thread_id":"w-1"}"#
+                .to_string(),
+        ];
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let result = inv.find_patterns(&[file.path().to_path_buf()], 2);
+        assert!(
+            result.is_ok(),
+            "find_patterns should not panic with missing timestamps"
+        );
+        // Pattern is skipped because no timestamps available
+        let patterns = result.unwrap();
+        assert_eq!(
+            patterns.patterns.len(),
+            0,
+            "patterns without timestamps should be skipped"
+        );
+    }
+
+    #[test]
+    fn test_find_patterns_mixed_timestamps() {
+        // Mix of entries with and without timestamps
+        let entries: Vec<String> = vec![
+            // Timestamped errors (should produce a pattern)
+            json_entry(
+                "2024-01-15T10:00:00Z",
+                "ERROR",
+                "disk full on /var/log",
+                "w-0",
+                "svc-a",
+            ),
+            json_entry(
+                "2024-01-15T10:00:01Z",
+                "ERROR",
+                "disk full on /var/log",
+                "w-1",
+                "svc-a",
+            ),
+            json_entry(
+                "2024-01-15T10:00:02Z",
+                "ERROR",
+                "disk full on /var/log",
+                "w-0",
+                "svc-a",
+            ),
+            // Non-timestamped errors (should be skipped gracefully)
+            r#"{"level":"ERROR","message":"no timestamp here","thread_id":"w-2"}"#.to_string(),
+            r#"{"level":"ERROR","message":"no timestamp here","thread_id":"w-2"}"#.to_string(),
+            r#"{"level":"ERROR","message":"no timestamp here","thread_id":"w-2"}"#.to_string(),
+        ];
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let result = inv.find_patterns(&[file.path().to_path_buf()], 2);
+        assert!(
+            result.is_ok(),
+            "find_patterns should handle mixed timestamps"
+        );
+        let patterns = result.unwrap();
+        // Only the timestamped pattern should appear
+        assert_eq!(patterns.patterns.len(), 1);
+        assert_eq!(patterns.patterns[0].occurrences, 3);
+        assert!(patterns.patterns[0].pattern.contains("disk full"));
     }
 }

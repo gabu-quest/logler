@@ -74,10 +74,9 @@ JSON (recommended), syslog (RFC 3164/5424 + BSD), logfmt, plaintext, Apache CLF.
 Parser auto-detects format. BSD syslog without `<priority>` prefix uses
 pattern-based level inference (auth failures → ERROR, OOM → FATAL, etc.).
 
-## Known Issues
+## Known Limitations
 
-- Tour 12 duplicates entries when correlation_id AND trace_id match
-- Rust backend crashes with time_start/time_end on some log formats (BSD syslog)
+- BSD syslog entries without `<priority>` prefix have no parsed timestamps; time-based filtering is unavailable for these entries
 
 ## Key Dependencies
 
