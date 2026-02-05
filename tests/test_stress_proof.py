@@ -50,6 +50,7 @@ def generate_realistic_microservice_logs(
     services: List[str] = None,
     error_rate: float = 0.05,
     avg_logs_per_request: int = 15,
+    seed: int = 42,
 ) -> List[Dict[str, Any]]:
     """
     Generate realistic microservice logs that mirror production patterns.
@@ -57,6 +58,7 @@ def generate_realistic_microservice_logs(
     Each request flows through multiple services, spawning threads,
     database queries, cache lookups, and external API calls.
     """
+    random.seed(seed)
     if services is None:
         services = [
             "api-gateway",
@@ -423,11 +425,13 @@ def generate_chaotic_concurrent_logs(
     num_threads: int = 100,
     logs_per_thread: int = 50,
     overlap_factor: float = 0.8,
+    seed: int = 42,
 ) -> List[Dict[str, Any]]:
     """
     Generate logs from many concurrent threads with overlapping time ranges.
     This tests the ability to correctly separate and follow threads.
     """
+    random.seed(seed)
     logs = []
     base_time = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -487,11 +491,13 @@ def generate_deep_call_hierarchy(
     max_depth: int = 20,
     branching_factor: int = 3,
     logs_per_node: int = 5,
+    seed: int = 42,
 ) -> List[Dict[str, Any]]:
     """
     Generate logs representing a deep call hierarchy with parent-child relationships.
     Tests hierarchy building and visualization.
     """
+    random.seed(seed)
     logs = []
     base_time = datetime(2024, 1, 15, 14, 0, 0, tzinfo=timezone.utc)
     current_time = base_time
@@ -1089,5 +1095,155 @@ class TestUltimateStress:
             # Verify we processed all logs successfully
             assert metadata[0]["lines"] == len(logs), "All logs were processed"
 
+        finally:
+            Path(temp_path).unlink()
+
+
+# =============================================================================
+# CRUEL TESTS - PROVE DATA INTEGRITY AT DEPTH
+# =============================================================================
+
+
+class TestCruelDataIntegrity:
+    """Cruel tests that catch subtle data corruption and loss."""
+
+    def test_correlation_id_groups_are_complete(self, large_microservice_logs):
+        """For every correlation_id, follow_thread returns the same count as generated."""
+        file_path, original_logs = large_microservice_logs
+
+        # Build expected counts from original data
+        corr_counts = defaultdict(int)
+        for log in original_logs:
+            cid = log.get("correlation_id")
+            if cid:
+                corr_counts[cid] += 1
+
+        # Spot check 20 random correlation IDs
+        random.seed(42)
+        sample_ids = random.sample(list(corr_counts.keys()), min(20, len(corr_counts)))
+
+        for cid in sample_ids:
+            expected = corr_counts[cid]
+            result = follow_thread(files=[file_path], correlation_id=cid)
+            assert result["total_entries"] == expected, (
+                f"Correlation {cid}: expected {expected} entries, " f"got {result['total_entries']}"
+            )
+
+    def test_trace_id_groups_are_complete(self, large_microservice_logs):
+        """For every trace_id, follow_thread returns the same count as generated."""
+        file_path, original_logs = large_microservice_logs
+
+        trace_counts = defaultdict(int)
+        for log in original_logs:
+            tid = log.get("trace_id")
+            if tid:
+                trace_counts[tid] += 1
+
+        random.seed(42)
+        sample_ids = random.sample(list(trace_counts.keys()), min(20, len(trace_counts)))
+
+        for tid in sample_ids:
+            expected = trace_counts[tid]
+            result = follow_thread(files=[file_path], trace_id=tid)
+            assert result["total_entries"] == expected, (
+                f"Trace {tid}: expected {expected} entries, " f"got {result['total_entries']}"
+            )
+
+    def test_interleaved_timestamps_sorted_after_follow(self, large_microservice_logs):
+        """Despite shuffle in generator, follow_thread returns chronological order."""
+        file_path, original_logs = large_microservice_logs
+
+        # Pick a correlation_id that has multiple entries
+        corr_counts = defaultdict(int)
+        for log in original_logs:
+            cid = log.get("correlation_id")
+            if cid:
+                corr_counts[cid] += 1
+
+        # Find a corr_id with at least 5 entries
+        multi_entry_ids = [cid for cid, count in corr_counts.items() if count >= 5]
+        assert len(multi_entry_ids) > 0, "No correlation_ids with >= 5 entries"
+
+        test_cid = multi_entry_ids[0]
+        result = follow_thread(files=[file_path], correlation_id=test_cid)
+        assert result["total_entries"] >= 5
+
+        timestamps = [
+            entry.get("timestamp") for entry in result["entries"] if entry.get("timestamp")
+        ]
+        assert len(timestamps) >= 2, "Need at least 2 timestamps to verify order"
+
+        for i in range(1, len(timestamps)):
+            assert timestamps[i] >= timestamps[i - 1], (
+                f"Timeline not chronological at index {i}: "
+                f"{timestamps[i - 1]} > {timestamps[i]}"
+            )
+
+    def test_error_entries_have_error_codes(self, large_microservice_logs):
+        """Generated error entries include error_code field preserved after parse."""
+        file_path, original_logs = large_microservice_logs
+
+        # Count errors with error_code in original data
+        original_error_codes = [
+            log for log in original_logs if log.get("level") == "ERROR" and log.get("error_code")
+        ]
+        assert len(original_error_codes) > 0, "No error entries with error_code in generated data"
+
+        # Search for errors through the system
+        result = search(files=[file_path], level="ERROR", limit=10000)
+        assert result["total_matches"] > 0
+
+        # At least some parsed errors should preserve the error_code in raw JSON
+        found_error_codes = 0
+        for item in result["results"]:
+            raw = item["entry"].get("raw", "")
+            if raw and "error_code" in raw:
+                found_error_codes += 1
+
+        assert (
+            found_error_codes > 0
+        ), "No error_code fields found in parsed error entries' raw content"
+
+    def test_no_data_corruption_on_special_characters(self):
+        """Messages with Unicode, quotes, and special chars survive round-trip."""
+        special_messages = [
+            "Error: file 'config.json' not found",
+            'Warning: key "api_key" is empty',
+            "CPU usage at 99.9% \u2014 system overloaded",
+            "User \u30e6\u30fc\u30b6\u30fc logged in from 192.168.1.1",
+            "Path: /var/log/app\\n\\tstack trace follows",
+            "Amount: $1,234.56 (USD)",
+            "Query: SELECT * FROM users WHERE name = 'O\\'Brien'",
+        ]
+
+        logs = []
+        base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+        for i, msg in enumerate(special_messages):
+            logs.append(
+                {
+                    "timestamp": (base_time + timedelta(seconds=i)).isoformat(),
+                    "level": "INFO",
+                    "message": msg,
+                    "thread_id": "test-thread",
+                }
+            )
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
+            for log in logs:
+                f.write(json.dumps(log, ensure_ascii=False) + "\n")
+            temp_path = f.name
+
+        try:
+            result = search(files=[temp_path], limit=100)
+            assert result["total_matches"] == len(
+                special_messages
+            ), f"Expected {len(special_messages)} entries, got {result['total_matches']}"
+
+            # Verify messages survived the round-trip
+            found_messages = [item["entry"]["message"] for item in result["results"]]
+            for original_msg in special_messages:
+                assert any(
+                    original_msg in fm for fm in found_messages
+                ), f"Message lost in round-trip: {original_msg[:60]}"
         finally:
             Path(temp_path).unlink()
