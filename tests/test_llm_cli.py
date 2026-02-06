@@ -209,6 +209,40 @@ class TestEmitCommand:
                 parsed = json.loads(line)
                 assert "ln" in parsed  # Short key for line_number
 
+    def test_emit_compact_src_multi_file(self, sample_log_file):
+        """Compact mode includes src field when emitting multiple files."""
+        # Create a second log file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f2:
+            f2.write("2024-01-15T11:00:00.000Z INFO [worker-3] Secondary log entry\n")
+            f2.flush()
+            second_file = f2.name
+
+        try:
+            result = run_llm_command(
+                ["emit", sample_log_file, second_file, "--compact", "--limit", "5"]
+            )
+            assert result.returncode == EXIT_SUCCESS
+
+            lines = [line for line in result.stdout.strip().split("\n") if line]
+            assert len(lines) > 0
+            for line in lines:
+                parsed = json.loads(line)
+                assert "src" in parsed, "compact multi-file emit must include 'src'"
+                # src should be filename only, not full path
+                assert "/" not in parsed["src"]
+        finally:
+            os.unlink(second_file)
+
+    def test_emit_compact_no_src_single_file(self, sample_log_file):
+        """Compact mode omits src field for single-file emit."""
+        result = run_llm_command(["emit", sample_log_file, "--compact", "--limit", "3"])
+        assert result.returncode == EXIT_SUCCESS
+
+        for line in result.stdout.strip().split("\n"):
+            if line:
+                parsed = json.loads(line)
+                assert "src" not in parsed, "compact single-file emit should NOT include 'src'"
+
     def test_emit_with_level_filter(self, sample_log_file):
         """Test emit with level filter."""
         result = run_llm_command(["emit", sample_log_file, "--level", "ERROR"])
