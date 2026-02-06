@@ -3779,7 +3779,15 @@ def _load_files_with_config(
     parser_format: Optional[str] = None,
     custom_regex: Optional[str] = None,
 ):
-    """Load files with optional parser config; falls back to plain load if config not supported."""
+    """Load files with optional parser config; falls back to plain load if config not supported.
+
+    When no explicit parser_format or custom_regex is given, auto-discovers
+    .logler/formats.yaml and matches file patterns to select the right format.
+    """
+    # Auto-discover config when no explicit format is given
+    if not parser_format and not custom_regex and files:
+        custom_regex = _auto_detect_format_from_config(files)
+
     try:
         if parser_format or custom_regex:
             return inv.load_files_with_config(files, parser_format, custom_regex)
@@ -3787,3 +3795,45 @@ def _load_files_with_config(
         # Fall back silently to default loader if enhanced path fails
         pass
     return inv.load_files(files)
+
+
+def _auto_detect_format_from_config(files: List[str]) -> Optional[str]:
+    """Try to find a matching format in .logler/formats.yaml for the given files.
+
+    Searches from the directory of the first file. If a config is found and
+    any file matches a format's file_patterns, returns that format's regex.
+    Only returns a regex if ALL files match the SAME format (or have no match).
+    """
+    try:
+        from pathlib import Path as _Path
+
+        from .config import find_config, get_format_for_file, load_config
+
+        if not files:
+            return None
+
+        # Search from the directory of the first file
+        start_dir = _Path(files[0]).resolve().parent
+        config_path = find_config(start_dir)
+        if not config_path:
+            return None
+
+        config = load_config(config_path)
+        if not config.formats:
+            return None
+
+        # Find format for the first file that has a match
+        matched_regex = None
+        for f in files:
+            fmt = get_format_for_file(config, f)
+            if fmt:
+                if matched_regex is None:
+                    matched_regex = fmt.regex
+                elif matched_regex != fmt.regex:
+                    # Multiple files match different formats — don't auto-select
+                    return None
+
+        return matched_regex
+    except Exception:
+        # Config loading should never break file loading
+        return None
