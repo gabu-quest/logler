@@ -135,7 +135,8 @@ class TestThreadTracking:
         thread = tracker.get_thread("worker-1")
         assert thread["log_count"] == 5
         # First/last should be from entries that have timestamps
-        assert thread["first_seen"] is not None
+        assert thread["first_seen"] is not None  # guard
+        assert thread["first_seen"] == datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
 
     def test_all_entries_none_timestamp(self, tracker):
         """All entries have None timestamp"""
@@ -239,8 +240,9 @@ class TestTraceTracking:
         tracker.track(entry)
 
         trace = tracker.get_trace("trace-123")
-        # Should still track the trace, but spans list might be empty
-        assert trace is not None
+        # Should still track the trace, but spans list is empty (no span_id)
+        assert trace is not None  # guard
+        assert trace["spans"] == []
 
     def test_many_traces(self, tracker):
         """Track many different traces"""
@@ -323,8 +325,12 @@ class TestCombinedTracking:
         trace = tracker.get_trace("trace-123")
         corr = tracker.get_by_correlation("req-456")
 
-        assert thread is not None
-        assert trace is not None
+        assert thread is not None  # guard
+        assert thread["thread_id"] == "worker-1"
+        assert thread["log_count"] == 1
+        assert trace is not None  # guard
+        assert len(trace["spans"]) == 1
+        assert trace["spans"][0]["span_id"] == "span-1"
         assert len(corr) == 1
 
     def test_cross_thread_correlation(self, tracker):
@@ -395,14 +401,18 @@ class TestEdgeCaseIDs:
         entry = LogEntry(line_number=1, raw="test", thread_id=long_id)
         tracker.track(entry)
         thread = tracker.get_thread(long_id)
-        assert thread is not None
+        assert thread is not None  # guard
+        assert thread["thread_id"] == long_id
+        assert thread["log_count"] == 1
 
     def test_unicode_thread_id(self, tracker):
         """Unicode characters in thread ID"""
         entry = LogEntry(line_number=1, raw="test", thread_id="ワーカー-1")
         tracker.track(entry)
         thread = tracker.get_thread("ワーカー-1")
-        assert thread is not None
+        assert thread is not None  # guard
+        assert thread["thread_id"] == "ワーカー-1"
+        assert thread["log_count"] == 1
 
     def test_special_chars_in_ids(self, tracker):
         """Special characters in IDs"""
@@ -422,7 +432,9 @@ class TestEdgeCaseIDs:
 
         for tid in special_ids:
             thread = tracker.get_thread(tid)
-            assert thread is not None, f"Failed for ID: {tid}"
+            assert thread is not None, f"Failed for ID: {tid}"  # guard
+            assert thread["thread_id"] == tid, f"Wrong thread_id for {tid}"
+            assert thread["log_count"] == 1, f"Wrong count for {tid}"
 
 
 class TestTimezoneHandling:
@@ -532,8 +544,12 @@ class TestStateIsolation:
         tracker1.track(entry1)
         tracker2.track(entry2)
 
-        assert tracker1.get_thread("tracker1-thread") is not None
+        t1 = tracker1.get_thread("tracker1-thread")
+        assert t1 is not None  # guard
+        assert t1["thread_id"] == "tracker1-thread"
         assert tracker1.get_thread("tracker2-thread") is None
 
-        assert tracker2.get_thread("tracker2-thread") is not None
+        t2 = tracker2.get_thread("tracker2-thread")
+        assert t2 is not None  # guard
+        assert t2["thread_id"] == "tracker2-thread"
         assert tracker2.get_thread("tracker1-thread") is None

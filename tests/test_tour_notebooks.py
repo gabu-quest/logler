@@ -98,6 +98,18 @@ EXPECTED_OUTPUT = {
         "OUTPUT FORMAT COMPARISON",
         "PERFORMANCE SUMMARY",
     ],
+    "tour_16_metrics_extraction.py": [
+        "=== Metrics Extracted ===",
+        "=== Statistical Summary ===",
+        "=== Anomalies Detected ===",
+        "=== Time-Series Buckets ===",
+    ],
+    "tour_17_format_detection.py": [
+        "=== Format Detection ===",
+        "=== Confidence Analysis ===",
+        "=== Template Mining ===",
+        "=== Template Clusters ===",
+    ],
 }
 
 FORBIDDEN_OUTPUT = {
