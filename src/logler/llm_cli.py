@@ -3487,3 +3487,195 @@ def correlate_events_cmd(
         raise
     except Exception as e:
         _error_json(f"Internal error in correlate-events: {str(e)}", EXIT_INTERNAL_ERROR)
+
+
+# ============================================================================
+# M5: Numeric Metrics Commands
+# ============================================================================
+
+
+@llm.command()
+@click.argument("files", nargs=-1, required=True)
+@click.option(
+    "--fields",
+    help="Comma-separated list of field names to include (default: all)",
+)
+@click.option(
+    "--bucket",
+    help="Time bucket size for aggregation (e.g., 1s, 5s, 1m)",
+)
+@click.option(
+    "--anomaly-threshold",
+    type=float,
+    default=2.0,
+    help="Z-score threshold for anomaly detection (default: 2.0)",
+)
+@click.option("--compact", is_flag=True, help="Compact output (stats only, no buckets)")
+@click.option("--max-bytes", type=int, help="Maximum output size in bytes")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
+def metrics(
+    files: tuple,
+    fields: Optional[str],
+    bucket: Optional[str],
+    anomaly_threshold: float,
+    compact: bool,
+    max_bytes: Optional[int],
+    pretty: bool,
+):
+    """Extract numeric values from log files and compute time-series statistics.
+
+    Finds numeric fields in structured data (JSON fields, key=value pairs)
+    and log messages (duration=123ms, temperature: 45.2).
+
+    For each discovered field, computes: min, max, mean, median, stddev,
+    p95, p99, and z-score anomalies.
+
+    Examples:
+        logler llm metrics app.log sensor.log
+        logler llm metrics "*.log" --fields temperature,pressure --bucket 5s
+        logler llm metrics app.log --compact --pretty
+    """
+    from . import investigate
+
+    try:
+        file_list = _expand_globs(list(files))
+        if not file_list:
+            _error_json(f"No files found matching: {list(files)}")
+
+        field_list = [f.strip() for f in fields.split(",")] if fields else None
+
+        result = investigate.extract_metrics(
+            files=file_list,
+            fields=field_list,
+            bucket_size=None if compact else bucket,
+            anomaly_threshold=anomaly_threshold,
+        )
+
+        if compact:
+            # Compact mode: stats only, no buckets or anomaly details
+            compact_fields = {}
+            for name, data in result.get("fields", {}).items():
+                compact_fields[name] = {
+                    "count": data["count"],
+                    "stats": data["stats"],
+                }
+                if data.get("unit"):
+                    compact_fields[name]["unit"] = data["unit"]
+            result = {
+                "fields": compact_fields,
+                "entries_scanned": result["entries_scanned"],
+                "files_searched": result["files_searched"],
+            }
+
+        if max_bytes:
+            result = _apply_max_bytes(result, max_bytes)
+
+        _output_json(result, pretty)
+
+        has_fields = bool(result.get("fields"))
+        sys.exit(EXIT_SUCCESS if has_fields else EXIT_NO_RESULTS)
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        _error_json(f"Internal error in metrics: {str(e)}", EXIT_INTERNAL_ERROR)
+
+
+# ============================================================================
+# M6: Format Detection Commands
+# ============================================================================
+
+
+@llm.command()
+@click.argument("files", nargs=-1, required=True)
+@click.option("--sample", type=int, default=50, help="Lines to sample per file (default: 50)")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
+def detect(
+    files: tuple,
+    sample: int,
+    pretty: bool,
+):
+    """Auto-detect the log format of files with confidence scoring.
+
+    Samples lines from each file and scores them against known formats
+    (JSON, syslog, Apache CLF, logfmt) and any custom formats from
+    .logler/formats.yaml.
+
+    Examples:
+        logler llm detect app.log sensor.log
+        logler llm detect "*.log" --sample 100 --pretty
+    """
+    from . import investigate
+
+    try:
+        file_list = _expand_globs(list(files))
+        if not file_list:
+            _error_json(f"No files found matching: {list(files)}")
+
+        result = investigate.detect_formats(
+            files=file_list,
+            sample_size=sample,
+        )
+
+        _output_json(result, pretty)
+        sys.exit(EXIT_SUCCESS)
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        _error_json(f"Internal error in detect: {str(e)}", EXIT_INTERNAL_ERROR)
+
+
+@llm.command()
+@click.argument("files", nargs=-1, required=True)
+@click.option("--max-clusters", type=int, default=200, help="Max template clusters (default: 200)")
+@click.option(
+    "--similarity",
+    type=float,
+    default=0.5,
+    help="Token similarity threshold for merging (0.0-1.0, default: 0.5)",
+)
+@click.option("--max-bytes", type=int, help="Maximum output size in bytes")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
+def templates(
+    files: tuple,
+    max_clusters: int,
+    similarity: float,
+    max_bytes: Optional[int],
+    pretty: bool,
+):
+    """Mine recurring log templates using the Drain algorithm.
+
+    Discovers common log message patterns and extracts variable positions.
+    Templates show what patterns recur most often, helping to understand
+    log structure and identify dominant behaviors.
+
+    Examples:
+        logler llm templates app.log
+        logler llm templates "*.log" --max-clusters 50 --pretty
+    """
+    from . import investigate
+
+    try:
+        file_list = _expand_globs(list(files))
+        if not file_list:
+            _error_json(f"No files found matching: {list(files)}")
+
+        result = investigate.mine_log_templates(
+            files=file_list,
+            max_clusters=max_clusters,
+            sim_threshold=similarity,
+        )
+
+        if max_bytes:
+            result = _apply_max_bytes(result, max_bytes)
+
+        _output_json(result, pretty)
+
+        has_templates = result.get("unique_templates", 0) > 0
+        sys.exit(EXIT_SUCCESS if has_templates else EXIT_NO_RESULTS)
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        _error_json(f"Internal error in templates: {str(e)}", EXIT_INTERNAL_ERROR)

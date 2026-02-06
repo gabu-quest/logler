@@ -3837,3 +3837,162 @@ def _auto_detect_format_from_config(files: List[str]) -> Optional[str]:
     except Exception:
         # Config loading should never break file loading
         return None
+
+
+# ============================================================================
+# Numeric Extraction Wrappers (M5)
+# ============================================================================
+
+
+def extract_metrics(
+    files: List[str],
+    fields: Optional[List[str]] = None,
+    bucket_size: Optional[str] = None,
+    anomaly_threshold: float = 2.0,
+    query: Optional[str] = None,
+    level: Optional[str] = None,
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
+    parser_format: Optional[str] = None,
+    custom_regex: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Extract numeric metrics from log files.
+
+    Loads files via search(), extracts numeric values from entries,
+    and returns time-series stats with optional bucketing and anomaly detection.
+
+    Args:
+        files: Log file paths to analyze.
+        fields: If specified, only return these field names.
+        bucket_size: If specified, include time-bucketed aggregation (e.g., "5s").
+        anomaly_threshold: Z-score threshold for anomaly detection (default 2.0).
+        query: Optional search query to filter entries.
+        level: Optional log level filter.
+        time_start: Optional time range start (ISO8601).
+        time_end: Optional time range end (ISO8601).
+        parser_format: Optional parser format hint.
+        custom_regex: Optional custom regex for parsing.
+
+    Returns:
+        Dict with "fields" mapping of extracted metrics and stats.
+    """
+    from .metrics import extract_metrics as _extract
+
+    # Load entries via search (no limit — we want all entries for metrics)
+    result = search(
+        files=files,
+        query=query,
+        level=level,
+        time_start=time_start,
+        time_end=time_end,
+        parser_format=parser_format,
+        custom_regex=custom_regex,
+    )
+
+    entries = [item.get("entry", {}) for item in result.get("results", [])]
+
+    metrics = _extract(
+        entries, fields=fields, bucket_size=bucket_size, anomaly_threshold=anomaly_threshold
+    )
+    metrics["files_searched"] = len(files)
+    return metrics
+
+
+# ============================================================================
+# Format Detection Wrappers (M6)
+# ============================================================================
+
+
+def detect_formats(
+    files: List[str],
+    sample_size: int = 50,
+) -> Dict[str, Any]:
+    """Detect log format for each file.
+
+    Args:
+        files: Log file paths to analyze.
+        sample_size: Number of lines to sample per file.
+
+    Returns:
+        Dict mapping file paths to FormatDetection results.
+    """
+    from .format_detector import detect_format as _detect
+
+    # Load custom formats from config if available
+    custom_formats = None
+    try:
+        from pathlib import Path as _Path
+        from .config import find_config, load_config
+
+        if files:
+            start_dir = _Path(files[0]).resolve().parent
+            config_path = find_config(start_dir)
+            if config_path:
+                config = load_config(config_path)
+                if config.formats:
+                    custom_formats = {
+                        name: {"regex": fmt.regex} for name, fmt in config.formats.items()
+                    }
+    except Exception:
+        pass  # Config loading should never break detection
+
+    results = {}
+    for file_path in files:
+        detection = _detect(file_path, sample_size=sample_size, custom_formats=custom_formats)
+        results[file_path] = {
+            "format": detection.format,
+            "confidence": detection.confidence,
+            "sample_size": detection.sample_size,
+            "match_rate": detection.match_rate,
+            "alternatives": detection.alternatives,
+            "detected_fields": detection.detected_fields,
+            "sample_lines": detection.sample_lines,
+            "mixed": detection.mixed,
+        }
+
+    return {"files": results}
+
+
+def mine_log_templates(
+    files: List[str],
+    max_clusters: int = 200,
+    sim_threshold: float = 0.5,
+    parser_format: Optional[str] = None,
+    custom_regex: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Mine log templates from files using the Drain algorithm.
+
+    Args:
+        files: Log file paths to analyze.
+        max_clusters: Maximum number of template clusters.
+        sim_threshold: Minimum token similarity for cluster merge.
+        parser_format: Optional parser format hint.
+        custom_regex: Optional custom regex for parsing.
+
+    Returns:
+        Dict with templates, counts, and coverage statistics.
+    """
+    from .format_detector import mine_templates as _mine
+
+    # Load entries and extract messages
+    result = search(
+        files=files,
+        parser_format=parser_format,
+        custom_regex=custom_regex,
+    )
+
+    messages = [
+        item.get("entry", {}).get("message", "")
+        for item in result.get("results", [])
+        if item.get("entry", {}).get("message")
+    ]
+
+    template_result = _mine(messages, max_clusters=max_clusters, sim_threshold=sim_threshold)
+
+    return {
+        "templates": template_result.templates,
+        "total_lines": template_result.total_lines,
+        "unique_templates": template_result.unique_templates,
+        "coverage": template_result.coverage,
+        "files_searched": len(files),
+    }
