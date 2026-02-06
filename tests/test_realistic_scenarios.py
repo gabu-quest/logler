@@ -340,10 +340,8 @@ class TestOrphanedSpans:
         """Building hierarchy should handle orphaned spans gracefully"""
         hierarchy = follow_thread_hierarchy(files=[orphaned_spans_log], root_identifier="trace-123")
 
-        # Should complete without crashing
-        assert "roots" in hierarchy
-        # Should have some nodes
-        assert hierarchy.get("total_nodes", 0) >= 1
+        assert "roots" in hierarchy  # guard
+        assert hierarchy["total_nodes"] >= 3  # root + auth + at least one orphan reattached
 
     def test_orphans_not_lost(self, orphaned_spans_log):
         """Orphaned spans should not be silently dropped"""
@@ -378,9 +376,9 @@ class TestClockSkew:
         hierarchy = follow_thread_hierarchy(files=[clock_skew_log], root_identifier="trace-skew")
         tree = format_tree(hierarchy, use_colors=False)
 
-        # Should produce output without crashing
-        assert isinstance(tree, str)
-        assert len(tree) > 0
+        assert len(tree) > 0  # guard
+        # Tree must mention at least one operation from the data
+        assert "parent" in tree.lower() or "child" in tree.lower() or "span" in tree.lower()
 
 
 # =============================================================================
@@ -398,11 +396,12 @@ class TestConcurrentSpans:
         )
         waterfall = format_waterfall(hierarchy, width=100)
 
-        # Should produce output
-        assert isinstance(waterfall, str)
-        assert len(waterfall) > 0
-        # Should show batch and workers
-        assert "batch" in waterfall.lower() or "worker" in waterfall.lower()
+        assert len(waterfall) > 0  # guard
+        # Should show batch and workers — both keywords must appear somewhere
+        waterfall_lower = waterfall.lower()
+        assert "batch" in waterfall_lower or "worker" in waterfall_lower
+        # Must have multiple lines (one per span)
+        assert waterfall.count("\n") >= 3
 
     def test_hierarchy_captures_concurrency(self, concurrent_spans_log):
         """Hierarchy should capture concurrent children"""
@@ -535,7 +534,8 @@ class TestMixedScenarios:
         Fixed by switching to f64::total_cmp which handles NaN deterministically.
         """
         result = search(files=[messy_production_log], query="", limit=100)
-        assert result["total_matches"] > 0, "Should find some entries despite messy data"
+        # 50 normal + 1 unicode + 1 long + 1 no-ts + 1 no-level + 1 plain text = 55 parseable
+        assert result["total_matches"] >= 50, f"Expected 50+ entries, got {result['total_matches']}"
 
     def test_unicode_search_in_messy_data(self, messy_production_log):
         """Should find unicode content in messy data"""
@@ -549,8 +549,9 @@ class TestMixedScenarios:
         """Level filtering should handle entries with missing levels"""
         result = search(files=[messy_production_log], level="ERROR", limit=100)
 
-        # Should complete without crashing
-        assert isinstance(result, dict)
-        # Should find ERROR entries
-        total = result.get("total_matches", len(result.get("results", [])))
-        assert total >= 1, "Should find ERROR entries"
+        total = result["total_matches"]
+        # Fixture has 1 explicit ERROR (long stacktrace) + 1 plain text ERROR line = at least 1
+        assert total >= 1, f"Should find ERROR entries, got {total}"
+        # Verify the results actually have ERROR level
+        for entry in result.get("results", []):
+            assert entry["level"] == "ERROR", f"Got non-ERROR entry: {entry['level']}"
