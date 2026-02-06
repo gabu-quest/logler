@@ -50,6 +50,11 @@ A modern, feature-rich log viewer that makes debugging a pleasure. View logs in 
 - 📝 **Investigation Sessions** - Track progress, undo/redo, save/resume investigations
 - 🎯 **Smart Sampling** - Representative sampling with multiple strategies (diverse, errors-focused, chronological)
 - 📄 **Report Generation** - Auto-generate markdown/text/JSON reports from investigation
+- 📊 **Numeric Metrics Extraction** - Extract numeric values from log fields and messages, compute stats (min/max/mean/p95/p99), z-score anomaly detection, time-series bucketing
+- 🔎 **Format Auto-Detection** - Confidence-scored format detection across JSON/logfmt/syslog/plain text, Drain algorithm template mining
+- 🔗 **Virtual Trace Correlation** - Define correlation rules in `.logler.toml` to link entries by shared field values or temporal proximity
+- 🌐 **Cross-File Event Correlation** - Find related events across multiple log files using time windows and trigger patterns
+- 🎨 **Custom Log Formats** - Define, test, and manage parsing formats via `.logler.toml` config with a built-in format library
 
 ### Public API Contract
 
@@ -224,6 +229,24 @@ logler llm diff app.log --baseline 1h                    # Before/after analysis
 logler llm sample app.log --strategy errors_focused --size 50
 logler llm context app.log 1523 --before 10 --after 10
 logler llm export trace-xyz --format jaeger
+
+# Metrics & Format Detection (NEW - M5/M6)
+logler llm metrics -f "*.log"                                    # Extract numeric values with stats
+logler llm metrics -f "*.log" --fields duration_ms,response_time # Specific fields
+logler llm detect -f "*.log"                                     # Auto-detect log format
+logler llm templates -f "*.log" --top 20                         # Drain template mining
+
+# Custom Formats (NEW - M1)
+logler llm format list                     # List configured formats
+logler llm format test app.log my-format   # Test a format against a file
+logler llm format save my-format           # Save format to config
+
+# Correlations (NEW - M2/M3)
+logler llm correlation list                                      # List configured rules
+logler llm correlation run -f "*.log"                            # Run all correlation rules
+logler llm correlation run -f "*.log" --group request-tracking   # Run specific group
+logler llm correlate-events -f "*.log" --window 5s               # Cross-file event correlation
+logler llm correlate-events -f "*.log" --trigger "ERROR"         # Trigger-based correlation
 ```
 
 See **[LLM CLI Reference](docs/LLM_CLI_REFERENCE.md)** for complete documentation of all 17 commands.
@@ -460,7 +483,27 @@ logler view app.log service.log --grep "req-12345"
 
 ## ⚙️ Configuration
 
-Logler works with zero configuration, but you can customize:
+Logler works with zero configuration, but you can customize behavior with a `.logler.toml` file in your log directory.
+
+### Custom Log Formats (M1)
+
+```toml
+[formats.my-app]
+pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+(?P<level>\w+)\s+\[(?P<thread_id>[\w-]+)\]\s+(?P<message>.*)'
+timestamp_format = "%Y-%m-%dT%H:%M:%S%.fZ"
+```
+
+### Correlation Rules (M2)
+
+```toml
+[correlations.request-tracking]
+rules = [
+  { type = "field_match", source_field = "correlation_id", target_field = "correlation_id" },
+  { type = "temporal", window = "5s", anchor_field = "trace_id" },
+]
+```
+
+### CLI Options
 
 ```bash
 # View options
@@ -536,14 +579,18 @@ uv run marimo edit examples/tours/tour_01_fundamentals.py
 | 02 | Thread Tracking -- grouping, correlation IDs |
 | 03 | Hierarchy -- tree views, waterfall, bottleneck detection |
 | 04 | Investigation -- sessions, history, report generation |
+| 05 | Pattern Detection -- find repeated log patterns, frequency analysis |
 | 06 | Flamegraph -- performance visualization |
 | 07 | Error Flow -- root cause analysis, propagation chains |
 | 08 | Comparison -- diff hierarchies, compare threads |
 | 09 | Tracing Exports -- Jaeger and Zipkin formats |
 | 10 | Sampling -- smart sampling strategies |
+| 11 | AI Insights -- LLM investigation workflow, triage to actions |
 | 12 | Multi-File -- cross-service distributed tracing |
 | 13 | Live Watching -- real-time tailing and streaming |
 | 14 | Performance -- 10K+ entries, benchmarks |
+| 16 | Metrics Extraction -- numeric values, stats, anomaly detection, time-series |
+| 17 | Format Detection -- auto-detect formats, Drain template mining |
 
 See the [examples README](examples/README.md) for the full learning path.
 
