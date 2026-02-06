@@ -8,8 +8,8 @@ Rust core -> PyO3 bridge -> Python API/CLI.
 ```
 crates/logler-core/src/     — Rust engine (parser, index, investigate, hierarchy)
 crates/logler-py/src/lib.rs — PyO3 FFI bridge
-src/logler/investigate.py   — Python API (wraps Rust via logler_rs)
-src/logler/llm_cli.py       — LLM CLI commands (JSON output)
+src/logler/investigate.py   — Python API re-export facade (wraps submodules)
+src/logler/llm_cli/         — LLM CLI package (JSON output, 8 submodules)
 src/logler/cli.py            — Human CLI (view, stats, investigate)
 ```
 
@@ -17,8 +17,15 @@ src/logler/cli.py            — Human CLI (view, stats, investigate)
 
 | Module | Purpose |
 |--------|---------|
-| `investigate.py` | Core API: search, hierarchy, sessions, compare, timeline |
-| `llm_cli.py` | Click-based LLM CLI (JSON output, exit codes) |
+| `investigate.py` | Re-export facade + Investigator class + M5/M6 wrappers |
+| `_search_core.py` | Core search, follow, context, patterns, metadata (Rust FFI) |
+| `hierarchy.py` | Thread hierarchy, error flow, bottleneck analysis, correlation chains |
+| `comparison.py` | Thread/period comparison, cross-service timeline |
+| `sampling.py` | Smart sampling strategies |
+| `session.py` | InvestigationSession class (stateful investigations) |
+| `export.py` | Jaeger/Zipkin trace export |
+| `types.py` | TypedDict definitions for all return shapes |
+| `llm_cli/` | Click CLI package (8 submodules, see below) |
 | `cli.py` | Human CLI (rich terminal output) |
 | `config.py` | `.logler.toml` config loader (Pydantic v2 models) |
 | `correlator.py` | Virtual trace correlation engine (field match + temporal) |
@@ -26,17 +33,59 @@ src/logler/cli.py            — Human CLI (view, stats, investigate)
 | `metrics.py` | Numeric value extraction, stats, z-score anomaly detection |
 | `format_detector.py` | Format auto-detection + Drain template mining |
 | `builtin_formats.py` | Built-in format library (syslog, logfmt, CLF, etc.) |
+| `models.py` | Pydantic v2 data models |
 | `tree_formatter.py` | Tree and waterfall rendering |
 | `sql.py` | DuckDB-powered SQL queries |
 | `tracker.py` | Thread/correlation tracking |
 | `parser.py` | Log format parsing |
-| `models.py` | Data models |
 | `safe_regex.py` | Regex compilation with safety limits |
 | `cache.py` | LRU caching |
 | `helpers.py` | Shared utilities |
 | `watcher.py` | File watcher (watchdog) |
 | `terminal.py` | Rich terminal rendering |
 | `bootstrap.py` | Package initialization |
+
+### LLM CLI Package (`llm_cli/`)
+
+| Submodule | Commands |
+|-----------|----------|
+| `_core.py` | Shared: exit codes, `_output_json`, `_error_json`, `_expand_globs`, `time_filter_options` |
+| `_search.py` | schema, search, ids, sample, triage, summarize, sql |
+| `_trace.py` | correlate, hierarchy, bottleneck, context, export |
+| `_compare.py` | compare, diff |
+| `_session.py` | session group (create, list, query, note, conclude) |
+| `_format.py` | format group (list, test, validate) |
+| `_correlation.py` | correlation group (list, run), correlate-events |
+| `_metrics.py` | verify-pattern, emit, metrics, detect, templates |
+
+### Public API Contract (logler-web imports)
+
+These 13+ functions are imported by logler-web's FastAPI backend:
+
+```python
+from logler.investigate import (
+    search, extract_ids, follow_thread, get_context, find_patterns,
+    get_metadata, follow_thread_hierarchy, get_hierarchy_summary,
+    analyze_error_flow, cross_service_timeline, compare_threads,
+    smart_sample, extract_metrics, detect_formats, mine_log_templates,
+)
+```
+
+All return TypedDict-documented dicts. See `types.py` for shapes.
+
+### Module Split Architecture
+
+```
+investigate.py (facade)
+  ├── _search_core.py     ← foundation, zero circular imports
+  ├── hierarchy.py         ← imports from _search_core
+  ├── comparison.py        ← imports from _search_core
+  ├── sampling.py          ← imports from _search_core
+  ├── session.py           ← imports from investigate (facade)
+  └── export.py            ← standalone
+```
+
+**Key rule:** `_search_core.py` has zero logler submodule imports (only `.safe_regex` and conditional `logler_rs`). All other modules import from `_search_core` — never the reverse.
 
 ## Build
 
@@ -152,7 +201,8 @@ pattern-based level inference (auth failures -> ERROR, OOM -> FATAL, etc.).
 ## Known Limitations
 
 - BSD syslog entries without `<priority>` prefix have no parsed timestamps; time-based filtering is unavailable for these entries
-- `investigate.py` has `except Exception: return None` patterns that silently swallow errors — ensure all imports are local inside these try blocks
+- `_search_core.py` has `except Exception: return None` patterns that silently swallow errors — ensure all imports are local inside these try blocks
+- Rust level enum expects title case (`Error`, `Warn`, `Info`) — `_parse_levels()` converts user input, `_normalize_entry()` uppercases for display
 
 ## Key Dependencies
 
