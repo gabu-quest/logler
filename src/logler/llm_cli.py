@@ -405,7 +405,9 @@ def _extract_patterns(values: List[str]) -> List[str]:
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
 @click.option("--count-only", is_flag=True, help="Return only match count, no results")
 @click.option("--offset", type=int, default=0, help="Skip first N results (for pagination)")
-@click.option("--compact", is_flag=True, help="Use short field names (ts/lv/msg/svc/th/cid/trc)")
+@click.option(
+    "--compact", is_flag=True, help="Use short field names (ts/lv/msg/src/svc/th/cid/trc)"
+)
 @click.option("--metadata-only", is_flag=True, help="Return aggregations only, no results array")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def search(
@@ -514,6 +516,8 @@ def search(
                     "lv": entry.get("level"),
                     "msg": entry.get("message"),
                 }
+                if entry.get("file"):
+                    out_entry["src"] = Path(entry["file"]).name
                 if entry.get("thread_id"):
                     out_entry["th"] = entry["thread_id"]
                 if entry.get("correlation_id"):
@@ -1435,6 +1439,8 @@ def emit(
                                 "lv": entry_level,
                                 "msg": entry.message,
                             }
+                            if len(file_list) > 1:
+                                out["src"] = Path(file_path).name
                             if entry.thread_id:
                                 out["th"] = entry.thread_id
                         else:
