@@ -552,6 +552,7 @@ class TestMixedScenarios:
         total = result["total_matches"]
         # Fixture has 1 explicit ERROR (long stacktrace) + 1 plain text ERROR line = at least 1
         assert total >= 1, f"Should find ERROR entries, got {total}"
-        # Verify the results actually have ERROR level
-        for entry in result.get("results", []):
+        # Verify the results actually have ERROR level (search wraps entries in {"entry": {...}})
+        for item in result.get("results", []):
+            entry = item["entry"]
             assert entry["level"] == "ERROR", f"Got non-ERROR entry: {entry['level']}"

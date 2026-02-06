@@ -287,9 +287,11 @@ class TestHierarchyEdgeCases:
         assert empty["total_nodes"] == 0
         assert empty["bottleneck"] is None
 
-        # Tree formatter should handle empty hierarchy — returns "Hierarchy" label
+        # Tree formatter should handle empty hierarchy — includes header and zero counts
         tree = format_tree(empty, use_colors=False)
-        assert tree == "Hierarchy"
+        assert "THREAD HIERARCHY" in tree
+        assert "Total nodes: 0" in tree
+        assert "Max depth: 0" in tree
 
     def test_single_node_is_its_own_bottleneck(self):
         """Single node hierarchy should have that node as bottleneck (100%)."""
