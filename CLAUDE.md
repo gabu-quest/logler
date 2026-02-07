@@ -87,6 +87,20 @@ investigate.py (facade)
 
 **Key rule:** `_search_core.py` has zero logler submodule imports (only `.safe_regex` and conditional `logler_rs`). All other modules import from `_search_core` — never the reverse.
 
+## Philosophy: Not a SQL Wrapper
+
+Logler's value is in its **own algorithms** — Rust parsing/indexing, Python correlation engines,
+sampling strategies, metrics extraction, format detection. DuckDB/SQL is an optional power-user
+escape hatch (`sql.py`), not the foundation.
+
+**SQL passthrough is OK** where it genuinely makes sense (ad-hoc queries, aggregations DuckDB
+is built for). Don't reinvent the wheel. But the library's core paths (search, hierarchy,
+correlation, metrics, sampling) must use logler's own engines.
+
+**Tests and tours MUST test the library, not DuckDB.** Every test exercises logler's public API
+(`search()`, `follow_thread()`, `extract_metrics()`, etc.). Testing SQL passthrough would be
+testing DuckDB, not logler. Tours demonstrate logler's capabilities, not SQL syntax.
+
 ## Build
 
 ```bash
@@ -118,6 +132,7 @@ cargo test --workspace     # 26 Rust tests
 - Assert exact values, not types or existence
 - README contract tests (C02-C10) in `tests/test_readme.py` enforce public API examples
 - Tour notebook tests in `tests/test_tour_notebooks.py` (17 tours)
+- **Tests exercise logler's API, never raw SQL** — we test the library, not DuckDB
 
 ### Known Flaky Tests
 
@@ -149,7 +164,7 @@ Exit codes: 0=success, 1=no results, 2=user error, 3=internal error
 **Custom Formats (M1):**
 - `format list` — List configured formats
 - `format test` — Test a format against a file
-- `format save` — Save format to config
+- `format validate` — Validate a format definition against a file
 
 **Correlations (M2/M3):**
 - `correlation list` — List configured correlation rules
