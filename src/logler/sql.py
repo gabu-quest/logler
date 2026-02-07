@@ -212,9 +212,14 @@ class SqlEngine:
             table: Name of table to get schema for
 
         Returns:
-            JSON string with schema information
+            JSON string with schema information, or empty array for
+            invalid/nonexistent tables.
         """
-        # Use parameterized query to prevent SQL injection
-        # PRAGMA doesn't support parameters, so we sanitize the table name
-        safe_table = table.replace("'", "''")
-        return self.query(f"PRAGMA table_info('{safe_table}')")
+        import re
+
+        if not re.fullmatch(r"[A-Za-z_]\w*", table):
+            return json.dumps([])
+        try:
+            return self.query(f"PRAGMA table_info('{table}')")
+        except Exception:
+            return json.dumps([])
