@@ -248,30 +248,39 @@ def test_C03_compare_threads_has_both_sides(app_log):
     )
 
     # Contract: returns dict with these exact keys
-    assert "summary" in diff, f"Missing 'summary'. Keys: {sorted(diff.keys())}"
-    assert "thread_a" in diff, f"Missing 'thread_a'. Keys: {sorted(diff.keys())}"
-    assert "thread_b" in diff, f"Missing 'thread_b'. Keys: {sorted(diff.keys())}"
-    assert "differences" in diff, f"Missing 'differences'. Keys: {sorted(diff.keys())}"
+    for key in ("summary", "thread_a", "thread_b", "differences"):
+        assert key in diff, f"Missing '{key}'. Keys: {sorted(diff.keys())}"
 
-    # Summary should be a non-trivial string
-    assert len(diff["summary"]) > 10, f"Summary too short: {diff['summary']!r}"
+    # Summary should describe the actual differences found
+    summary = diff["summary"]
+    assert len(summary) > 10, f"Summary too short: {summary!r}"
+    assert (
+        "error" in summary.lower()
+    ), f"Summary should describe the error difference between threads. Got:\n{summary}"
 
 
 def test_C03_compare_threads_captures_error_difference(app_log):
-    """thread_a (success) should have 0 errors, thread_b (failed) should have errors."""
+    """thread_a (success) should have 4 entries, thread_b (failed) should have 4 entries."""
     diff = compare_threads(
         files=[app_log],
         correlation_a="req-success-123",
         correlation_b="req-failed-456",
     )
 
-    # thread_a is the success path — should have 4 entries, all INFO
-    a_count = diff["thread_a"].get("entry_count", diff["thread_a"].get("total", 0))
-    assert a_count == 4, f"req-success-123 should have 4 entries, got {a_count}"
+    # Enforce exact field name — the API contract must be stable
+    assert (
+        "entry_count" in diff["thread_a"]
+    ), f"thread_a missing 'entry_count'. Keys: {sorted(diff['thread_a'].keys())}"
+    assert (
+        diff["thread_a"]["entry_count"] == 4
+    ), f"req-success-123 should have 4 entries, got {diff['thread_a']['entry_count']}"
 
-    # thread_b is the failure path — should have 4 entries including ERRORs
-    b_count = diff["thread_b"].get("entry_count", diff["thread_b"].get("total", 0))
-    assert b_count == 4, f"req-failed-456 should have 4 entries, got {b_count}"
+    assert (
+        "entry_count" in diff["thread_b"]
+    ), f"thread_b missing 'entry_count'. Keys: {sorted(diff['thread_b'].keys())}"
+    assert (
+        diff["thread_b"]["entry_count"] == 4
+    ), f"req-failed-456 should have 4 entries, got {diff['thread_b']['entry_count']}"
 
 
 # ---------------- [C04] Cross-service timeline ----------------
@@ -336,10 +345,11 @@ def test_C05_session_report_includes_note(app_log):
     session.add_note("Database connection pool exhausted")
 
     report = session.generate_report(format="markdown")
-    assert len(report) > 50, f"Report too short ({len(report)} chars)"
     assert (
         "Database connection pool" in report
     ), f"Report should include note text. First 300 chars:\n{report[:300]}"
+    # Report should also reference the session name and search results
+    assert "incident_2024" in report, f"Report should include session name. Got:\n{report[:300]}"
 
 
 def test_C05_session_tracks_history(app_log):
@@ -453,8 +463,11 @@ def test_C09_hierarchy_summary_mentions_node_count(hierarchy_log):
 
     summary = get_hierarchy_summary(hierarchy)
 
-    assert len(summary) > 20, f"Summary too short: {summary!r}"
     assert "3" in summary, f"Summary should mention 3 total nodes. Got:\n{summary}"
+    # Should reference the hierarchy structure, not just be random text
+    assert (
+        "span" in summary.lower() or "node" in summary.lower() or "hierarchy" in summary.lower()
+    ), f"Summary should describe hierarchy structure. Got:\n{summary}"
 
 
 # ---------------- [C10] Tree visualization ----------------
@@ -470,8 +483,10 @@ def test_C10_format_tree_has_header_and_content(hierarchy_log):
     tree = format_tree(hierarchy, mode="detailed", use_colors=False)
 
     assert "THREAD HIERARCHY" in tree, f"Missing header. Got:\n{tree}"
-    # Should mention node count
-    assert "3" in tree, f"Should mention 3 nodes. Got:\n{tree}"
+    # Tree should show the hierarchy structure with node labels from log messages
+    assert (
+        "Request" in tree or "Auth" in tree or "DB" in tree
+    ), f"Tree should contain node labels from log messages. Got:\n{tree}"
 
 
 def test_C10_format_waterfall_produces_multiline_output(hierarchy_log):
@@ -484,7 +499,10 @@ def test_C10_format_waterfall_produces_multiline_output(hierarchy_log):
     waterfall = format_waterfall(hierarchy, width=100)
 
     lines = waterfall.strip().split("\n")
-    assert len(lines) >= 3, f"Waterfall should have multiple lines. Got:\n{waterfall}"
+    # 3 spans (root, auth, db) should produce at least 3 lines
+    assert len(lines) >= 3, f"Waterfall should have >= 3 lines for 3 spans. Got:\n{waterfall}"
+    # Waterfall should show timing information (ms durations)
+    assert "ms" in waterfall, f"Waterfall should show durations in ms. Got:\n{waterfall}"
 
 
 def test_C10_print_tree_writes_to_stdout(hierarchy_log, capsys):
@@ -496,7 +514,10 @@ def test_C10_print_tree_writes_to_stdout(hierarchy_log, capsys):
 
     print_tree(hierarchy, mode="detailed", show_duration=True)
     captured = capsys.readouterr()
-    assert len(captured.out) > 20, f"print_tree output too short: {captured.out!r}"
+    # print_tree uses human-readable labels from log messages
+    assert (
+        "Request" in captured.out or "Auth" in captured.out or "DB" in captured.out
+    ), f"print_tree should show node labels. Got:\n{captured.out}"
 
 
 def test_C10_print_waterfall_writes_to_stdout(hierarchy_log, capsys):
@@ -508,4 +529,7 @@ def test_C10_print_waterfall_writes_to_stdout(hierarchy_log, capsys):
 
     print_waterfall(hierarchy, width=100)
     captured = capsys.readouterr()
-    assert len(captured.out) > 20, f"print_waterfall output too short: {captured.out!r}"
+    lines = captured.out.strip().split("\n")
+    assert (
+        len(lines) >= 3
+    ), f"print_waterfall should show >= 3 lines for 3 spans. Got:\n{captured.out}"
