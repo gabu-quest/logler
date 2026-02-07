@@ -199,7 +199,7 @@ logler investigate app.log --thread worker-1 --hierarchy --max-depth 3   # Limit
 
 **LLM-first CLI (JSON output by default):**
 
-Designed for AI agents - 17 commands with structured JSON output, no truncation.
+Designed for AI agents - 25 commands with structured JSON output, no truncation.
 
 ```bash
 # Assessment & Overview
@@ -239,7 +239,7 @@ logler llm templates -f "*.log" --top 20                         # Drain templat
 # Custom Formats (NEW - M1)
 logler llm format list                     # List configured formats
 logler llm format test app.log my-format   # Test a format against a file
-logler llm format save my-format           # Save format to config
+logler llm format validate app.log my-format   # Validate a format definition
 
 # Correlations (NEW - M2/M3)
 logler llm correlation list                                      # List configured rules
@@ -249,7 +249,7 @@ logler llm correlate-events -f "*.log" --window 5s               # Cross-file ev
 logler llm correlate-events -f "*.log" --trigger "ERROR"         # Trigger-based correlation
 ```
 
-See **[LLM CLI Reference](docs/LLM_CLI_REFERENCE.md)** for complete documentation of all 17 commands.
+See **[LLM CLI Reference](docs/LLM_CLI_REFERENCE.md)** for complete documentation of all 25 commands.
 
 ### Visualization Modes
 
@@ -589,6 +589,7 @@ uv run marimo edit examples/tours/tour_01_fundamentals.py
 | 12 | Multi-File -- cross-service distributed tracing |
 | 13 | Live Watching -- real-time tailing and streaming |
 | 14 | Performance -- 10K+ entries, benchmarks |
+| 15 | Filtering -- field filtering, complex queries |
 | 16 | Metrics Extraction -- numeric values, stats, anomaly detection, time-series |
 | 17 | Format Detection -- auto-detect formats, Drain template mining |
 
