@@ -40,6 +40,10 @@ from typing import List, Optional, Dict, Any
 from ._search_core import (  # noqa: F401
     RUST_AVAILABLE,
     search,
+    extract_ids,
+    follow_thread,
+    get_context,
+    find_patterns,
     get_metadata,
     # Private helpers re-exported for Investigator class & tests
     _normalize_entry,
@@ -156,6 +160,35 @@ class Investigator:
         _load_files_with_config(self._investigator, files, parser_format, custom_regex)
         self._files = files
         self._custom_regex = custom_regex
+
+    def get_metadata(self) -> List[Dict[str, Any]]:
+        """Get metadata about loaded log files."""
+        return get_metadata(self._files)
+
+    def get_context(
+        self,
+        file: str,
+        line_number: int,
+        lines_before: int = 10,
+        lines_after: int = 10,
+    ) -> Dict[str, Any]:
+        """Get context around a specific log line."""
+        return get_context(file, line_number, lines_before, lines_after)
+
+    def follow_thread(
+        self,
+        thread_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Follow a thread/correlation/trace through loaded files."""
+        return follow_thread(
+            files=self._files,
+            thread_id=thread_id,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            custom_regex=self._custom_regex,
+        )
 
     def search(
         self,
