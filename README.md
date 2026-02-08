@@ -116,14 +116,20 @@ investigation toolkit.
 
 ## Performance
 
-| Operation | Target | Typical |
-|-----------|--------|---------|
-| Index 1GB file | < 2s | ~1.5s |
-| Search indexed logs | < 50ms | ~10-30ms |
-| Follow thread | < 100ms | ~20-50ms |
-| Pattern detection | < 500ms | ~200-400ms |
+Real numbers from the [benchmark suite](benchmarks/results/REPORT.md)
+(14 scenarios, Python 3.12, Rust backend):
 
-Token savings: 44x with summary/count/compact modes vs full output.
+| Operation | Result | Context |
+|-----------|--------|---------|
+| Search throughput | **257K entries/sec** | Level filter, 10K entries |
+| Follow thread | **2.6ms** | Correlation lookup, 1K entries |
+| Cross-service timeline | **13ms** | 5 services, shared correlation |
+| Error flow analysis | **1.7ms** | 10K entry hierarchy |
+| Token savings | **2540x** | count vs full, 100 ERRORs |
+
+![Search scaling](benchmarks/results/charts/01_search_scaling.svg)
+
+Full report with 14 charts: [benchmarks/results/REPORT.md](benchmarks/results/REPORT.md)
 
 **Honest limitations:**
 - BSD syslog without `<priority>` prefix has no parsed timestamps
