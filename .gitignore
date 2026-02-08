@@ -219,5 +219,9 @@ __marimo__/
 # Internal planning docs
 .internal/
 
+# Benchmark results (keep REPORT.md and SVG charts)
+benchmarks/results/*.json
+benchmarks/results/charts/*.png
+
 # Project-local Claude memory (personal, not shared)
 CLAUDE.local.md
