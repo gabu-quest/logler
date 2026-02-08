@@ -31,8 +31,11 @@ import pytest
 
 try:
     from logler.investigate import Investigator, RUST_AVAILABLE
-except ImportError:
-    RUST_AVAILABLE = False
+except ImportError as e:
+    if "logler_rs" in str(e):
+        RUST_AVAILABLE = False
+    else:
+        raise
 
 try:
     from logler.sql import SqlEngine
