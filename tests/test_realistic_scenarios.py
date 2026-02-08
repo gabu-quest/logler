@@ -25,8 +25,11 @@ try:
         RUST_AVAILABLE,
     )
     from logler.tree_formatter import format_tree, format_waterfall
-except ImportError:
-    RUST_AVAILABLE = False
+except ImportError as e:
+    if "logler_rs" in str(e):
+        RUST_AVAILABLE = False
+    else:
+        raise
 
 
 pytestmark = pytest.mark.skipif(
