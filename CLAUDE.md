@@ -224,6 +224,21 @@ pattern-based level inference (auth failures -> ERROR, OOM -> FATAL, etc.).
 Rust: chrono, serde, regex, rayon (parallel), pyo3
 Python: click, rich, duckdb, pydantic, watchdog
 
+## Benchmarks
+
+```bash
+uv run python -m benchmarks run --scale small       # Run all 14 scenarios
+uv run python -m benchmarks list                      # List available scenarios
+uv run python -m benchmarks plot -i results/latest.json  # Generate charts
+uv run python -m benchmarks compare -b v1.json -c v2.json -o results/v2  # Before/after comparison
+```
+
+- 14 scenarios across 5 suites (search, hierarchy, correlation, output, sampling)
+- Scales: small (1K/10K/50K), medium (10K/50K/100K), large (50K/100K/500K)
+- Deterministic data generation (seeded RNG), precision timing (warmup + percentiles)
+- v1 baseline preserved at `benchmarks/results/v1/baseline.json`
+- Comparison report generator produces scientific before/after analysis with confidence levels
+
 ## Pre-commit Hooks
 
 black, ruff, fix-end-of-files, trim-trailing-whitespace, cargo-fmt.
