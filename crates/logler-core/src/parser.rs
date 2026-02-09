@@ -201,9 +201,9 @@ impl LogParser {
             .get()
             .unwrap()
             .find_iter(trimmed)
-            .take(3)
+            .take(2)
             .count();
-        if logfmt_matches >= 3 {
+        if logfmt_matches >= 2 {
             return LogFormat::Logfmt;
         }
         LogFormat::PlainText

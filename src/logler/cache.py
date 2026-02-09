@@ -1,75 +1,79 @@
 """
-Performance optimization: Add file-level index caching to standalone functions.
+Performance optimization: File-level index caching for standalone functions.
 
-Currently, standalone functions like search(), follow_thread() create a new
-Investigator and re-read files every time. This is inefficient for repeated
-queries on the same files.
-
-Solution: Add a module-level LRU cache that reuses Investigator instances.
+Standalone functions like search(), extract_ids(), get_context() create a new
+PyInvestigator and re-parse files every call.  This module provides a
+thread-safe cache keyed on (sorted file paths) with mtime-based staleness
+detection so callers get parsed indices for free on repeated queries.
 """
 
+from __future__ import annotations
+
+import os
 import threading
-from typing import Dict
-import logler_rs
+from typing import Any, Dict, Tuple
 
 # Thread-safe cache for Investigator instances
 _investigator_lock = threading.Lock()
-_investigator_cache: Dict[tuple, logler_rs.PyInvestigator] = {}
+
+# Cache entry: (investigator, {path: mtime})
+_CacheEntry = Tuple[Any, Dict[str, float]]  # Any = logler_rs.PyInvestigator
+_investigator_cache: Dict[tuple, _CacheEntry] = {}
 _cache_max_size = 10  # Keep up to 10 file sets in cache
 
 
-def _get_cached_investigator(files: tuple) -> logler_rs.PyInvestigator:
-    """
-    Get or create a cached Investigator for the given files.
+def _collect_mtimes(files: tuple) -> Dict[str, float]:
+    """Snapshot mtime for each file (0.0 if stat fails)."""
+    mtimes: Dict[str, float] = {}
+    for f in files:
+        try:
+            mtimes[f] = os.path.getmtime(f)
+        except OSError:
+            mtimes[f] = 0.0
+    return mtimes
 
-    This allows standalone functions to reuse parsed indices when
-    called multiple times with the same files.
-    """
+
+def _mtimes_fresh(cached: Dict[str, float], current: Dict[str, float]) -> bool:
+    """Return True if every file's mtime matches the cached snapshot."""
+    if cached.keys() != current.keys():
+        return False
+    return all(cached[k] == current[k] for k in cached)
+
+
+def _get_cached_investigator(files: tuple) -> Any:
+    """Get or create a cached Investigator for the given (sorted) file tuple."""
     with _investigator_lock:
-        # Check cache
-        if files in _investigator_cache:
-            return _investigator_cache[files]
+        current_mtimes = _collect_mtimes(files)
 
-        # Create new investigator
+        if files in _investigator_cache:
+            inv, cached_mtimes = _investigator_cache[files]
+            if _mtimes_fresh(cached_mtimes, current_mtimes):
+                return inv
+            # Stale — fall through to re-create
+            del _investigator_cache[files]
+
+        # Lazy import to avoid module-level dependency on logler_rs
+        import logler_rs
+
         inv = logler_rs.PyInvestigator()
         inv.load_files(list(files))
 
-        # Add to cache (with simple size limit)
+        # Evict oldest entry if at capacity
         if len(_investigator_cache) >= _cache_max_size:
-            # Remove oldest entry (simple FIFO)
             oldest = next(iter(_investigator_cache))
             del _investigator_cache[oldest]
 
-        _investigator_cache[files] = inv
+        _investigator_cache[files] = (inv, current_mtimes)
         return inv
 
 
-def get_cached_investigator(files) -> logler_rs.PyInvestigator:
-    """
-    Public accessor that normalizes the incoming file list into a stable cache key.
-    """
+def get_cached_investigator(files) -> Any:
+    """Public accessor — normalizes file list into a stable cache key."""
     key = tuple(sorted(str(f) for f in files))
     return _get_cached_investigator(key)
 
 
 def clear_cache():
-    """Clear the investigator cache (useful for testing or freeing memory)"""
+    """Clear the investigator cache (useful for testing or freeing memory)."""
     with _investigator_lock:
         _investigator_cache.clear()
-
-
-# Example usage showing the difference:
-#
-# SLOW (current):
-#   for i in range(100):
-#       search(["app.log"], level="ERROR")  # Re-reads file 100 times!
-#
-# FAST (with cache):
-#   for i in range(100):
-#       search(["app.log"], level="ERROR")  # Reads once, caches index!
-#
-# FASTEST (explicit Investigator):
-#   inv = Investigator()
-#   inv.load_files(["app.log"])
-#   for i in range(100):
-#       inv.search(level="ERROR")  # Explicit control, no cache overhead

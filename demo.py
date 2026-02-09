@@ -1,76 +1,261 @@
 #!/usr/bin/env python3
+"""Logler demo -- generates sample logs and demonstrates key features.
+
+Run:
+    uv run python demo.py
+
+Generates a temporary log file with realistic microservice entries,
+then runs logler's investigation engine to show:
+  1. Error search with summary output
+  2. Thread hierarchy with bottleneck detection
+  3. Cross-service timeline
 """
-Quick 30-Second Demo of Logler's LLM Investigation Features
 
-This demonstrates what an LLM agent can do with logler in under a minute.
-"""
+import json
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-import logler.investigate as investigate
+# ---------------------------------------------------------------------------
+# Generate sample log data
+# ---------------------------------------------------------------------------
 
-LOG_FILE = "examples/logs/production_incident.log"
+BASE = datetime(2024, 6, 15, 14, 30, 0, tzinfo=timezone.utc)
 
-print("🔍 Logler - LLM Investigation Engine Demo")
-print("=" * 60)
-print()
 
-# 1. Quick Overview (5 seconds)
-print("📊 Quick Overview:")
-metadata = investigate.get_metadata([LOG_FILE])
-print(f"   {metadata[0]['lines']} log entries")
-print(f"   {metadata[0]['unique_threads']} threads")
-print(f"   {metadata[0]['log_levels']['ERROR']} errors")
-print()
+def entry(offset_ms, level, message, thread_id, cid=None, tid=None, sid=None, psid=None, svc=None):
+    ts = BASE + timedelta(milliseconds=offset_ms)
+    d = {"timestamp": ts.isoformat(), "level": level, "message": message, "thread_id": thread_id}
+    if cid:
+        d["correlation_id"] = cid
+    if tid:
+        d["trace_id"] = tid
+    if sid:
+        d["span_id"] = sid
+    if psid:
+        d["parent_span_id"] = psid
+    if svc:
+        d["service"] = svc
+    return d
 
-# 2. Find Error Patterns (5 seconds)
-print("🔍 Finding Error Patterns...")
-patterns = investigate.find_patterns([LOG_FILE], min_occurrences=2)
-if patterns["patterns"]:
-    p = patterns["patterns"][0]
-    print(f"   Top issue: '{p['pattern'][:50]}...'")
-    print(f"   Occurred {p['occurrences']} times")
-print()
 
-# 3. Search for Specific Errors (5 seconds)
-print("⚠️  Searching for Database Errors...")
-results = investigate.search(files=[LOG_FILE], query="database", level="ERROR", limit=3)
-print(f"   Found {results['total_matches']} errors in {results['search_time_ms']}ms")
-for i, result in enumerate(results["results"][:2], 1):
-    entry = result["entry"]
-    print(f"   {i}. Line {entry['line_number']}: {entry['message'][:45]}...")
-print()
+ENTRIES = [
+    # --- Request flow with hierarchy ---
+    entry(
+        0,
+        "INFO",
+        "POST /api/checkout started",
+        "api-1",
+        "req-7742",
+        "trace-a1",
+        "span-root",
+        svc="api",
+    ),
+    entry(
+        5,
+        "INFO",
+        "Authenticating user",
+        "api-1",
+        "req-7742",
+        "trace-a1",
+        "span-auth",
+        "span-root",
+        svc="api",
+    ),
+    entry(
+        15,
+        "INFO",
+        "JWT validated for user:bob",
+        "api-1",
+        "req-7742",
+        "trace-a1",
+        "span-auth",
+        "span-root",
+        svc="api",
+    ),
+    entry(
+        20,
+        "INFO",
+        "Checking inventory",
+        "api-1",
+        "req-7742",
+        "trace-a1",
+        "span-inv",
+        "span-root",
+        svc="api",
+    ),
+    entry(
+        120,
+        "WARN",
+        "Inventory query slow (100ms)",
+        "api-1",
+        "req-7742",
+        "trace-a1",
+        "span-inv",
+        "span-root",
+        svc="api",
+    ),
+    entry(
+        130,
+        "INFO",
+        "Inventory confirmed",
+        "api-1",
+        "req-7742",
+        "trace-a1",
+        "span-inv",
+        "span-root",
+        svc="api",
+    ),
+    entry(
+        135,
+        "INFO",
+        "Processing payment",
+        "api-1",
+        "req-7742",
+        "trace-a1",
+        "span-pay",
+        "span-root",
+        svc="api",
+    ),
+    entry(
+        400,
+        "ERROR",
+        "Payment gateway timeout after 250ms",
+        "api-1",
+        "req-7742",
+        "trace-a1",
+        "span-pay",
+        "span-root",
+        svc="api",
+    ),
+    entry(
+        405,
+        "ERROR",
+        "POST /api/checkout failed 500",
+        "api-1",
+        "req-7742",
+        "trace-a1",
+        "span-root",
+        svc="api",
+    ),
+    # --- Database service ---
+    entry(25, "INFO", "SELECT * FROM inventory WHERE sku='ABC'", "db-pool-1", "req-7742", svc="db"),
+    entry(115, "INFO", "Query returned 1 row (90ms)", "db-pool-1", "req-7742", svc="db"),
+    # --- Cache service ---
+    entry(22, "INFO", "Cache MISS for sku:ABC", "cache-1", "req-7742", svc="cache"),
+    entry(118, "INFO", "Cache SET for sku:ABC ttl=300s", "cache-1", "req-7742", svc="cache"),
+    # --- Background noise ---
+    entry(50, "INFO", "Health check passed", "monitor", svc="api"),
+    entry(200, "INFO", "Metrics exported", "metrics-1", svc="api"),
+    entry(300, "DEBUG", "GC pause 12ms", "gc-thread", svc="api"),
+    entry(500, "INFO", "Connection pool recycled", "db-pool-1", svc="db"),
+    entry(600, "ERROR", "Redis connection refused", "cache-1", svc="cache"),
+]
 
-# 4. Follow a Failed Request (10 seconds)
-print("🧵 Following Failed Request Timeline...")
-first_error = results["results"][0]["entry"]
-if first_error.get("correlation_id"):
-    timeline = investigate.follow_thread(
-        files=[LOG_FILE], correlation_id=first_error["correlation_id"]
-    )
-    print(f"   Request took {timeline['duration_ms']}ms")
-    print(f"   {timeline['total_entries']} log entries")
-    print()
-    print("   Timeline:")
-    for entry in timeline["entries"][:3]:
-        level_emoji = {"INFO": "ℹ️", "ERROR": "❌", "FATAL": "💀", "WARN": "⚠️"}.get(
-            entry["level"], "📝"
+
+def write_logs(directory):
+    """Write service-split log files. Returns dict of service -> [path]."""
+    services = {}
+    for e in ENTRIES:
+        svc = e.get("service", "api")
+        services.setdefault(svc, []).append(e)
+
+    paths = {}
+    for svc, entries in services.items():
+        p = Path(directory) / f"{svc}.log"
+        with open(p, "w") as f:
+            for ent in sorted(entries, key=lambda x: x["timestamp"]):
+                f.write(json.dumps(ent) + "\n")
+        paths[svc] = [str(p)]
+
+    # Also write a combined file
+    combined = Path(directory) / "combined.log"
+    with open(combined, "w") as f:
+        for ent in sorted(ENTRIES, key=lambda x: x["timestamp"]):
+            f.write(json.dumps(ent) + "\n")
+
+    return paths, str(combined)
+
+
+# ---------------------------------------------------------------------------
+# Demo
+# ---------------------------------------------------------------------------
+
+
+def main():
+    try:
+        import logler.investigate as investigate
+    except ImportError:
+        print("logler not installed. Run: uv pip install -e .")
+        sys.exit(1)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        service_paths, combined = write_logs(tmpdir)
+        all_files = [combined]
+
+        print("=" * 60)
+        print("  LOGLER DEMO")
+        print("=" * 60)
+        print()
+
+        # 1. Search for errors
+        print("--- 1. Search for errors (summary mode) ---")
+        print()
+        result = investigate.search(files=all_files, level="ERROR", output_format="summary")
+        print(f"  Total errors found: {result['total_matches']}")
+        print()
+
+        # Also show full results
+        full = investigate.search(files=all_files, level="ERROR")
+        for r in full.get("results", []):
+            e = r.get("entry", r)
+            print(f"  [{e.get('level', '?')}] {e.get('message', '?')}")
+        print()
+
+        # 2. Thread hierarchy
+        print("--- 2. Thread hierarchy (req-7742) ---")
+        print()
+        hierarchy = investigate.follow_thread_hierarchy(
+            files=all_files,
+            root_identifier="req-7742",
         )
-        print(f"   {level_emoji} {entry['message'][:50]}")
-    if timeline["total_entries"] > 3:
-        print(f"   ... and {timeline['total_entries'] - 3} more entries")
-print()
+        print(f"  Nodes: {hierarchy['total_nodes']}")
+        if hierarchy.get("bottleneck"):
+            bn = hierarchy["bottleneck"]
+            print(f"  Bottleneck: {bn['node_id']} ({bn['duration_ms']}ms)")
+        print()
 
-# 5. Summary (5 seconds)
-print("=" * 60)
-print("✨ Investigation Complete!")
-print()
-print("💡 This took ~30 seconds to:")
-print("   ✓ Parse and index the log file")
-print("   ✓ Find repeated error patterns")
-print("   ✓ Search for specific issues")
-print("   ✓ Reconstruct request timelines")
-print()
-print("📚 For more examples:")
-print("   python examples/en/01_production_incident_investigation.py")
-print("   python examples/en/03_distributed_tracing.py")
-print()
-print("🚀 Built with Rust for speed, designed for AI agents!")
+        try:
+            from logler.tree_formatter import format_tree
+
+            tree = format_tree(hierarchy, mode="detailed", use_colors=False)
+            for line in tree.split("\n"):
+                print(f"  {line}")
+        except Exception:
+            pass
+        print()
+
+        # 3. Cross-service timeline
+        print("--- 3. Cross-service timeline (req-7742) ---")
+        print()
+        timeline = investigate.cross_service_timeline(
+            files=service_paths,
+            correlation_id="req-7742",
+        )
+        print(f"  Total events: {timeline['total_entries']}")
+        services_seen = {e["service"] for e in timeline["timeline"]}
+        print(f"  Services: {', '.join(sorted(services_seen))}")
+        for event in timeline["timeline"]:
+            msg = event.get("entry", {}).get("message", "?")
+            print(f"    [{event['service']}] {msg}")
+        print()
+
+        print("=" * 60)
+        print("  Demo complete. Explore more with the interactive tours:")
+        print("  uv run marimo edit examples/tours/tour_01_fundamentals.py")
+        print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

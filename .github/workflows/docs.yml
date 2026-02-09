@@ -1,0 +1,118 @@
+name: Deploy Tour Notebooks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/tours/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-groups
+          uv pip install marimo
+
+      - name: Build Rust extension
+        run: |
+          cargo build --release --all
+          cp target/release/liblogler_rs.so \
+            .venv/lib/python3.12/site-packages/logler_rs/logler_rs.cpython-312-x86_64-linux-gnu.so
+
+      - name: Export tours as WASM
+        run: |
+          mkdir -p _site
+          for tour in examples/tours/tour_*.py; do
+            name=$(basename "$tour" .py)
+            uv run marimo export html-wasm "$tour" -o "_site/${name}.html" --mode run
+          done
+
+      - name: Create index page
+        run: |
+          cat > _site/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Logler Interactive Tours</title>
+            <style>
+              body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+              h1 { border-bottom: 2px solid #333; padding-bottom: 0.5rem; }
+              a { color: #0366d6; text-decoration: none; }
+              a:hover { text-decoration: underline; }
+              table { border-collapse: collapse; width: 100%; }
+              td, th { padding: 0.5rem; border-bottom: 1px solid #ddd; text-align: left; }
+            </style>
+          </head>
+          <body>
+            <h1>Logler Interactive Tours</h1>
+            <p>Learn logler hands-on with <a href="https://marimo.io">marimo</a> notebooks.
+            Each tour runs entirely in your browser via WebAssembly.</p>
+            <table>
+              <tr><th>Tour</th><th>Topics</th></tr>
+              <tr><td><a href="tour_01_fundamentals.html">01. Fundamentals</a></td><td>Search, filter, output formats</td></tr>
+              <tr><td><a href="tour_02_thread_tracking.html">02. Thread Tracking</a></td><td>Grouping, correlation IDs</td></tr>
+              <tr><td><a href="tour_03_hierarchy.html">03. Hierarchy</a></td><td>Tree views, waterfall, bottleneck</td></tr>
+              <tr><td><a href="tour_04_investigation.html">04. Investigation</a></td><td>Sessions, history, reports</td></tr>
+              <tr><td><a href="tour_05_patterns.html">05. Patterns</a></td><td>Repeated patterns, frequency</td></tr>
+              <tr><td><a href="tour_06_flamegraph.html">06. Flamegraph</a></td><td>Performance visualization</td></tr>
+              <tr><td><a href="tour_07_error_flow.html">07. Error Flow</a></td><td>Root cause, propagation chains</td></tr>
+              <tr><td><a href="tour_08_comparison.html">08. Comparison</a></td><td>Diff hierarchies, compare threads</td></tr>
+              <tr><td><a href="tour_09_tracing_exports.html">09. Tracing Exports</a></td><td>Jaeger and Zipkin formats</td></tr>
+              <tr><td><a href="tour_10_sampling.html">10. Sampling</a></td><td>Smart sampling strategies</td></tr>
+              <tr><td><a href="tour_11_ai_insights.html">11. AI Insights</a></td><td>LLM investigation workflow</td></tr>
+              <tr><td><a href="tour_12_multi_file_interleaving.html">12. Multi-File</a></td><td>Cross-service distributed tracing</td></tr>
+              <tr><td><a href="tour_13_live_watching.html">13. Live Watching</a></td><td>Real-time tailing, streaming</td></tr>
+              <tr><td><a href="tour_14_performance.html">14. Performance</a></td><td>10K+ entries, benchmarks</td></tr>
+              <tr><td><a href="tour_15_filtering.html">15. Filtering</a></td><td>Field filtering, complex queries</td></tr>
+              <tr><td><a href="tour_16_metrics_extraction.html">16. Metrics</a></td><td>Numeric values, stats, anomaly detection</td></tr>
+              <tr><td><a href="tour_17_format_detection.html">17. Format Detection</a></td><td>Auto-detect, Drain template mining</td></tr>
+            </table>
+            <p style="margin-top: 2rem; color: #666;">
+              <a href="https://github.com/gabu-quest/logler">GitHub</a> |
+              Run locally: <code>uv run marimo edit examples/tours/tour_01_fundamentals.py</code>
+            </p>
+          </body>
+          </html>
+          HTMLEOF
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
