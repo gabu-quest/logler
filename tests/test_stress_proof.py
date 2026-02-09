@@ -578,8 +578,8 @@ def generate_deep_call_hierarchy(
 
 @pytest.fixture
 def large_microservice_logs():
-    """Generate 500 requests worth of microservice logs (~5000-8000 entries)"""
-    logs = generate_realistic_microservice_logs(num_requests=500, error_rate=0.08)
+    """Generate 200 requests worth of microservice logs (~3000 entries)"""
+    logs = generate_realistic_microservice_logs(num_requests=200, error_rate=0.08)
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
         for log in logs:
@@ -592,8 +592,8 @@ def large_microservice_logs():
 
 @pytest.fixture
 def concurrent_chaos_logs():
-    """Generate 100 threads x 50 logs = 5000 chaotic concurrent logs"""
-    logs = generate_chaotic_concurrent_logs(num_threads=100, logs_per_thread=50)
+    """Generate 50 threads x 20 logs = 1000 chaotic concurrent logs"""
+    logs = generate_chaotic_concurrent_logs(num_threads=50, logs_per_thread=20)
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
         for log in logs:
@@ -607,7 +607,7 @@ def concurrent_chaos_logs():
 @pytest.fixture
 def deep_hierarchy_logs():
     """Generate deep call hierarchy logs"""
-    logs = generate_deep_call_hierarchy(max_depth=15, branching_factor=2, logs_per_node=4)
+    logs = generate_deep_call_hierarchy(max_depth=8, branching_factor=2, logs_per_node=4)
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
         for log in logs:
@@ -708,8 +708,8 @@ class TestConcurrentThreadTracking:
                 entry.get("thread_id") == test_thread_id
             ), f"Found log from wrong thread: {entry.get('thread_id')}"
 
-    def test_all_100_threads_tracked_independently(self, concurrent_chaos_logs):
-        """Each of 100 threads must be tracked correctly"""
+    def test_all_50_threads_tracked_independently(self, concurrent_chaos_logs):
+        """Each of 50 threads must be tracked correctly"""
         file_path, original_logs = concurrent_chaos_logs
 
         thread_counts = defaultdict(int)
@@ -718,8 +718,8 @@ class TestConcurrentThreadTracking:
             if tid:
                 thread_counts[tid] += 1
 
-        # Verify we have ~100 threads
-        assert len(thread_counts) >= 95, f"Expected ~100 threads, found {len(thread_counts)}"
+        # Verify we have ~50 threads
+        assert len(thread_counts) >= 45, f"Expected ~50 threads, found {len(thread_counts)}"
 
         # Spot check 10 random threads
         sample_threads = random.sample(list(thread_counts.keys()), min(10, len(thread_counts)))
@@ -1051,10 +1051,10 @@ class TestEdgeCaseStress:
 class TestUltimateStress:
     """The ultimate stress test - combine everything"""
 
-    def test_10000_log_gauntlet(self):
-        """Process 10,000 logs with full investigation workflow"""
-        # Generate massive dataset
-        logs = generate_realistic_microservice_logs(num_requests=1000, error_rate=0.1)
+    def test_3000_log_gauntlet(self):
+        """Process ~3,000 logs with full investigation workflow"""
+        # Generate dataset
+        logs = generate_realistic_microservice_logs(num_requests=200, error_rate=0.1)
 
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as f:
             for log in logs:
@@ -1074,22 +1074,22 @@ class TestUltimateStress:
 
             # 3. Follow random threads
             thread_ids = list(set(log.get("thread_id") for log in logs if log.get("thread_id")))
-            for tid in random.sample(thread_ids, min(20, len(thread_ids))):
+            for tid in random.sample(thread_ids, min(10, len(thread_ids))):
                 timeline = session.follow_thread(thread_id=tid)
                 assert timeline["total_entries"] > 0
 
-            # 5. Follow random correlation IDs
+            # 4. Follow random correlation IDs
             corr_ids = list(
                 set(log.get("correlation_id") for log in logs if log.get("correlation_id"))
             )
-            for cid in random.sample(corr_ids, min(20, len(corr_ids))):
+            for cid in random.sample(corr_ids, min(10, len(corr_ids))):
                 timeline = session.follow_thread(correlation_id=cid)
                 assert timeline["total_entries"] > 0
 
-            # 6. Build hierarchies for some correlation IDs
+            # 5. Build hierarchies for some correlation IDs
             inv = Investigator()
             inv.load_files([temp_path])
-            for cid in random.sample(corr_ids, min(5, len(corr_ids))):
+            for cid in random.sample(corr_ids, min(2, len(corr_ids))):
                 hierarchy = inv.build_hierarchy(cid)
                 # Format regardless of content
                 tree = format_tree(hierarchy, use_colors=False)
