@@ -41,10 +41,7 @@ from ._search_core import (  # noqa: F401
     RUST_AVAILABLE,
     search,
     extract_ids,
-    follow_thread,
-    get_context,
     find_patterns,
-    get_metadata,
     # Private helpers re-exported for Investigator class & tests
     _normalize_entry,
     _normalize_entries,
@@ -163,7 +160,7 @@ class Investigator:
 
     def get_metadata(self) -> List[Dict[str, Any]]:
         """Get metadata about loaded log files."""
-        return get_metadata(self._files)
+        return json.loads(self._investigator.get_metadata(self._files))
 
     def get_context(
         self,
@@ -173,7 +170,12 @@ class Investigator:
         lines_after: int = 10,
     ) -> Dict[str, Any]:
         """Get context around a specific log line."""
-        return get_context(file, line_number, lines_before, lines_after)
+        result_json = self._investigator.get_context(
+            file, line_number, lines_before, lines_after, False
+        )
+        result = json.loads(result_json)
+        _normalize_context_payload(result)
+        return result
 
     def follow_thread(
         self,
@@ -182,13 +184,12 @@ class Investigator:
         trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Follow a thread/correlation/trace through loaded files."""
-        return follow_thread(
-            files=self._files,
-            thread_id=thread_id,
-            correlation_id=correlation_id,
-            trace_id=trace_id,
-            custom_regex=self._custom_regex,
+        result_json = self._investigator.follow_thread(
+            self._files, thread_id, correlation_id, trace_id
         )
+        result = json.loads(result_json)
+        _normalize_entries(result.get("entries", []))
+        return result
 
     def search(
         self,
