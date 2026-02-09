@@ -81,6 +81,23 @@ RUST_BACKEND_STATUS = _ensure_rust_backend()
 RUST_READY = RUST_BACKEND_STATUS.ready
 
 
+@pytest.fixture(autouse=True)
+def _clear_investigator_cache():
+    """Free cached PyInvestigator instances after every test.
+
+    The cache module keeps parsed Rust objects alive across calls.  Stress
+    tests create multiple large temp files and the accumulated Rust heap
+    can exhaust swap, so we flush between tests.
+    """
+    yield
+    try:
+        from logler.cache import clear_cache
+
+        clear_cache()
+    except Exception:
+        pass
+
+
 @pytest.fixture(scope="session")
 def rust_backend():
     status = RUST_BACKEND_STATUS
