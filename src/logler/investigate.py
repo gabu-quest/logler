@@ -41,6 +41,9 @@ from ._search_core import (  # noqa: F401
     RUST_AVAILABLE,
     search,
     extract_ids,
+    follow_thread,
+    get_context,
+    get_metadata,
     find_patterns,
     # Private helpers re-exported for Investigator class & tests
     _normalize_entry,
@@ -158,11 +161,11 @@ class Investigator:
         self._files = files
         self._custom_regex = custom_regex
 
-    def get_metadata(self) -> List[Dict[str, Any]]:
+    def get_metadata(self) -> List[Dict[str, Any]]:  # noqa: F811
         """Get metadata about loaded log files."""
         return json.loads(self._investigator.get_metadata(self._files))
 
-    def get_context(
+    def get_context(  # noqa: F811
         self,
         file: str,
         line_number: int,
@@ -177,7 +180,7 @@ class Investigator:
         _normalize_context_payload(result)
         return result
 
-    def follow_thread(
+    def follow_thread(  # noqa: F811
         self,
         thread_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
