@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from collections import defaultdict
 
+from .cache import get_cached_investigator
 from .safe_regex import try_compile
 
 # ---------------------------------------------------------------------------
@@ -353,8 +354,11 @@ def search(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    investigator = logler_rs.PyInvestigator()
-    _load_files_with_config(investigator, files, parser_format, custom_regex)
+    if parser_format or custom_regex:
+        investigator = logler_rs.PyInvestigator()
+        _load_files_with_config(investigator, files, parser_format, custom_regex)
+    else:
+        investigator = get_cached_investigator(files)
 
     # Build filters
     filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
@@ -469,8 +473,7 @@ def extract_ids(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    investigator = logler_rs.PyInvestigator()
-    investigator.load_files(files)
+    investigator = get_cached_investigator(files)
 
     filters_json = None
     if time_start or time_end:
@@ -534,7 +537,8 @@ def follow_thread(
             thread_id=thread_id, correlation_id=correlation_id, trace_id=trace_id
         )
 
-    result_json = logler_rs.follow_thread(files, thread_id, correlation_id, trace_id)
+    investigator = get_cached_investigator(files)
+    result_json = investigator.follow_thread(files, thread_id, correlation_id, trace_id)
     result = json.loads(result_json)
     _normalize_entries(result.get("entries", []))
     return result
@@ -571,9 +575,7 @@ def get_context(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Use Investigator class for more complex operations
-    investigator = logler_rs.PyInvestigator()
-    investigator.load_files([file])
+    investigator = get_cached_investigator([file])
     result_json = investigator.get_context(file, line_number, lines_before, lines_after, False)
     result = json.loads(result_json)
     _normalize_context_payload(result)
@@ -620,7 +622,8 @@ def find_patterns(
         inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
         return inv.find_patterns(min_occurrences=min_occurrences)
 
-    result_json = logler_rs.find_patterns(files, min_occurrences)
+    investigator = get_cached_investigator(files)
+    result_json = investigator.find_patterns(files, min_occurrences)
     result = json.loads(result_json)
     _normalize_pattern_examples(result)
     _apply_custom_regex_to_results(result, custom_regex)
@@ -646,7 +649,8 @@ def get_metadata(files: List[str]) -> Dict[str, Any]:
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    result_json = logler_rs.get_metadata(files)
+    investigator = get_cached_investigator(files)
+    result_json = investigator.get_metadata(files)
     return json.loads(result_json)
 
 
