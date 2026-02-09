@@ -60,6 +60,23 @@ def cmd_plot(args: argparse.Namespace) -> None:
     generate_report(args.input, args.output)
 
 
+def cmd_compare(args: argparse.Namespace) -> None:
+    """Generate a scientific before/after comparison report."""
+    from benchmarks.plotting.comparison import generate_comparison
+
+    changes_md = None
+    if args.changes:
+        from pathlib import Path
+
+        p = Path(args.changes)
+        if p.exists():
+            changes_md = p.read_text()
+        else:
+            changes_md = args.changes
+
+    generate_comparison(args.baseline, args.current, args.output, changes_md)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="benchmarks",
@@ -87,6 +104,14 @@ def main() -> None:
     plot_p.add_argument("--input", "-i", default="benchmarks/results/latest.json")
     plot_p.add_argument("--output", "-o", default="benchmarks/results")
     plot_p.set_defaults(func=cmd_plot)
+
+    # compare
+    cmp_p = sub.add_parser("compare", help="Compare two benchmark runs (before/after)")
+    cmp_p.add_argument("--baseline", "-b", required=True, help="Path to baseline (v1) results JSON")
+    cmp_p.add_argument("--current", "-c", required=True, help="Path to current (v2) results JSON")
+    cmp_p.add_argument("--output", "-o", default="benchmarks/results/v2")
+    cmp_p.add_argument("--changes", help="Markdown file or string describing what changed")
+    cmp_p.set_defaults(func=cmd_compare)
 
     args = parser.parse_args()
     args.func(args)
