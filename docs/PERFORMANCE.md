@@ -4,15 +4,20 @@
 
 Logler is built with Rust for maximum performance. This guide explains performance characteristics and optimization strategies for LLM agents working with large log files.
 
-## Performance Targets
+## Measured Performance
 
-| Operation | Target | Typical |
-|-----------|--------|---------|
-| Index 1GB file | < 2 seconds | ~1.5s |
-| Search indexed logs | < 50ms | ~10-30ms |
-| Follow thread | < 100ms | ~20-50ms |
-| Pattern detection | < 500ms | ~200-400ms |
-| SQL query (1M rows) | < 1 second | ~300-800ms |
+Numbers from the [benchmark suite](../benchmarks/results/REPORT.md)
+(14 scenarios, 3 iterations, Python 3.12, Rust backend, 8 cores):
+
+| Operation | Measured | Scale |
+|-----------|----------|-------|
+| Search (level filter) | **7ms** / **39ms** / **694ms** | 1K / 10K / 50K entries |
+| Search (combined filters) | **4ms** / **25ms** / **173ms** | 1K / 10K / 50K entries |
+| Follow thread | **2.6ms** / **28ms** / **259ms** | 1K / 10K / 50K entries |
+| Cross-service timeline | **5ms** / **7ms** / **13ms** | 2 / 3 / 5 services |
+| Error flow analysis | **0.15ms** / **0.8ms** / **1.7ms** | 1K / 5K / 10K entries |
+| Smart sampling | **64ms** / **778ms** / **9.1s** | 1K / 10K / 50K entries |
+| Token savings (count vs full) | **2540x** | 100 ERRORs, 50K entries |
 
 ## Architecture
 
@@ -53,22 +58,18 @@ Logler is built with Rust for maximum performance. This guide explains performan
 
 ## Performance Characteristics
 
-### 1. File Loading and Indexing
+### 1. File Loading and Search
 
-**Cold Start** (first load):
-```
-File Size    Index Time    Memory Usage
----------    ----------    ------------
-10 MB        ~50ms         ~5 MB
-100 MB       ~400ms        ~40 MB
-1 GB         ~1.5s         ~200 MB
-10 GB        ~15s          ~1.5 GB
-```
+Measured on generated JSON-lines log files (benchmark suite, small scale):
 
-**Hot Path** (subsequent operations):
-- Search operations use in-memory indices
-- No re-parsing required
-- Sub-millisecond lookups for indexed fields
+| Entries | Search (level) | Search (combined) | Follow thread |
+|---------|---------------|-------------------|---------------|
+| 1,000   | 7ms           | 4ms               | 2.6ms         |
+| 10,000  | 39ms          | 25ms              | 28ms          |
+| 50,000  | 694ms         | 173ms             | 259ms         |
+
+Note: logler re-parses files on each call (no persistent index). Combined filters
+(level + query) can be faster than level-only when the query narrows results early.
 
 ### 2. Search Performance
 
@@ -296,49 +297,25 @@ def process_errors_in_batches(files, batch_size=1000):
 
 ## Benchmarks
 
-### Real-world Test Data
+The full benchmark suite measures 14 scenarios across 5 suites (search, hierarchy,
+correlation, output, sampling). Run it yourself:
 
-**Production incident log** (42 lines, 5.2 KB):
-```
-Operation              Time      Memory
----------              ----      ------
-Load + index          <1ms       50 KB
-Search for errors     <1ms       10 KB
-Follow thread         <1ms       15 KB
-Find patterns         <1ms       20 KB
+```bash
+uv pip install "matplotlib>=3.8"
+uv run python -m benchmarks run --scale small -v
+uv run python -m benchmarks plot
 ```
 
-**Distributed trace log** (150 lines, 24 KB):
-```
-Operation              Time      Memory
----------              ----      ------
-Load + index          2ms        150 KB
-Cross-service trace   2ms        50 KB
-Latency breakdown     1ms        30 KB
-```
-
-**Large production log** (1M lines, 500 MB):
-```
-Operation              Time      Memory
----------              ----      ------
-Load + index          800ms      85 MB
-Search by level       12ms       5 MB
-Search text query     180ms      20 MB
-Follow thread         8ms        2 MB
-Pattern detection     420ms      45 MB
-SQL aggregation       650ms      1.2 GB
-```
+Results: [benchmarks/results/REPORT.md](../benchmarks/results/REPORT.md)
 
 ### Comparison with Traditional Tools
 
-| Tool | Search 1GB | Thread Trace | SQL Query |
-|------|-----------|--------------|-----------|
-| grep | ~3-5s | N/A | N/A |
-| ripgrep | ~0.5-1s | N/A | N/A |
-| awk | ~2-4s | ~10-30s | N/A |
-| **logler** | **~0.05s** | **~0.02s** | **~0.8s** |
+grep and ripgrep search bytes; logler searches structured log entries with thread/correlation
+awareness. Direct comparisons aren't meaningful — they solve different problems. Use grep for
+string matching, use logler when you need thread tracking, hierarchy building, cross-service
+timelines, or structured investigation.
 
-*After initial indexing (~1.5s for 1GB)
+See the [full benchmark report](../benchmarks/results/REPORT.md) for measured numbers across 14 scenarios.
 
 ## Performance Testing
 

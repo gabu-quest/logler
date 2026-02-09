@@ -15,8 +15,11 @@ import pytest
 
 try:
     from logler.investigate import follow_thread, RUST_AVAILABLE
-except ImportError:
-    RUST_AVAILABLE = False
+except ImportError as e:
+    if "logler_rs" in str(e):
+        RUST_AVAILABLE = False
+    else:
+        raise
 
 
 pytestmark = pytest.mark.skipif(

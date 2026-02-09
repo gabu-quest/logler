@@ -98,6 +98,79 @@ class SqlEngine:
         if "logs" not in self._tables_loaded:
             self._tables_loaded.append("logs")
 
+        # Also populate metrics table from numeric extraction
+        self._load_metrics(indices)
+
+    def _load_metrics(self, indices: Mapping[str, LogIndex]) -> None:
+        """Extract numeric values from log entries and load into a metrics table.
+
+        This enables SQL queries like:
+            SELECT field_name, AVG(value), MAX(value) FROM metrics GROUP BY field_name
+            SELECT m.*, l.message FROM metrics m JOIN logs l
+                ON m.file = l.file AND m.line_number = l.line_number
+                WHERE m.value > 1000
+        """
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS metrics (
+                file TEXT,
+                line_number INTEGER,
+                timestamp TIMESTAMP,
+                field_name TEXT,
+                value DOUBLE,
+                unit TEXT
+            )
+        """
+        )
+
+        from .metrics import extract_numeric_fields
+
+        for file_path, index in indices.items():
+            entries = getattr(index, "entries", None)
+            if entries is None:
+                continue
+
+            # Build entry dicts for the metrics extractor
+            entry_dicts = []
+            for entry in entries:
+                ts = getattr(entry, "timestamp", None)
+                if ts is not None:
+                    if isinstance(ts, datetime):
+                        ts = ts.isoformat()
+                    elif hasattr(ts, "to_rfc3339"):
+                        ts = ts.to_rfc3339()
+
+                entry_dicts.append(
+                    {
+                        "file": file_path,
+                        "line_number": getattr(entry, "line_number", None),
+                        "timestamp": ts,
+                        "message": getattr(entry, "message", None)
+                        or getattr(entry, "raw", None)
+                        or "",
+                        "fields": getattr(entry, "fields", None) or {},
+                    }
+                )
+
+            all_series = extract_numeric_fields(entry_dicts)
+
+            for field_name, points in all_series.items():
+                for point in points:
+                    self.conn.execute(
+                        "INSERT INTO metrics VALUES (?, ?, ?, ?, ?, ?)",
+                        [
+                            point.file,
+                            point.line_number,
+                            point.timestamp,
+                            field_name,
+                            point.value,
+                            point.unit,
+                        ],
+                    )
+
+        if "metrics" not in self._tables_loaded:
+            self._tables_loaded.append("metrics")
+
     def query(self, sql: str) -> str:
         """Execute a SQL query and return results as JSON.
 
@@ -139,9 +212,14 @@ class SqlEngine:
             table: Name of table to get schema for
 
         Returns:
-            JSON string with schema information
+            JSON string with schema information, or empty array for
+            invalid/nonexistent tables.
         """
-        # Use parameterized query to prevent SQL injection
-        # PRAGMA doesn't support parameters, so we sanitize the table name
-        safe_table = table.replace("'", "''")
-        return self.query(f"PRAGMA table_info('{safe_table}')")
+        import re
+
+        if not re.fullmatch(r"[A-Za-z_]\w*", table):
+            return json.dumps([])
+        try:
+            return self.query(f"PRAGMA table_info('{table}')")
+        except Exception:
+            return json.dumps([])

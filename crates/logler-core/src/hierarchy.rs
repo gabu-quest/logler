@@ -1,7 +1,7 @@
 use crate::types::{LogEntry, LogLevel};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use uuid::Uuid;
 
 /// A node in the span/thread hierarchy tree
@@ -155,6 +155,12 @@ pub struct HierarchyBuilder {
     /// All log entries indexed by ID
     entries_by_id: HashMap<Uuid, LogEntry>,
 
+    /// Map of parent_span_id -> Vec<Uuid> for O(1) child lookup
+    children_by_parent: HashMap<String, Vec<Uuid>>,
+
+    /// Sorted set of all thread/span IDs for O(log n) prefix lookups
+    all_ids_sorted: BTreeSet<String>,
+
     /// Detected naming patterns
     #[allow(dead_code)]
     naming_patterns: Vec<NamingPattern>,
@@ -222,6 +228,8 @@ impl HierarchyBuilder {
             span_entries: HashMap::new(),
             thread_entries: HashMap::new(),
             entries_by_id: HashMap::new(),
+            children_by_parent: HashMap::new(),
+            all_ids_sorted: BTreeSet::new(),
             naming_patterns: Self::default_naming_patterns(),
             config,
         }
@@ -240,6 +248,7 @@ impl HierarchyBuilder {
                 .entry(span_id.clone())
                 .or_default()
                 .push(entry_id);
+            self.all_ids_sorted.insert(span_id.clone());
 
             // Record explicit parent relationship
             if let Some(parent_span_id) = &entry.parent_span_id {
@@ -248,12 +257,21 @@ impl HierarchyBuilder {
             }
         }
 
+        // Index for O(1) child lookup by parent_span_id
+        if let Some(parent_span_id) = &entry.parent_span_id {
+            self.children_by_parent
+                .entry(parent_span_id.clone())
+                .or_default()
+                .push(entry_id);
+        }
+
         // Track thread relationships
         if let Some(thread_id) = &entry.thread_id {
             self.thread_entries
                 .entry(thread_id.clone())
                 .or_default()
                 .push(entry_id);
+            self.all_ids_sorted.insert(thread_id.clone());
         }
     }
 
@@ -488,23 +506,20 @@ impl HierarchyBuilder {
     fn find_children(&self, parent_entries: &[&LogEntry]) -> HashMap<String, Vec<&LogEntry>> {
         let mut children: HashMap<String, Vec<&LogEntry>> = HashMap::new();
 
-        // Extract potential parent identifiers
-        let parent_span_ids: Vec<String> = parent_entries
-            .iter()
-            .filter_map(|e| e.span_id.clone())
-            .collect();
-
-        // Find entries with matching parent_span_id
-        for entry in self.entries_by_id.values() {
-            if let Some(parent_span_id) = &entry.parent_span_id {
-                if parent_span_ids.contains(parent_span_id) {
-                    let key = if let Some(span_id) = &entry.span_id {
-                        format!("span:{}", span_id)
-                    } else {
-                        format!("entry:{}", entry.id)
-                    };
-
-                    children.entry(key).or_default().push(entry);
+        // O(1) lookup via children_by_parent index instead of scanning all entries
+        for parent in parent_entries {
+            if let Some(span_id) = &parent.span_id {
+                if let Some(child_ids) = self.children_by_parent.get(span_id) {
+                    for child_id in child_ids {
+                        if let Some(entry) = self.entries_by_id.get(child_id) {
+                            let key = if let Some(sid) = &entry.span_id {
+                                format!("span:{}", sid)
+                            } else {
+                                format!("entry:{}", entry.id)
+                            };
+                            children.entry(key).or_default().push(entry);
+                        }
+                    }
                 }
             }
         }
@@ -517,7 +532,27 @@ impl HierarchyBuilder {
         children
     }
 
+    /// Compute the exclusive upper bound for a prefix range scan.
+    ///
+    /// Increments the last byte of the prefix. Returns `None` only if the
+    /// prefix is empty or consists entirely of `0xFF` bytes (practically
+    /// impossible for human-readable IDs).
+    fn prefix_successor(prefix: &str) -> Option<String> {
+        let mut bytes = prefix.as_bytes().to_vec();
+        while let Some(last) = bytes.last_mut() {
+            if *last < 0xFF {
+                *last += 1;
+                return String::from_utf8(bytes).ok();
+            }
+            bytes.pop();
+        }
+        None
+    }
+
     /// Infer children from naming patterns (worker-1 → worker-1.task-a)
+    ///
+    /// Uses a BTreeSet prefix scan (O(log n + k) where k = matches) instead
+    /// of iterating all thread/span IDs (O(n)).
     fn infer_children_from_naming(
         &self,
         parent_entries: &[&LogEntry],
@@ -532,17 +567,31 @@ impl HierarchyBuilder {
                 .or(parent.span_id.as_ref());
 
             if let Some(parent_id) = parent_id {
-                // Look for entries with IDs that start with parent_id
-                for entry in self.entries_by_id.values() {
-                    if let Some(child_id) = entry
-                        .thread_id
-                        .as_ref()
-                        .or(entry.correlation_id.as_ref())
-                        .or(entry.span_id.as_ref())
-                    {
-                        if self.is_child_by_naming(parent_id, child_id) {
-                            let key = format!("thread:{}", child_id);
-                            children.entry(key).or_default().push(entry);
+                for separator in ['.', ':', '-'] {
+                    let prefix = format!("{}{}", parent_id, separator);
+                    if let Some(end) = Self::prefix_successor(&prefix) {
+                        for candidate_id in self.all_ids_sorted.range(prefix.clone()..end) {
+                            // For dash separator, skip if the candidate equals the parent
+                            if separator == '-' && candidate_id == parent_id {
+                                continue;
+                            }
+                            let key = format!("thread:{}", candidate_id);
+                            // Collect entries from both thread_entries and span_entries
+                            if let Some(entry_ids) = self.thread_entries.get(candidate_id.as_str())
+                            {
+                                for eid in entry_ids {
+                                    if let Some(entry) = self.entries_by_id.get(eid) {
+                                        children.entry(key.clone()).or_default().push(entry);
+                                    }
+                                }
+                            }
+                            if let Some(entry_ids) = self.span_entries.get(candidate_id.as_str()) {
+                                for eid in entry_ids {
+                                    if let Some(entry) = self.entries_by_id.get(eid) {
+                                        children.entry(key.clone()).or_default().push(entry);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -550,14 +599,6 @@ impl HierarchyBuilder {
         }
 
         children
-    }
-
-    /// Check if child_id is a child of parent_id based on naming
-    fn is_child_by_naming(&self, parent_id: &str, child_id: &str) -> bool {
-        // Pattern: parent.child, parent:child, parent-child
-        child_id.starts_with(&format!("{}.", parent_id))
-            || child_id.starts_with(&format!("{}:", parent_id))
-            || (child_id.starts_with(&format!("{}-", parent_id)) && child_id != parent_id)
     }
 
     /// Parse node key into type and ID

@@ -16,8 +16,11 @@ import pytest
 
 try:
     from logler.investigate import search, RUST_AVAILABLE
-except ImportError:
-    RUST_AVAILABLE = False
+except ImportError as e:
+    if "logler_rs" in str(e):
+        RUST_AVAILABLE = False
+    else:
+        raise
 
 
 pytestmark = pytest.mark.skipif(not RUST_AVAILABLE, reason="Rust backend required for search tests")
