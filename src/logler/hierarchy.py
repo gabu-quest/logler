@@ -70,8 +70,6 @@ def follow_thread_hierarchy(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    import logler_rs
-
     # Lazy import to avoid circular dependency
     from .investigate import Investigator
 
@@ -87,8 +85,11 @@ def follow_thread_hierarchy(
             min_confidence=min_confidence,
         )
 
-    # Call Rust directly for better performance
-    result_json = logler_rs.build_hierarchy(
+    # Use cached investigator to avoid re-parsing files
+    from .cache import get_cached_investigator
+
+    investigator = get_cached_investigator(files)
+    result_json = investigator.build_hierarchy(
         files,
         root_identifier,
         max_depth,
@@ -587,26 +588,13 @@ def detect_correlation_chains(
     patterns = chain_patterns or default_patterns
     compiled_patterns = [re.compile(p) for p in patterns]
 
-    # Read and parse logs
+    # Read and parse logs using the proper search API (cached investigator)
     entries = []
     if RUST_AVAILABLE:
-        import logler_rs
+        from ._search_core import search as _search
 
-        for file_path in files:
-            result_json = logler_rs.search(
-                [file_path],
-                "",  # No query filter
-                None,  # level
-                None,  # thread_id
-                None,  # correlation_id
-                None,  # trace_id
-                None,  # start_time
-                None,  # end_time
-                10000,  # limit - get many entries
-                0,  # offset
-            )
-            result = json.loads(result_json)
-            entries.extend(result.get("entries", []))
+        result = _search(files, limit=10000)
+        entries = [r["entry"] for r in result.get("results", [])]
     else:
         # Fallback to Python parsing
         from .parser import LogParser
