@@ -53,11 +53,11 @@ def smart_sample(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Get all entries
-    results = search(files, level=level, limit=None)
-    all_entries = [r["entry"] for r in results.get("results", [])]
+    # Get total count cheaply without fetching all entries
+    count_result = search(files, level=level, output_format="count")
+    total_population = count_result.get("total_matches", 0)
 
-    if not all_entries:
+    if total_population == 0:
         return {
             "samples": [],
             "total_population": 0,
@@ -66,25 +66,46 @@ def smart_sample(
             "coverage": {},
         }
 
-    # Apply sampling strategy
-    if strategy == "representative":
-        samples = _sample_representative(all_entries, sample_size)
-    elif strategy == "diverse":
-        samples = _sample_diverse(all_entries, sample_size)
-    elif strategy == "chronological":
-        samples = _sample_chronological(all_entries, sample_size)
-    elif strategy == "errors_focused":
+    # For errors_focused, use two targeted fetches instead of one huge fetch
+    if strategy == "errors_focused":
+        error_budget = int(sample_size * 0.7)
+        context_budget = sample_size - error_budget
+
+        # Fetch errors with a capped oversample
+        error_limit = min(total_population, max(error_budget * 10, 500))
+        errors_result = search(files, level="ERROR,FATAL", limit=error_limit)
+        error_entries = [r["entry"] for r in errors_result.get("results", [])]
+
+        # Fetch non-errors for context
+        context_limit = min(total_population, max(context_budget * 10, 500))
+        context_result = search(
+            files, level=level, exclude_level="ERROR,FATAL", limit=context_limit
+        )
+        context_entries = [r["entry"] for r in context_result.get("results", [])]
+
+        all_entries = error_entries + context_entries
         samples = _sample_errors_focused(all_entries, sample_size)
     else:
-        # Default to representative
-        samples = _sample_representative(all_entries, sample_size)
+        # Fetch capped entries — 10x oversample for diversity, but never all 50K
+        fetch_limit = min(total_population, max(sample_size * 10, 500))
+        results = search(files, level=level, limit=fetch_limit)
+        all_entries = [r["entry"] for r in results.get("results", [])]
 
-    # Calculate coverage
+        if strategy == "representative":
+            samples = _sample_representative(all_entries, sample_size)
+        elif strategy == "diverse":
+            samples = _sample_diverse(all_entries, sample_size)
+        elif strategy == "chronological":
+            samples = _sample_chronological(all_entries, sample_size)
+        else:
+            samples = _sample_representative(all_entries, sample_size)
+
+    # Calculate coverage using the fetched entries
     coverage = _calculate_coverage(all_entries, samples)
 
     return {
         "samples": samples,
-        "total_population": len(all_entries),
+        "total_population": total_population,
         "sample_size": len(samples),
         "strategy": strategy,
         "coverage": coverage,
