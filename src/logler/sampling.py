@@ -53,43 +53,35 @@ def smart_sample(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Get total count cheaply without fetching all entries
-    count_result = search(files, level=level, output_format="count")
-    total_population = count_result.get("total_matches", 0)
+    # Cap fetch size to avoid deserializing tens of thousands of entries.
+    # Rust returns total_matches (true count) even with a limit, so we get
+    # the real population size without a separate count query.
+    fetch_limit = max(sample_size * 10, 500)
 
-    if total_population == 0:
-        return {
-            "samples": [],
-            "total_population": 0,
-            "sample_size": 0,
-            "strategy": strategy,
-            "coverage": {},
-        }
-
-    # For errors_focused, use two targeted fetches instead of one huge fetch
     if strategy == "errors_focused":
         error_budget = int(sample_size * 0.7)
         context_budget = sample_size - error_budget
 
-        # Fetch errors with a capped oversample
-        error_limit = min(total_population, max(error_budget * 10, 500))
-        errors_result = search(files, level="ERROR,FATAL", limit=error_limit)
+        errors_result = search(files, level="ERROR,FATAL", limit=max(error_budget * 10, 500))
         error_entries = [r["entry"] for r in errors_result.get("results", [])]
 
-        # Fetch non-errors for context
-        context_limit = min(total_population, max(context_budget * 10, 500))
         context_result = search(
-            files, level=level, exclude_level="ERROR,FATAL", limit=context_limit
+            files,
+            level=level,
+            exclude_level="ERROR,FATAL",
+            limit=max(context_budget * 10, 500),
         )
         context_entries = [r["entry"] for r in context_result.get("results", [])]
 
         all_entries = error_entries + context_entries
+        total_population = errors_result.get("total_matches", 0) + context_result.get(
+            "total_matches", 0
+        )
         samples = _sample_errors_focused(all_entries, sample_size)
     else:
-        # Fetch capped entries — 10x oversample for diversity, but never all 50K
-        fetch_limit = min(total_population, max(sample_size * 10, 500))
         results = search(files, level=level, limit=fetch_limit)
         all_entries = [r["entry"] for r in results.get("results", [])]
+        total_population = results.get("total_matches", len(all_entries))
 
         if strategy == "representative":
             samples = _sample_representative(all_entries, sample_size)
@@ -100,7 +92,15 @@ def smart_sample(
         else:
             samples = _sample_representative(all_entries, sample_size)
 
-    # Calculate coverage using the fetched entries
+    if total_population == 0:
+        return {
+            "samples": [],
+            "total_population": 0,
+            "sample_size": 0,
+            "strategy": strategy,
+            "coverage": {},
+        }
+
     coverage = _calculate_coverage(all_entries, samples)
 
     return {
