@@ -364,6 +364,52 @@ def configure_fastapi_logging_for_logler(log_file: str = "fastapi.log", use_json
     access_logger.addHandler(file_handler)
 
 
+# ==================== STDLIB + LOGLER CONTEXT ====================
+
+
+def configure_stdlib_for_logler(
+    logger: logging.Logger | None = None,
+    filename: str | None = None,
+    stream=None,
+    level: int = logging.DEBUG,
+):
+    """Wire up logler's JsonHandler + CorrelationFilter on a stdlib logger.
+
+    This is the recommended one-call setup for applications that want
+    structured JSON logs with automatic correlation ID injection.
+
+    Args:
+        logger: Logger to configure. Defaults to the root logger.
+        filename: Path to write JSON logs. Mutually exclusive with stream.
+        stream: Stream to write to. Mutually exclusive with filename.
+        level: Logging level (default: DEBUG).
+
+    Returns:
+        The configured logger.
+
+    Example::
+
+        from logler_helpers import configure_stdlib_for_logler
+        from logler.context import correlation_context
+
+        logger = configure_stdlib_for_logler(filename="app.log")
+
+        with correlation_context("job-123"):
+            logger.info("Processing")
+            # -> JSON line with correlation_id="job-123"
+    """
+    from logler.context import CorrelationFilter, JsonHandler
+
+    if logger is None:
+        logger = logging.getLogger()
+
+    handler = JsonHandler(filename=filename, stream=stream)
+    handler.addFilter(CorrelationFilter())
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    return logger
+
+
 # ==================== CORRELATION ID MIDDLEWARE ====================
 
 

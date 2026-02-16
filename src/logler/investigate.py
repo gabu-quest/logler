@@ -147,8 +147,9 @@ class Investigator:
         import logler_rs
 
         self._investigator = logler_rs.PyInvestigator()
-        self._files = []
-        self._custom_regex = None
+        self._files: List[str] = []
+        self._custom_regex: Optional[str] = None
+        self._db_temp_files: List[str] = []
 
     def load_files(
         self,
@@ -368,6 +369,47 @@ class Investigator:
         )
         return json.loads(result_json)
 
+    def load_from_db(
+        self,
+        db_path: str,
+        mappings: Optional[List] = None,
+    ) -> None:
+        """Load a sqler database as a log source.
+
+        Converts the database to JSONL and feeds it into the Rust parser,
+        giving full access to all logler features (search, hierarchy,
+        correlation, etc.).
+
+        Args:
+            db_path: Path to the SQLite database file.
+            mappings: List of :class:`~logler.db_source.DbTableMapping`.
+                Auto-detected if None.
+
+        Example::
+
+            inv = Investigator()
+            inv.load_from_db("qler.db")
+            results = inv.search(level="ERROR")
+            inv.close()  # clean up temp files
+        """
+        from .db_source import db_to_jsonl
+
+        jsonl_path = db_to_jsonl(db_path, mappings)
+        self._db_temp_files.append(jsonl_path)
+        _load_files_with_config(self._investigator, [jsonl_path], None, None)
+        self._files.append(jsonl_path)
+
+    def close(self) -> None:
+        """Clean up temporary files created by :meth:`load_from_db`."""
+        import os
+
+        for path in self._db_temp_files:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        self._db_temp_files.clear()
+
 
 # ============================================================================
 # Numeric Extraction Wrappers (M5)
@@ -560,3 +602,58 @@ def mine_log_templates(
         "coverage": template_result.coverage,
         "files_searched": len(files),
     }
+
+
+# ============================================================================
+# Database Source (M-1: logler-sqler bridge)
+# ============================================================================
+
+
+# Re-export for convenience: ``from logler.investigate import DbTableMapping``
+from .db_source import (  # noqa: E402, F401
+    DbTableMapping,
+    qler_job_mapping,
+    qler_attempt_mapping,
+)
+
+
+def search_db(
+    db_path: str,
+    mappings: Optional[List] = None,
+    query: Optional[str] = None,
+    level: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """One-shot convenience: load a sqler DB and search it.
+
+    Creates a temporary :class:`Investigator`, loads the database,
+    searches, and cleans up.
+
+    Args:
+        db_path: Path to the SQLite database file.
+        mappings: Table mappings. Auto-detected if None.
+        query: Search query regex.
+        level: Log level filter (e.g. ``"ERROR"``).
+        correlation_id: Filter by correlation ID.
+        limit: Maximum results to return.
+
+    Returns:
+        Search results dict (same shape as :meth:`Investigator.search`).
+
+    Example::
+
+        from logler.investigate import search_db
+        results = search_db("qler.db", level="ERROR")
+    """
+    inv = Investigator()
+    try:
+        inv.load_from_db(db_path, mappings)
+        return inv.search(
+            query=query,
+            level=level,
+            correlation_id=correlation_id,
+            limit=limit,
+        )
+    finally:
+        inv.close()

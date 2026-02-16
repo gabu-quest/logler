@@ -10,6 +10,9 @@ from .tracker import ThreadTracker
 from .log_reader import LogReader
 from .tree_formatter import format_tree, format_waterfall, print_tree, print_waterfall
 
+# Correlation context
+from .context import correlation_context, get_correlation_id, CorrelationFilter, JsonHandler
+
 # Pydantic models for type-safe log analysis
 from .models import (
     # Core entry models
@@ -124,4 +127,9 @@ __all__ = [
     "parse_search_results",
     "parse_thread_hierarchy",
     "parse_error_analysis",
+    # Correlation context
+    "correlation_context",
+    "get_correlation_id",
+    "CorrelationFilter",
+    "JsonHandler",
 ]
