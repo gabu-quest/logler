@@ -42,6 +42,14 @@ class TestCorrelationContext:
     def test_default_none(self):
         assert get_correlation_id() is None
 
+    def test_exception_resets_context(self):
+        """correlation_id is reset even if exception occurs inside context."""
+        with pytest.raises(RuntimeError):
+            with correlation_context("will-fail"):
+                assert get_correlation_id() == "will-fail"
+                raise RuntimeError("boom")
+        assert get_correlation_id() is None
+
 
 # ---------------------------------------------------------------------------
 # CorrelationFilter

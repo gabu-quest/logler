@@ -180,14 +180,14 @@ def _read_sqler_table(
 ) -> list[dict]:
     """Read all rows from a sqler table and convert to log entries."""
     # Discover columns
-    cursor = conn.execute(f"PRAGMA table_info({mapping.table})")
+    cursor = conn.execute(f'PRAGMA table_info("{mapping.table}")')
     columns = [row[1] for row in cursor.fetchall()]
 
     if not columns:
         return []
 
     # Read rows ordered by _id
-    cursor = conn.execute(f"SELECT * FROM {mapping.table} ORDER BY _id")
+    cursor = conn.execute(f'SELECT * FROM "{mapping.table}" ORDER BY _id')
     rows = cursor.fetchall()
 
     entries = []
@@ -318,7 +318,7 @@ def _auto_detect_mappings(conn: sqlite3.Connection) -> list[DbTableMapping]:
             mappings.append(qler_attempt_mapping())
         else:
             # Generic mapping for unknown sqler tables
-            columns = [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            columns = [row[1] for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()]
             # Try to guess reasonable defaults
             ts_field = "created_at"
             if "created_at" not in columns:

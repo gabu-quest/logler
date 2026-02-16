@@ -80,14 +80,20 @@ class TestSearchDbFlag:
         result = run_llm_command(["search", "--db", qler_test_db])
         assert result.returncode == EXIT_SUCCESS
         output = json.loads(result.stdout)
-        assert output["summary"]["total_matches"] >= 3
+        # 3 jobs in fixture
+        assert output["summary"]["total_matches"] == 3
+        # Verify actual job data came through
+        messages = [e["message"] for e in output["results"]]
+        assert any("send_email" in m for m in messages)
+        assert any("process_image" in m for m in messages)
 
     def test_search_db_level_filter(self, qler_test_db: str):
         """--db --level ERROR filters correctly."""
         result = run_llm_command(["search", "--db", qler_test_db, "--level", "ERROR"])
         assert result.returncode == EXIT_SUCCESS
         output = json.loads(result.stdout)
-        assert output["summary"]["total_matches"] >= 1
+        # 1 failed job in fixture -> 1 ERROR
+        assert output["summary"]["total_matches"] == 1
         for entry in output["results"]:
             assert entry["level"] == "ERROR"
 

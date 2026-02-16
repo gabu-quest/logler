@@ -155,3 +155,11 @@ class JsonHandler(logging.Handler):
         if self._owns_stream:
             self._stream.close()
         super().close()
+
+    def __del__(self) -> None:
+        """Safety net: close file if handler is garbage collected."""
+        try:
+            if getattr(self, "_owns_stream", False) and getattr(self, "_stream", None):
+                self._stream.close()
+        except Exception:
+            pass

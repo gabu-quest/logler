@@ -232,6 +232,27 @@ class TestMergeSqlerRow:
         assert result["status"] == "new_value"
         assert result["name"] == "alice"
 
+    def test_null_data_column(self):
+        """Row with NULL data column doesn't crash."""
+        row = {"_id": 1, "data": None, "status": "active"}
+        result = _merge_sqler_row(row, ["_id", "data", "status"])
+        assert result["_id"] == 1
+        assert result["status"] == "active"
+        assert "name" not in result
+
+    def test_malformed_json_data(self):
+        """Row with malformed JSON in data column falls back gracefully."""
+        row = {"_id": 1, "data": "not-json{", "status": "ok"}
+        result = _merge_sqler_row(row, ["_id", "data", "status"])
+        assert result["_id"] == 1
+        assert result["status"] == "ok"
+
+    def test_json_array_data(self):
+        """Row where data is a JSON array instead of object."""
+        row = {"_id": 1, "data": "[1, 2, 3]"}
+        result = _merge_sqler_row(row, ["_id", "data"])
+        assert result["_id"] == 1
+
 
 class TestQlerMappings:
     def test_qler_job_mapping(self):
@@ -326,12 +347,16 @@ class TestDbToJsonl:
             with open(path) as f:
                 entries = [json.loads(line) for line in f]
 
-            # Find the failed job (process_image 01H3)
-            failed_entries = [e for e in entries if e["level"] == "ERROR"]
-            assert len(failed_entries) >= 2  # failed + dead jobs
+            level_counts = {}
+            for e in entries:
+                level_counts[e["level"]] = level_counts.get(e["level"], 0) + 1
 
-            warn_entries = [e for e in entries if e["level"] == "WARN"]
-            assert len(warn_entries) >= 1  # cancelled job
+            # 2 failed + 1 dead = 3 ERROR
+            assert level_counts.get("ERROR", 0) == 3
+            # 1 cancelled = 1 WARN
+            assert level_counts.get("WARN", 0) == 1
+            # 4 success + 1 pending + 1 running = 6 INFO
+            assert level_counts.get("INFO", 0) == 6
         finally:
             os.unlink(path)
 
@@ -342,7 +367,7 @@ class TestDbToJsonl:
                 entries = [json.loads(line) for line in f]
 
             with_corr = [e for e in entries if "correlation_id" in e]
-            assert len(with_corr) >= 8  # 9 of 10 jobs have correlation_id
+            assert len(with_corr) == 9  # 9 of 10 jobs have correlation_id (cleanup_temp doesn't)
         finally:
             os.unlink(path)
 
@@ -384,7 +409,8 @@ class TestInvestigatorDbIntegration:
 
         results = inv.search(level="ERROR")
         entries = results.get("results", [])
-        assert len(entries) >= 2  # at least failed + dead jobs from jobs table
+        # 2 failed + 1 dead jobs + 4 failed/timeout attempts = 7+ ERROR entries
+        assert len(entries) >= 7
 
         inv.close()
 
@@ -394,7 +420,7 @@ class TestInvestigatorDbIntegration:
 
         results = search_db(qler_test_db, level="ERROR")
         entries = results.get("results", [])
-        assert len(entries) >= 2
+        assert len(entries) >= 7
 
     def test_search_db_by_correlation(self, qler_test_db: str):
         from logler.investigate import search_db
