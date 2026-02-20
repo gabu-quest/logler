@@ -20,160 +20,158 @@ from logler.db_source import (
 
 
 # ---------------------------------------------------------------------------
-# Shared fixture: temp SQLite with sqler schema
+# Shared fixture: temp SQLite with sqler schema matching qler's actual tables
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
 def qler_test_db(tmp_path: Path) -> str:
-    """Create a temp SQLite DB with sqler-style tables and sample data."""
+    """Create a temp SQLite DB with sqler-style tables matching qler's actual schema.
+
+    qler_jobs promoted columns: ulid, status, queue_name, priority, eta, lease_expires_at
+    qler_job_attempts promoted columns: ulid, job_ulid, status
+    Non-promoted fields live in the ``data`` JSON blob.
+    """
     db_path = str(tmp_path / "test_qler.db")
     conn = sqlite3.connect(db_path)
 
-    # Jobs table (sqler schema: _id, data, + promoted columns)
+    # qler_jobs table (sqler schema: _id, data, _version + promoted columns)
     conn.execute(
         """
-        CREATE TABLE jobs (
+        CREATE TABLE qler_jobs (
             _id INTEGER PRIMARY KEY AUTOINCREMENT,
             data JSON NOT NULL,
+            _version INTEGER NOT NULL DEFAULT 1,
+            ulid TEXT UNIQUE NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
+            queue_name TEXT NOT NULL DEFAULT 'default',
             priority INTEGER NOT NULL DEFAULT 0,
-            attempt_count INTEGER NOT NULL DEFAULT 0
+            eta INTEGER NOT NULL DEFAULT 0,
+            lease_expires_at INTEGER
         )
     """
     )
 
+    # Epoch timestamps (seconds since unix epoch)
+    base_ts = 1705312800  # 2024-01-15T10:00:00Z
+
     # Insert 10 jobs with mixed statuses
+    # Data blob has non-promoted fields: task, attempts, correlation_id, created_at, etc.
     jobs = [
+        # (data_json, ulid, status, queue_name, priority)
         (
-            '{"task_name":"send_email","queue":"default","ulid":"01H1","correlation_id":"corr-001","created_at":"2024-01-15T10:00:00Z"}',
-            "success",
-            0,
-            1,
+            json.dumps({"task": "send_email", "attempts": 1, "correlation_id": "corr-001", "created_at": base_ts}),
+            "01H1", "completed", "default", 0,
         ),
         (
-            '{"task_name":"send_email","queue":"default","ulid":"01H2","correlation_id":"corr-002","created_at":"2024-01-15T10:01:00Z"}',
-            "success",
-            0,
-            1,
+            json.dumps({"task": "send_email", "attempts": 1, "correlation_id": "corr-002", "created_at": base_ts + 60}),
+            "01H2", "completed", "default", 0,
         ),
         (
-            '{"task_name":"process_image","queue":"media","ulid":"01H3","correlation_id":"corr-003","created_at":"2024-01-15T10:02:00Z"}',
-            "failed",
-            5,
-            3,
+            json.dumps({"task": "process_image", "attempts": 3, "correlation_id": "corr-003", "created_at": base_ts + 120}),
+            "01H3", "failed", "media", 5,
         ),
         (
-            '{"task_name":"generate_report","queue":"default","ulid":"01H4","correlation_id":"corr-004","created_at":"2024-01-15T10:03:00Z"}',
-            "pending",
-            0,
-            0,
+            json.dumps({"task": "generate_report", "attempts": 0, "correlation_id": "corr-004", "created_at": base_ts + 180}),
+            "01H4", "pending", "default", 0,
         ),
         (
-            '{"task_name":"send_email","queue":"default","ulid":"01H5","correlation_id":"corr-005","created_at":"2024-01-15T10:04:00Z"}',
-            "running",
-            0,
-            1,
+            json.dumps({"task": "send_email", "attempts": 1, "correlation_id": "corr-005", "created_at": base_ts + 240}),
+            "01H5", "running", "default", 0,
         ),
         (
-            '{"task_name":"cleanup_temp","queue":"maintenance","ulid":"01H6","created_at":"2024-01-15T10:05:00Z"}',
-            "success",
-            -1,
-            1,
+            json.dumps({"task": "cleanup_temp", "attempts": 1, "created_at": base_ts + 300}),
+            "01H6", "completed", "maintenance", -1,
         ),
         (
-            '{"task_name":"process_image","queue":"media","ulid":"01H7","correlation_id":"corr-007","created_at":"2024-01-15T10:06:00Z"}',
-            "failed",
-            5,
-            3,
+            json.dumps({"task": "process_image", "attempts": 3, "correlation_id": "corr-007", "created_at": base_ts + 360}),
+            "01H7", "failed", "media", 5,
         ),
         (
-            '{"task_name":"sync_data","queue":"default","ulid":"01H8","correlation_id":"corr-008","created_at":"2024-01-15T10:07:00Z"}',
-            "success",
-            10,
-            1,
+            json.dumps({"task": "sync_data", "attempts": 1, "correlation_id": "corr-008", "created_at": base_ts + 420}),
+            "01H8", "completed", "default", 10,
         ),
         (
-            '{"task_name":"send_notification","queue":"default","ulid":"01H9","correlation_id":"corr-009","created_at":"2024-01-15T10:08:00Z"}',
-            "cancelled",
-            0,
-            0,
+            json.dumps({"task": "send_notification", "attempts": 0, "correlation_id": "corr-009", "created_at": base_ts + 480}),
+            "01H9", "cancelled", "default", 0,
         ),
         (
-            '{"task_name":"process_image","queue":"media","ulid":"01HA","correlation_id":"corr-010","created_at":"2024-01-15T10:09:00Z"}',
-            "dead",
-            5,
-            5,
+            json.dumps({"task": "process_image", "attempts": 5, "correlation_id": "corr-010", "created_at": base_ts + 540}),
+            "01HA", "failed", "media", 5,
         ),
     ]
     conn.executemany(
-        "INSERT INTO jobs (data, status, priority, attempt_count) VALUES (?, ?, ?, ?)",
+        "INSERT INTO qler_jobs (data, ulid, status, queue_name, priority) VALUES (?, ?, ?, ?, ?)",
         jobs,
     )
 
-    # Job attempts table
+    # qler_job_attempts table
     conn.execute(
         """
-        CREATE TABLE job_attempts (
+        CREATE TABLE qler_job_attempts (
             _id INTEGER PRIMARY KEY AUTOINCREMENT,
             data JSON NOT NULL,
-            outcome TEXT DEFAULT NULL
+            _version INTEGER NOT NULL DEFAULT 1,
+            ulid TEXT UNIQUE NOT NULL,
+            job_ulid TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running'
         )
     """
     )
 
     attempts = [
+        # (data_json, ulid, job_ulid, status)
         (
-            '{"job_ulid":"01H1","attempt_number":1,"worker_id":"w-1","started_at":"2024-01-15T10:00:01Z","correlation_id":"corr-001","duration_ms":120}',
-            "success",
+            json.dumps({"attempt_number": 1, "worker_id": "w-1", "started_at": base_ts + 1}),
+            "A001", "01H1", "completed",
         ),
         (
-            '{"job_ulid":"01H2","attempt_number":1,"worker_id":"w-2","started_at":"2024-01-15T10:01:01Z","correlation_id":"corr-002","duration_ms":95}',
-            "success",
+            json.dumps({"attempt_number": 1, "worker_id": "w-2", "started_at": base_ts + 61}),
+            "A002", "01H2", "completed",
         ),
         (
-            '{"job_ulid":"01H3","attempt_number":1,"worker_id":"w-1","started_at":"2024-01-15T10:02:01Z","correlation_id":"corr-003","error_message":"OOM","duration_ms":5000}',
-            "failure",
+            json.dumps({"attempt_number": 1, "worker_id": "w-1", "started_at": base_ts + 121, "error": "OOM", "failure_kind": "exception"}),
+            "A003", "01H3", "failed",
         ),
         (
-            '{"job_ulid":"01H3","attempt_number":2,"worker_id":"w-2","started_at":"2024-01-15T10:02:30Z","correlation_id":"corr-003","error_message":"OOM","duration_ms":4800}',
-            "failure",
+            json.dumps({"attempt_number": 2, "worker_id": "w-2", "started_at": base_ts + 150, "error": "OOM", "failure_kind": "exception"}),
+            "A004", "01H3", "failed",
         ),
         (
-            '{"job_ulid":"01H3","attempt_number":3,"worker_id":"w-1","started_at":"2024-01-15T10:03:00Z","correlation_id":"corr-003","error_message":"OOM","duration_ms":5100}',
-            "failure",
+            json.dumps({"attempt_number": 3, "worker_id": "w-1", "started_at": base_ts + 180, "error": "OOM", "failure_kind": "exception"}),
+            "A005", "01H3", "failed",
         ),
         (
-            '{"job_ulid":"01H5","attempt_number":1,"worker_id":"w-3","started_at":"2024-01-15T10:04:01Z","correlation_id":"corr-005","duration_ms":null}',
-            None,
+            json.dumps({"attempt_number": 1, "worker_id": "w-3", "started_at": base_ts + 241}),
+            "A006", "01H5", "running",
         ),
         (
-            '{"job_ulid":"01H6","attempt_number":1,"worker_id":"w-1","started_at":"2024-01-15T10:05:01Z","duration_ms":50}',
-            "success",
+            json.dumps({"attempt_number": 1, "worker_id": "w-1", "started_at": base_ts + 301}),
+            "A007", "01H6", "completed",
         ),
         (
-            '{"job_ulid":"01H7","attempt_number":1,"worker_id":"w-2","started_at":"2024-01-15T10:06:01Z","correlation_id":"corr-007","error_message":"timeout","duration_ms":30000}',
-            "timeout",
+            json.dumps({"attempt_number": 1, "worker_id": "w-2", "started_at": base_ts + 361, "error": "timeout", "failure_kind": "lease_expired"}),
+            "A008", "01H7", "lease_expired",
         ),
         (
-            '{"job_ulid":"01H7","attempt_number":2,"worker_id":"w-1","started_at":"2024-01-15T10:06:30Z","correlation_id":"corr-007","error_message":"timeout","duration_ms":30000}',
-            "timeout",
+            json.dumps({"attempt_number": 2, "worker_id": "w-1", "started_at": base_ts + 390, "error": "timeout", "failure_kind": "lease_expired"}),
+            "A009", "01H7", "lease_expired",
         ),
         (
-            '{"job_ulid":"01H7","attempt_number":3,"worker_id":"w-3","started_at":"2024-01-15T10:07:00Z","correlation_id":"corr-007","error_message":"timeout","duration_ms":30000}',
-            "failure",
+            json.dumps({"attempt_number": 3, "worker_id": "w-3", "started_at": base_ts + 420, "error": "timeout", "failure_kind": "exception"}),
+            "A010", "01H7", "failed",
         ),
         (
-            '{"job_ulid":"01H8","attempt_number":1,"worker_id":"w-2","started_at":"2024-01-15T10:07:01Z","correlation_id":"corr-008","duration_ms":200}',
-            "success",
+            json.dumps({"attempt_number": 1, "worker_id": "w-2", "started_at": base_ts + 421}),
+            "A011", "01H8", "completed",
         ),
         (
-            '{"job_ulid":"01HA","attempt_number":1,"worker_id":"w-1","started_at":"2024-01-15T10:09:01Z","correlation_id":"corr-010","error_message":"crash","duration_ms":100}',
-            "failure",
+            json.dumps({"attempt_number": 1, "worker_id": "w-1", "started_at": base_ts + 541, "error": "crash", "failure_kind": "exception"}),
+            "A012", "01HA", "failed",
         ),
     ]
     conn.executemany(
-        "INSERT INTO job_attempts (data, outcome) VALUES (?, ?)",
+        "INSERT INTO qler_job_attempts (data, ulid, job_ulid, status) VALUES (?, ?, ?, ?)",
         attempts,
     )
 
@@ -257,18 +255,31 @@ class TestMergeSqlerRow:
 class TestQlerMappings:
     def test_qler_job_mapping(self):
         m = qler_job_mapping()
-        assert m.table == "jobs"
+        assert m.table == "qler_jobs"
+        assert m.timestamp_format == "epoch"
         assert m.level_map["failed"] == "ERROR"
-        assert m.level_map["success"] == "INFO"
+        assert m.level_map["completed"] == "INFO"
+        assert "claimed" not in m.level_map
+        assert "success" not in m.level_map
+        assert "dead" not in m.level_map
         assert m.correlation_id_field == "correlation_id"
         assert "ulid" in m.extra_fields
+        assert "task" in m.extra_fields
+        assert "queue_name" in m.extra_fields
+        assert "attempts" in m.extra_fields
 
     def test_qler_attempt_mapping(self):
         m = qler_attempt_mapping()
-        assert m.table == "job_attempts"
-        assert m.level_map["failure"] == "ERROR"
-        assert m.level_map["timeout"] == "WARN"
+        assert m.table == "qler_job_attempts"
+        assert m.timestamp_format == "epoch"
+        assert m.level_field == "status"
+        assert m.level_map["failed"] == "ERROR"
+        assert m.level_map["lease_expired"] == "WARN"
+        assert m.level_map["completed"] == "INFO"
+        assert m.correlation_id_field is None
         assert "job_ulid" in m.extra_fields
+        assert "error" in m.extra_fields
+        assert "failure_kind" in m.extra_fields
 
 
 class TestDbToJsonl:
@@ -303,10 +314,10 @@ class TestDbToJsonl:
         try:
             mappings = _auto_detect_mappings(conn)
             table_names = {m.table for m in mappings}
-            assert "jobs" in table_names
-            assert "job_attempts" in table_names
+            assert "qler_jobs" in table_names
+            assert "qler_job_attempts" in table_names
 
-            jobs_mapping = next(m for m in mappings if m.table == "jobs")
+            jobs_mapping = next(m for m in mappings if m.table == "qler_jobs")
             assert jobs_mapping.level_map is not None
             assert jobs_mapping.level_map["failed"] == "ERROR"
         finally:
@@ -341,21 +352,24 @@ class TestDbToJsonl:
             os.unlink(path)
 
     def test_job_level_mapping(self, qler_test_db: str):
-        """Failed/dead jobs map to ERROR, cancelled to WARN."""
+        """Failed jobs map to ERROR, cancelled to WARN."""
         path = db_to_jsonl(qler_test_db, [qler_job_mapping()])
         try:
             with open(path) as f:
                 entries = [json.loads(line) for line in f]
 
-            level_counts = {}
+            level_counts: dict[str, int] = {}
             for e in entries:
                 level_counts[e["level"]] = level_counts.get(e["level"], 0) + 1
 
-            # 2 failed + 1 dead = 3 ERROR
+            # 3 failed = 3 ERROR
             assert level_counts.get("ERROR", 0) == 3
             # 1 cancelled = 1 WARN
             assert level_counts.get("WARN", 0) == 1
-            # 4 success + 1 pending + 1 running = 6 INFO
+            # 3 completed + 1 pending + 1 running = 5 INFO
+            # cleanup_temp (completed) makes it 3 completed total + pending + running = 5
+            # Wait: 01H1=completed, 01H2=completed, 01H4=pending, 01H5=running,
+            # 01H6=completed, 01H8=completed = 4 completed + 1 pending + 1 running = 6 INFO
             assert level_counts.get("INFO", 0) == 6
         finally:
             os.unlink(path)
@@ -371,14 +385,51 @@ class TestDbToJsonl:
         finally:
             os.unlink(path)
 
+    def test_epoch_timestamps_converted(self, qler_test_db: str):
+        """Epoch integer timestamps are converted to ISO 8601 strings."""
+        path = db_to_jsonl(qler_test_db, [qler_job_mapping()])
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+
+            assert len(entries) == 10
+            for e in entries:
+                # Should be ISO format after conversion from epoch
+                assert "T" in e["timestamp"]
+                assert "+" in e["timestamp"] or "Z" in e["timestamp"]
+        finally:
+            os.unlink(path)
+
+    def test_attempt_status_mapping(self, qler_test_db: str):
+        """Attempt statuses map to correct log levels."""
+        path = db_to_jsonl(qler_test_db, [qler_attempt_mapping()])
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+
+            assert len(entries) == 12
+            level_counts: dict[str, int] = {}
+            for e in entries:
+                level_counts[e["level"]] = level_counts.get(e["level"], 0) + 1
+
+            # 4 failed + 1 failed (01H7 attempt 3) + 1 failed (01HA) = 5 failed -> ERROR
+            # Actually: A003=failed, A004=failed, A005=failed, A010=failed, A012=failed = 5 ERROR
+            assert level_counts.get("ERROR", 0) == 5
+            # A008=lease_expired, A009=lease_expired = 2 WARN
+            assert level_counts.get("WARN", 0) == 2
+            # A001=completed, A002=completed, A006=running, A007=completed, A011=completed = 5 INFO
+            assert level_counts.get("INFO", 0) == 5
+        finally:
+            os.unlink(path)
+
     def test_explicit_mapping(self, qler_test_db: str):
         """Using explicit mappings works correctly."""
         mapping = DbTableMapping(
-            table="jobs",
+            table="qler_jobs",
             timestamp_field="created_at",
-            timestamp_format="iso",
+            timestamp_format="epoch",
             level_field=None,
-            message_template="custom: {task_name}",
+            message_template="custom: {task}",
             service_name="test-svc",
         )
         path = db_to_jsonl(qler_test_db, [mapping])
@@ -409,8 +460,8 @@ class TestInvestigatorDbIntegration:
 
         results = inv.search(level="ERROR")
         entries = results.get("results", [])
-        # 2 failed + 1 dead jobs + 4 failed/timeout attempts = 7+ ERROR entries
-        assert len(entries) >= 7
+        # 3 failed jobs + 5 failed/expired attempts = 8 ERROR entries
+        assert len(entries) == 8
 
         inv.close()
 
@@ -420,14 +471,15 @@ class TestInvestigatorDbIntegration:
 
         results = search_db(qler_test_db, level="ERROR")
         entries = results.get("results", [])
-        assert len(entries) >= 7
+        assert len(entries) == 8
 
     def test_search_db_by_correlation(self, qler_test_db: str):
         from logler.investigate import search_db
 
         results = search_db(qler_test_db, correlation_id="corr-003")
         entries = results.get("results", [])
-        assert len(entries) >= 1
+        # Only job entries have correlation_id; attempts don't (correlation_id_field=None)
+        assert len(entries) == 1
         for item in entries:
             assert item["entry"].get("correlation_id") == "corr-003"
 

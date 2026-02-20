@@ -1,8 +1,8 @@
 """Read sqler SQLite databases as a logler data source.
 
 Converts rows from sqler tables into JSONL that logler's Rust parser can
-ingest. Works with any sqler database; auto-detects qler tables (``jobs``,
-``job_attempts``) and applies smart defaults.
+ingest. Works with any sqler database; auto-detects qler tables (``qler_jobs``,
+``qler_job_attempts``) and applies smart defaults.
 
 Example::
 
@@ -63,54 +63,52 @@ class DbTableMapping:
 
 
 def qler_job_mapping() -> DbTableMapping:
-    """Pre-built mapping for qler's ``jobs`` table."""
+    """Pre-built mapping for qler's ``qler_jobs`` table."""
     return DbTableMapping(
-        table="jobs",
+        table="qler_jobs",
         timestamp_field="created_at",
-        timestamp_format="iso",
+        timestamp_format="epoch",
         level_field="status",
         level_map={
             "pending": "INFO",
-            "claimed": "INFO",
             "running": "INFO",
-            "success": "INFO",
+            "completed": "INFO",
             "failed": "ERROR",
-            "dead": "ERROR",
             "cancelled": "WARN",
         },
-        message_template="[job] {task_name} ({ulid}) status={status}",
+        message_template="[job] {task} ({ulid}) status={status}",
         correlation_id_field="correlation_id",
-        extra_fields=["queue", "priority", "attempt_count", "task_name", "ulid"],
+        extra_fields=["queue_name", "priority", "attempts", "task", "ulid"],
         service_name="qler",
         id_field="ulid",
     )
 
 
 def qler_attempt_mapping() -> DbTableMapping:
-    """Pre-built mapping for qler's ``job_attempts`` table."""
+    """Pre-built mapping for qler's ``qler_job_attempts`` table."""
     return DbTableMapping(
-        table="job_attempts",
+        table="qler_job_attempts",
         timestamp_field="started_at",
-        timestamp_format="iso",
-        level_field="outcome",
+        timestamp_format="epoch",
+        level_field="status",
         level_map={
-            "success": "INFO",
-            "failure": "ERROR",
-            "timeout": "WARN",
-            "retry": "WARN",
+            "running": "INFO",
+            "completed": "INFO",
+            "failed": "ERROR",
+            "lease_expired": "WARN",
         },
-        message_template="[attempt] job={job_ulid} attempt={attempt_number} outcome={outcome}",
-        correlation_id_field="correlation_id",
+        message_template="[attempt] job={job_ulid} attempt={attempt_number} status={status}",
+        correlation_id_field=None,
         extra_fields=[
             "job_ulid",
             "attempt_number",
             "worker_id",
-            "outcome",
-            "error_message",
-            "duration_ms",
+            "status",
+            "error",
+            "failure_kind",
         ],
         service_name="qler",
-        id_field=None,
+        id_field="ulid",
     )
 
 
@@ -312,9 +310,9 @@ def _auto_detect_mappings(conn: sqlite3.Connection) -> list[DbTableMapping]:
 
     mappings = []
     for table in tables:
-        if table == "jobs":
+        if table == "qler_jobs":
             mappings.append(qler_job_mapping())
-        elif table == "job_attempts":
+        elif table == "qler_job_attempts":
             mappings.append(qler_attempt_mapping())
         else:
             # Generic mapping for unknown sqler tables
