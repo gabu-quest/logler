@@ -64,7 +64,7 @@ def correlation_context(correlation_id: str, otel_bridge: bool = False):
 
                 ctx = baggage.set_baggage("correlation_id", correlation_id)
                 otel_token = context.attach(ctx)
-            except ImportError:
+            except Exception:
                 pass
         yield correlation_id
     finally:

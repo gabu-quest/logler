@@ -25,8 +25,14 @@ import json
 import os
 import sqlite3
 import tempfile
+import urllib.parse
 from datetime import datetime, timezone
 from typing import Optional
+
+
+def _safe_identifier(name: str) -> str:
+    """Return a safely double-quoted SQL identifier."""
+    return '"' + name.replace('"', '""') + '"'
 
 
 @dataclasses.dataclass
@@ -133,7 +139,8 @@ def db_to_jsonl(
     Raises:
         ValueError: If the database has no tables or is empty.
     """
-    uri = f"file:{db_path}?mode=ro"
+    safe_path = urllib.parse.quote(os.path.abspath(db_path), safe="/")
+    uri = f"file:{safe_path}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
 
@@ -167,7 +174,10 @@ def db_to_jsonl(
                 tmp.write(json.dumps(entry) + "\n")
         except Exception:
             tmp.close()
-            os.unlink(tmp.name)
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
             raise
         finally:
             tmp.close()
@@ -191,14 +201,14 @@ def _read_sqler_table(
         raise ValueError(f"Table '{mapping.table}' not found in database")
 
     # Discover columns
-    cursor = conn.execute(f'PRAGMA table_info("{mapping.table}")')
+    cursor = conn.execute(f"PRAGMA table_info({_safe_identifier(mapping.table)})")
     columns = [row[1] for row in cursor.fetchall()]
 
     if not columns:
         return []
 
     # Read rows ordered by _id
-    cursor = conn.execute(f'SELECT * FROM "{mapping.table}" ORDER BY _id')
+    cursor = conn.execute(f"SELECT * FROM {_safe_identifier(mapping.table)} ORDER BY _id")
     rows = cursor.fetchall()
 
     entries = []
@@ -329,7 +339,7 @@ def _auto_detect_mappings(conn: sqlite3.Connection) -> list[DbTableMapping]:
             mappings.append(qler_attempt_mapping())
         else:
             # Generic mapping for unknown sqler tables
-            columns = [row[1] for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()]
+            columns = [row[1] for row in conn.execute(f"PRAGMA table_info({_safe_identifier(table)})").fetchall()]
             # Try to guess reasonable defaults
             ts_field = "created_at"
             if "created_at" not in columns:
