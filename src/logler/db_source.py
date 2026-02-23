@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
@@ -164,6 +165,10 @@ def db_to_jsonl(
         try:
             for entry in all_entries:
                 tmp.write(json.dumps(entry) + "\n")
+        except Exception:
+            tmp.close()
+            os.unlink(tmp.name)
+            raise
         finally:
             tmp.close()
 
@@ -177,6 +182,14 @@ def _read_sqler_table(
     mapping: DbTableMapping,
 ) -> list[dict]:
     """Read all rows from a sqler table and convert to log entries."""
+    # Validate table exists (parameterized query — safe from injection)
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (mapping.table,),
+    ).fetchone()
+    if exists is None:
+        raise ValueError(f"Table '{mapping.table}' not found in database")
+
     # Discover columns
     cursor = conn.execute(f'PRAGMA table_info("{mapping.table}")')
     columns = [row[1] for row in cursor.fetchall()]

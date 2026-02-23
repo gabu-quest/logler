@@ -7,6 +7,7 @@ import io
 import json
 import logging
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -257,3 +258,146 @@ class TestAsyncIsolation:
 
         assert results["task_a"] == ["aaa", "aaa"]
         assert results["task_b"] == ["bbb", "bbb"]
+
+
+# ---------------------------------------------------------------------------
+# IMP-2: JsonHandler robustness (consecutive error tracking)
+# ---------------------------------------------------------------------------
+
+
+class TestJsonHandlerRobustness:
+    def _make_record(self, msg: str = "test") -> logging.LogRecord:
+        return logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg=msg, args=(), exc_info=None,
+        )
+
+    def test_emit_resets_consecutive_errors(self):
+        buf = io.StringIO()
+        handler = JsonHandler(stream=buf)
+        handler.emit(self._make_record())
+        assert handler._consecutive_errors == 0
+        assert handler.degraded is False
+
+    def test_emit_tracks_consecutive_errors(self):
+        """Broken stream increments error counter and sets degraded."""
+        buf = MagicMock()
+        buf.write = MagicMock(side_effect=OSError("disk full"))
+        handler = JsonHandler(stream=buf)
+
+        for _ in range(5):
+            handler.emit(self._make_record())
+
+        assert handler._consecutive_errors == 5
+        assert handler.degraded is True
+
+    def test_emit_stops_calling_handle_error_after_3(self):
+        """handleError is called at most 3 times, then suppressed."""
+        buf = MagicMock()
+        buf.write = MagicMock(side_effect=OSError("broken pipe"))
+        handler = JsonHandler(stream=buf)
+        handler.handleError = MagicMock()
+
+        for _ in range(5):
+            handler.emit(self._make_record())
+
+        assert handler.handleError.call_count == 3
+
+    def test_degraded_resets_on_success(self):
+        """Successful emit after failures resets degraded state."""
+        buf = io.StringIO()
+        handler = JsonHandler(stream=buf)
+
+        # Force a failure
+        handler._consecutive_errors = 2
+        assert handler.degraded is True
+
+        # Successful emit resets
+        handler.emit(self._make_record())
+        assert handler._consecutive_errors == 0
+        assert handler.degraded is False
+
+    def test_flush_failure_increments_errors(self):
+        """flush() failure also triggers error tracking."""
+        buf = MagicMock()
+        buf.write = MagicMock(return_value=None)
+        buf.flush = MagicMock(side_effect=BrokenPipeError("broken pipe"))
+        handler = JsonHandler(stream=buf)
+        handler.handleError = MagicMock()
+
+        handler.emit(self._make_record())
+        assert handler._consecutive_errors == 1
+        assert handler.degraded is True
+        assert handler.handleError.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# IMP-4: OTel bridge for correlation_context
+# ---------------------------------------------------------------------------
+
+
+class TestOtelBridge:
+    def test_otel_bridge_false_default(self):
+        """Default behavior unchanged — no OTel imports."""
+        with correlation_context("job-123") as cid:
+            assert cid == "job-123"
+            assert get_correlation_id() == "job-123"
+        assert get_correlation_id() is None
+
+    def test_otel_bridge_without_otel_installed(self):
+        """otel_bridge=True gracefully handles missing opentelemetry."""
+        with patch.dict("sys.modules", {"opentelemetry": None}):
+            with correlation_context("job-456", otel_bridge=True) as cid:
+                assert cid == "job-456"
+                assert get_correlation_id() == "job-456"
+        assert get_correlation_id() is None
+
+    def test_otel_bridge_with_mock_otel(self):
+        """When opentelemetry is available, baggage is set and detached."""
+        mock_baggage = MagicMock()
+        mock_context = MagicMock()
+        mock_ctx = MagicMock()
+        mock_token = MagicMock()
+
+        mock_baggage.set_baggage = MagicMock(return_value=mock_ctx)
+        mock_context.attach = MagicMock(return_value=mock_token)
+
+        # The production code does `from opentelemetry import baggage, context`
+        # lazily inside the if-block, so patching sys.modules is sufficient.
+        with patch.dict("sys.modules", {
+            "opentelemetry": MagicMock(baggage=mock_baggage, context=mock_context),
+            "opentelemetry.baggage": mock_baggage,
+            "opentelemetry.context": mock_context,
+        }):
+            with correlation_context("job-789", otel_bridge=True) as cid:
+                assert cid == "job-789"
+                mock_baggage.set_baggage.assert_called_once_with(
+                    "correlation_id", "job-789"
+                )
+                mock_context.attach.assert_called_once_with(mock_ctx)
+
+            mock_context.detach.assert_called_once_with(mock_token)
+
+    def test_otel_bridge_detaches_on_exception(self):
+        """OTel context.detach() is called even when body raises."""
+        mock_baggage = MagicMock()
+        mock_context = MagicMock()
+        mock_ctx = MagicMock()
+        mock_token = MagicMock()
+
+        mock_baggage.set_baggage = MagicMock(return_value=mock_ctx)
+        mock_context.attach = MagicMock(return_value=mock_token)
+
+        with patch.dict("sys.modules", {
+            "opentelemetry": MagicMock(baggage=mock_baggage, context=mock_context),
+            "opentelemetry.baggage": mock_baggage,
+            "opentelemetry.context": mock_context,
+        }):
+            with pytest.raises(RuntimeError, match="boom"):
+                with correlation_context("job-explode", otel_bridge=True):
+                    raise RuntimeError("boom")
+
+            # detach must still be called despite the exception
+            mock_context.detach.assert_called_once_with(mock_token)
+        # correlation_id must also be reset
+        assert get_correlation_id() is None

@@ -508,3 +508,117 @@ class TestInvestigatorDbIntegration:
 
         with pytest.raises(ValueError, match="No rows found"):
             db_to_jsonl(db_path)
+
+
+# ---------------------------------------------------------------------------
+# IMP-1: Table name validation
+# ---------------------------------------------------------------------------
+
+
+class TestTableNameValidation:
+    """Explicit mappings with non-existent table names raise ValueError."""
+
+    def test_nonexistent_table_raises(self, qler_test_db: str):
+        """Completely unknown table name gives clear error."""
+        mapping = DbTableMapping(
+            table="nonexistent",
+            timestamp_field="created_at",
+            timestamp_format="iso",
+            message_template="{nonexistent} row {_id}",
+            service_name="test",
+        )
+        with pytest.raises(ValueError, match="Table 'nonexistent' not found"):
+            db_to_jsonl(qler_test_db, mappings=[mapping])
+
+    def test_typo_table_raises(self, qler_test_db: str):
+        """Plausible typo (missing 's') gives clear error instead of silent empty."""
+        mapping = DbTableMapping(
+            table="qler_job",  # typo: should be qler_jobs
+            timestamp_field="created_at",
+            timestamp_format="iso",
+            message_template="{qler_job} row {_id}",
+            service_name="test",
+        )
+        with pytest.raises(ValueError, match="Table 'qler_job' not found"):
+            db_to_jsonl(qler_test_db, mappings=[mapping])
+
+
+# ---------------------------------------------------------------------------
+# IMP-3: Temp file cleanup on error + context manager
+# ---------------------------------------------------------------------------
+
+
+class TestTempFileCleanup:
+    """Temp files are cleaned up even when exceptions occur."""
+
+    def test_db_to_jsonl_cleans_temp_on_write_error(self, qler_test_db: str, tmp_path, monkeypatch):
+        """If json.dumps raises during JSONL write, temp file is deleted."""
+        import tempfile as tmp_mod
+
+        # Control where the temp file goes so we can assert precisely
+        controlled_path = str(tmp_path / "should_be_deleted.jsonl")
+        original_ntf = tmp_mod.NamedTemporaryFile
+
+        def patched_ntf(**kwargs):
+            kwargs.pop("suffix", None)
+            kwargs.pop("delete", None)
+            return open(controlled_path, kwargs.get("mode", "w"), encoding=kwargs.get("encoding", "utf-8"))
+
+        # Patch NamedTemporaryFile to return a file at our controlled path
+        mock_file = open(controlled_path, "w", encoding="utf-8")
+        mock_file.close()
+
+        call_count = 0
+        original_dumps = json.dumps
+
+        def failing_dumps(obj, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count > 2:
+                raise RuntimeError("simulated serialization failure")
+            return original_dumps(obj, **kwargs)
+
+        monkeypatch.setattr(json, "dumps", failing_dumps)
+
+        class FakeTemp:
+            def __init__(self, **kwargs):
+                self._f = open(controlled_path, "w", encoding="utf-8")
+                self.name = controlled_path
+
+            def write(self, data):
+                return self._f.write(data)
+
+            def close(self):
+                self._f.close()
+
+        monkeypatch.setattr(tmp_mod, "NamedTemporaryFile", FakeTemp)
+
+        with pytest.raises(RuntimeError, match="simulated serialization failure"):
+            db_to_jsonl(qler_test_db)
+
+        assert not os.path.exists(controlled_path), "Temp file leaked after write error"
+
+    def test_investigator_context_manager(self, qler_test_db: str):
+        """Investigator as context manager cleans up temp files."""
+        from logler.investigate import Investigator
+
+        with Investigator() as inv:
+            inv.load_from_db(qler_test_db)
+            temp_files = list(inv._db_temp_files)
+            assert len(temp_files) == 1
+            assert os.path.exists(temp_files[0])
+
+        # After exiting context, temp files are gone
+        assert not os.path.exists(temp_files[0])
+
+    def test_investigator_context_manager_on_exception(self, qler_test_db: str):
+        """Temp files cleaned up even when exception inside context."""
+        from logler.investigate import Investigator
+
+        with pytest.raises(RuntimeError, match="boom"):
+            with Investigator() as inv:
+                inv.load_from_db(qler_test_db)
+                temp_files = list(inv._db_temp_files)
+                raise RuntimeError("boom")
+
+        assert not os.path.exists(temp_files[0])
