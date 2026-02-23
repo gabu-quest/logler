@@ -1,4 +1,4 @@
-"""Tests for the --db flag on `logler llm search`."""
+"""Tests for the --db flag on LLM CLI commands."""
 
 from __future__ import annotations
 
@@ -29,13 +29,19 @@ def run_llm_command(args, timeout=60):
 
 @pytest.fixture()
 def qler_test_db(tmp_path: Path) -> str:
-    """Create a temp SQLite DB with sqler-style tables and sample data."""
+    """Create a temp SQLite DB with qler_jobs table and sample data.
+
+    3 jobs:
+      - send_email: completed (INFO), corr-123
+      - process_image: failed (ERROR), corr-456
+      - generate_report: pending (INFO), corr-789
+    """
     db_path = str(tmp_path / "test_qler.db")
     conn = sqlite3.connect(db_path)
 
     conn.execute(
         """
-        CREATE TABLE jobs (
+        CREATE TABLE qler_jobs (
             _id INTEGER PRIMARY KEY AUTOINCREMENT,
             data JSON NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
@@ -47,26 +53,50 @@ def qler_test_db(tmp_path: Path) -> str:
 
     jobs = [
         (
-            '{"task_name":"send_email","queue":"default","ulid":"01H1","correlation_id":"corr-123","created_at":"2024-01-15T10:00:00Z"}',
-            "success",
+            json.dumps(
+                {
+                    "task": "send_email",
+                    "queue_name": "default",
+                    "ulid": "01H1",
+                    "correlation_id": "corr-123",
+                    "created_at": 1705312800,
+                }
+            ),
+            "completed",
             0,
             1,
         ),
         (
-            '{"task_name":"process_image","queue":"media","ulid":"01H2","correlation_id":"corr-456","created_at":"2024-01-15T10:01:00Z"}',
+            json.dumps(
+                {
+                    "task": "process_image",
+                    "queue_name": "media",
+                    "ulid": "01H2",
+                    "correlation_id": "corr-456",
+                    "created_at": 1705312860,
+                }
+            ),
             "failed",
             5,
             3,
         ),
         (
-            '{"task_name":"generate_report","queue":"default","ulid":"01H3","correlation_id":"corr-789","created_at":"2024-01-15T10:02:00Z"}',
+            json.dumps(
+                {
+                    "task": "generate_report",
+                    "queue_name": "default",
+                    "ulid": "01H3",
+                    "correlation_id": "corr-789",
+                    "created_at": 1705312920,
+                }
+            ),
             "pending",
             0,
             0,
         ),
     ]
     conn.executemany(
-        "INSERT INTO jobs (data, status, priority, attempt_count) VALUES (?, ?, ?, ?)",
+        "INSERT INTO qler_jobs (data, status, priority, attempt_count) VALUES (?, ?, ?, ?)",
         jobs,
     )
     conn.commit()
@@ -80,9 +110,7 @@ class TestSearchDbFlag:
         result = run_llm_command(["search", "--db", qler_test_db])
         assert result.returncode == EXIT_SUCCESS
         output = json.loads(result.stdout)
-        # 3 jobs in fixture
         assert output["summary"]["total_matches"] == 3
-        # Verify actual job data came through
         messages = [e["message"] for e in output["results"]]
         assert any("send_email" in m for m in messages)
         assert any("process_image" in m for m in messages)
@@ -92,21 +120,100 @@ class TestSearchDbFlag:
         result = run_llm_command(["search", "--db", qler_test_db, "--level", "ERROR"])
         assert result.returncode == EXIT_SUCCESS
         output = json.loads(result.stdout)
-        # 1 failed job in fixture -> 1 ERROR
         assert output["summary"]["total_matches"] == 1
-        for entry in output["results"]:
-            assert entry["level"] == "ERROR"
+        assert len(output["results"]) == 1
+        assert output["results"][0]["level"] == "ERROR"
 
     def test_search_db_correlation(self, qler_test_db: str):
         """--db --correlation filters by correlation ID."""
-        result = run_llm_command(["search", "--db", qler_test_db, "--correlation", "corr-123"])
+        result = run_llm_command(
+            ["search", "--db", qler_test_db, "--correlation", "corr-123"]
+        )
         assert result.returncode == EXIT_SUCCESS
         output = json.loads(result.stdout)
-        assert output["summary"]["total_matches"] >= 1
-        for entry in output["results"]:
-            assert entry.get("correlation_id") == "corr-123"
+        assert output["summary"]["total_matches"] == 1
+        assert output["results"][0]["correlation_id"] == "corr-123"
 
     def test_no_files_no_db_error(self):
         """Exit code 2 when neither FILES nor --db provided."""
         result = run_llm_command(["search"])
+        assert result.returncode == EXIT_USER_ERROR
+
+
+class TestDbFlagUniversal:
+    """Test that --db works across multiple LLM CLI commands."""
+
+    def test_schema_db(self, qler_test_db: str):
+        """schema --db returns field info from database."""
+        result = run_llm_command(["schema", "--db", qler_test_db])
+        assert result.returncode == EXIT_SUCCESS
+        output = json.loads(result.stdout)
+        assert output["total_entries"] == 3
+        assert output["files_analyzed"] == 1
+
+    def test_ids_db(self, qler_test_db: str):
+        """ids --db discovers IDs from database."""
+        result = run_llm_command(["ids", "--db", qler_test_db])
+        assert result.returncode == EXIT_SUCCESS
+        output = json.loads(result.stdout)
+        assert len(output.get("thread_ids", [])) >= 1
+
+    def test_sample_db(self, qler_test_db: str):
+        """sample --db returns entries from database."""
+        result = run_llm_command(
+            ["sample", "--db", qler_test_db, "--strategy", "head", "--size", "10"]
+        )
+        assert result.returncode == EXIT_SUCCESS
+        output = json.loads(result.stdout)
+        assert len(output["entries"]) == 3
+
+    def test_triage_db(self, qler_test_db: str):
+        """triage --db assesses severity from database."""
+        result = run_llm_command(["triage", "--db", qler_test_db])
+        assert result.returncode == EXIT_SUCCESS
+        output = json.loads(result.stdout)
+        assert output["metrics"]["total_entries"] == 3
+        assert output["metrics"]["error_count"] == 1
+
+    def test_summarize_db(self, qler_test_db: str):
+        """summarize --db produces summary from database."""
+        result = run_llm_command(["summarize", "--db", qler_test_db])
+        assert result.returncode == EXIT_SUCCESS
+        output = json.loads(result.stdout)
+        assert output["stats"]["total_entries"] == 3
+
+    def test_detect_db(self, qler_test_db: str):
+        """detect --db auto-detects format from database JSONL."""
+        result = run_llm_command(["detect", "--db", qler_test_db])
+        assert result.returncode == EXIT_SUCCESS
+
+    def test_metrics_db(self, qler_test_db: str):
+        """metrics --db extracts numeric values from database."""
+        result = run_llm_command(["metrics", "--db", qler_test_db])
+        assert result.returncode in (EXIT_SUCCESS, EXIT_NO_RESULTS)
+
+    def test_templates_db(self, qler_test_db: str):
+        """templates --db mines patterns from database."""
+        result = run_llm_command(["templates", "--db", qler_test_db])
+        assert result.returncode in (EXIT_SUCCESS, EXIT_NO_RESULTS)
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            ["schema"],
+            ["ids"],
+            ["sample"],
+            ["triage"],
+            ["summarize"],
+            ["metrics"],
+            ["detect"],
+            ["templates"],
+            ["verify-pattern", "--pattern", "test"],
+            ["emit"],
+            ["diff"],
+        ],
+    )
+    def test_no_files_no_db_gives_exit_2(self, cmd):
+        """Commands with argument-based FILES give exit 2 with no input."""
+        result = run_llm_command(cmd)
         assert result.returncode == EXIT_USER_ERROR
