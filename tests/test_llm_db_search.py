@@ -260,26 +260,42 @@ class TestSessionDb:
         assert query_result.returncode == EXIT_SUCCESS, query_result.stderr
         output = json.loads(query_result.stdout)
         assert output["total_matches"] == 3
+        assert len(output["results"]) == 3
+        # Verify actual content from the fixture
+        entries = [r.get("entry", r) for r in output["results"]]
+        levels = [e["level"] for e in entries]
+        assert "ERROR" in levels
+        messages = [e["message"] for e in entries]
+        assert any("process_image" in m for m in messages)
 
     def test_session_query_db_override(self, qler_test_db: str, tmp_path: Path):
         """session query --db overrides stored session files."""
         env = {"HOME": str(tmp_path)}
-        # Create a session with no DB (use a dummy log file)
+        # Create a session with a dummy log file containing a sentinel
         dummy_log = tmp_path / "dummy.log"
-        dummy_log.write_text("")
+        dummy_log.write_text(
+            '{"timestamp":"2024-01-15T10:00:00Z","level":"WARN","message":"DUMMY_SENTINEL"}\n'
+        )
         create_result = run_llm_command(
             ["session", "create", "-f", str(dummy_log)], env=env
         )
         assert create_result.returncode == EXIT_SUCCESS, create_result.stderr
         session_id = json.loads(create_result.stdout)["session_id"]
 
-        # Query with --db override
+        # Query with --db override — should include DB data + dummy file
         query_result = run_llm_command(
             ["session", "query", session_id, "--db", qler_test_db], env=env
         )
         assert query_result.returncode == EXIT_SUCCESS, query_result.stderr
         output = json.loads(query_result.stdout)
-        assert output["total_matches"] == 3
+        # DB has 3 entries + dummy file has 1 = 4 total
+        assert output["total_matches"] == 4
+        entries = [r.get("entry", r) for r in output["results"]]
+        messages = [e["message"] for e in entries]
+        # DB entries present
+        assert any("send_email" in m for m in messages)
+        # Dummy file entry also present (override adds to session files)
+        assert any("DUMMY_SENTINEL" in m for m in messages)
 
     def test_session_correlation_tracking(self, qler_test_db: str, tmp_path: Path):
         """session query tracks correlation IDs in session JSON."""
@@ -323,3 +339,26 @@ class TestSessionDb:
         sess = output["sessions"][0]
         assert sess["has_db"] is True
         assert sess["correlation_count"] == 3
+
+    def test_session_query_missing_session(self, tmp_path: Path):
+        """Querying a nonexistent session returns exit 2."""
+        env = {"HOME": str(tmp_path)}
+        result = run_llm_command(["session", "query", "sess_doesnotexist"], env=env)
+        assert result.returncode == EXIT_USER_ERROR
+        error = json.loads(result.stdout)
+        assert "sess_doesnotexist" in error["error"]
+
+    def test_session_list_file_session_has_db_false(self, tmp_path: Path):
+        """File-backed session shows has_db=False."""
+        env = {"HOME": str(tmp_path)}
+        dummy = tmp_path / "dummy.log"
+        dummy.write_text(
+            '{"timestamp":"2024-01-15T10:00:00Z","level":"INFO","message":"x"}\n'
+        )
+        run_llm_command(["session", "create", "-f", str(dummy)], env=env)
+        result = run_llm_command(["session", "list"], env=env)
+        assert result.returncode == EXIT_SUCCESS
+        sessions = json.loads(result.stdout)["sessions"]
+        assert len(sessions) == 1
+        assert sessions[0]["has_db"] is False
+        assert sessions[0]["correlation_count"] == 0

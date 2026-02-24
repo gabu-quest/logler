@@ -136,6 +136,8 @@ def session_list(pretty: bool):
         _output_json({"sessions": sessions}, pretty)
         sys.exit(EXIT_SUCCESS)
 
+    except SystemExit:
+        raise
     except Exception as e:
         _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
 
@@ -237,6 +239,8 @@ def session_note(session_id: str, text: str, pretty: bool):
         _output_json({"status": "ok", "note": note_entry}, pretty)
         sys.exit(EXIT_SUCCESS)
 
+    except SystemExit:
+        raise
     except Exception as e:
         _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
 
@@ -292,5 +296,7 @@ def session_conclude(
         _output_json(output, pretty)
         sys.exit(EXIT_SUCCESS)
 
+    except SystemExit:
+        raise
     except Exception as e:
         _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
