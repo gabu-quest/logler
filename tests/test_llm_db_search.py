@@ -161,7 +161,11 @@ class TestDbFlagUniversal:
         result = run_llm_command(["ids", "--db", qler_test_db])
         assert result.returncode == EXIT_SUCCESS
         output = json.loads(result.stdout)
-        assert len(output.get("thread_ids", [])) >= 1
+        assert len(output["thread_ids"]) == 1
+        assert output["thread_ids"][0]["id"] == "qler_jobs"
+        assert len(output["correlation_ids"]) == 3
+        corr_ids = sorted(c["id"] for c in output["correlation_ids"])
+        assert corr_ids == ["corr-123", "corr-456", "corr-789"]
 
     def test_sample_db(self, qler_test_db: str):
         """sample --db returns entries from database."""
@@ -191,16 +195,34 @@ class TestDbFlagUniversal:
         """detect --db auto-detects format from database JSONL."""
         result = run_llm_command(["detect", "--db", qler_test_db])
         assert result.returncode == EXIT_SUCCESS
+        output = json.loads(result.stdout)
+        # db_to_jsonl produces JSON format
+        files = output["files"]
+        assert len(files) == 1
+        file_info = next(iter(files.values()))
+        assert file_info["format"] == "json"
+        assert file_info["confidence"] >= 0.9
+        assert file_info["sample_size"] == 3
 
     def test_metrics_db(self, qler_test_db: str):
         """metrics --db extracts numeric values from database."""
         result = run_llm_command(["metrics", "--db", qler_test_db])
-        assert result.returncode in (EXIT_SUCCESS, EXIT_NO_RESULTS)
+        assert result.returncode == EXIT_SUCCESS
+        output = json.loads(result.stdout)
+        assert "priority" in output["fields"]
+        priority = output["fields"]["priority"]
+        assert priority["count"] == 3
+        assert priority["stats"]["min"] == 0.0
+        assert priority["stats"]["max"] == 5.0
 
     def test_templates_db(self, qler_test_db: str):
         """templates --db mines patterns from database."""
         result = run_llm_command(["templates", "--db", qler_test_db])
-        assert result.returncode in (EXIT_SUCCESS, EXIT_NO_RESULTS)
+        assert result.returncode == EXIT_SUCCESS
+        output = json.loads(result.stdout)
+        assert output["total_lines"] == 3
+        assert output["unique_templates"] == 3
+        assert len(output["templates"]) == 3
 
     @pytest.mark.parametrize(
         "cmd",

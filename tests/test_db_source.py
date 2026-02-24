@@ -12,7 +12,10 @@ import pytest
 from logler.db_source import (
     DbTableMapping,
     _auto_detect_mappings,
+    _build_entry,
     _merge_sqler_row,
+    _normalize_timestamp,
+    _safe_format,
     db_to_jsonl,
     qler_attempt_mapping,
     qler_job_mapping,
@@ -244,12 +247,14 @@ class TestMergeSqlerRow:
         result = _merge_sqler_row(row, ["_id", "data", "status"])
         assert result["_id"] == 1
         assert result["status"] == "ok"
+        assert set(result.keys()) == {"_id", "status"}
 
     def test_json_array_data(self):
-        """Row where data is a JSON array instead of object."""
+        """Row where data is a JSON array instead of object — array is ignored."""
         row = {"_id": 1, "data": "[1, 2, 3]"}
         result = _merge_sqler_row(row, ["_id", "data"])
         assert result["_id"] == 1
+        assert set(result.keys()) == {"_id"}
 
 
 class TestQlerMappings:
@@ -289,12 +294,11 @@ class TestDbToJsonl:
             with open(path) as f:
                 lines = f.readlines()
 
-            assert len(lines) > 0
-            for line in lines:
-                entry = json.loads(line)
-                assert "timestamp" in entry
-                assert "level" in entry
-                assert "message" in entry
+            assert len(lines) == 22  # 10 jobs + 12 attempts
+            entry = json.loads(lines[0])
+            assert entry["level"] in ("INFO", "WARN", "ERROR")
+            assert entry["message"].startswith("[job]") or entry["message"].startswith("[attempt]")
+            assert "T" in entry["timestamp"]
         finally:
             os.unlink(path)
 
@@ -304,6 +308,7 @@ class TestDbToJsonl:
             with open(path) as f:
                 entries = [json.loads(line) for line in f]
 
+            assert len(entries) == 22
             timestamps = [e["timestamp"] for e in entries]
             assert timestamps == sorted(timestamps)
         finally:
@@ -313,13 +318,17 @@ class TestDbToJsonl:
         conn = sqlite3.connect(qler_test_db)
         try:
             mappings = _auto_detect_mappings(conn)
+            assert len(mappings) == 2
             table_names = {m.table for m in mappings}
-            assert "qler_jobs" in table_names
-            assert "qler_job_attempts" in table_names
+            assert table_names == {"qler_jobs", "qler_job_attempts"}
 
             jobs_mapping = next(m for m in mappings if m.table == "qler_jobs")
-            assert jobs_mapping.level_map is not None
             assert jobs_mapping.level_map["failed"] == "ERROR"
+            assert jobs_mapping.level_map["completed"] == "INFO"
+
+            attempts_mapping = next(m for m in mappings if m.table == "qler_job_attempts")
+            assert attempts_mapping.level_map["failed"] == "ERROR"
+            assert attempts_mapping.level_map["lease_expired"] == "WARN"
         finally:
             conn.close()
 
@@ -342,27 +351,19 @@ class TestDbToJsonl:
             db_to_jsonl(db_path)
 
     def test_readonly_access(self, qler_test_db: str):
-        """DB is opened in readonly mode — writes must fail."""
-        import urllib.parse
+        """DB is not modified by db_to_jsonl — verified by checksum."""
+        import hashlib
+
+        with open(qler_test_db, "rb") as f:
+            checksum_before = hashlib.md5(f.read()).hexdigest()
 
         path = db_to_jsonl(qler_test_db)
-        try:
-            assert os.path.exists(path)
-            assert os.path.getsize(path) > 0
-        finally:
-            os.unlink(path)
+        os.unlink(path)
 
-        # Verify the mode=ro URI actually rejects writes
-        safe = urllib.parse.quote(os.path.realpath(qler_test_db), safe="/")
-        conn = sqlite3.connect(f"file:{safe}?mode=ro", uri=True)
-        try:
-            with pytest.raises(sqlite3.OperationalError, match="readonly"):
-                conn.execute(
-                    "INSERT INTO qler_jobs (data, ulid, status, queue_name, priority) "
-                    "VALUES ('{}', 'XTEST', 'ok', 'q', 0)"
-                )
-        finally:
-            conn.close()
+        with open(qler_test_db, "rb") as f:
+            checksum_after = hashlib.md5(f.read()).hexdigest()
+
+        assert checksum_before == checksum_after
 
     def test_job_level_mapping(self, qler_test_db: str):
         """Failed jobs map to ERROR, cancelled to WARN."""
@@ -406,8 +407,10 @@ class TestDbToJsonl:
                 entries = [json.loads(line) for line in f]
 
             assert len(entries) == 10
+            # First entry: base_ts=1705312800 -> 2024-01-15T10:00:00+00:00
+            assert entries[0]["timestamp"] == "2024-01-15T10:00:00+00:00"
+            # All entries should be ISO 8601
             for e in entries:
-                # Should be ISO format after conversion from epoch
                 assert "T" in e["timestamp"]
                 assert "+" in e["timestamp"] or "Z" in e["timestamp"]
         finally:
@@ -472,9 +475,10 @@ class TestInvestigatorDbIntegration:
         inv.load_from_db(qler_test_db)
 
         results = inv.search(level="ERROR")
-        entries = results.get("results", [])
+        entries = results["results"]
         # 3 failed jobs + 5 failed/expired attempts = 8 ERROR entries
         assert len(entries) == 8
+        assert all(e["entry"]["level"] == "ERROR" for e in entries)
 
         inv.close()
 
@@ -483,8 +487,9 @@ class TestInvestigatorDbIntegration:
         from logler.investigate import search_db
 
         results = search_db(qler_test_db, level="ERROR")
-        entries = results.get("results", [])
+        entries = results["results"]
         assert len(entries) == 8
+        assert all(e["entry"]["level"] == "ERROR" for e in entries)
 
     def test_search_db_by_correlation(self, qler_test_db: str):
         from logler.investigate import search_db
@@ -635,3 +640,113 @@ class TestTempFileCleanup:
                 raise RuntimeError("boom")
 
         assert not os.path.exists(temp_files[0])
+
+
+# ---------------------------------------------------------------------------
+# Security: _RestrictedFormatter / _safe_format
+# ---------------------------------------------------------------------------
+
+
+class TestRestrictedFormatter:
+    """The restricted formatter must reject attribute/index access in templates."""
+
+    def test_rejects_attribute_access(self):
+        """Template with dot-notation attribute access raises ValueError."""
+        with pytest.raises(ValueError, match="Attribute/index access not allowed"):
+            _safe_format("{key.__class__}", {"key": "hello"})
+
+    def test_rejects_index_access(self):
+        """Template with bracket-notation index access raises ValueError."""
+        with pytest.raises(ValueError, match="Attribute/index access not allowed"):
+            _safe_format("{key[0]}", {"key": "hello"})
+
+    def test_rejects_deep_attribute_chain(self):
+        """Template with deep attribute chain raises ValueError."""
+        with pytest.raises(ValueError, match="Attribute/index access not allowed"):
+            _safe_format("{key.__class__.__mro__}", {"key": "hello"})
+
+    def test_missing_key_returns_placeholder(self):
+        """Missing keys return literal {key} placeholder instead of raising."""
+        result = _safe_format("{present} {missing}", {"present": "hi"})
+        assert result == "hi {missing}"
+
+    def test_normal_substitution_works(self):
+        """Normal key substitution works correctly."""
+        result = _safe_format("[job] {task} ({ulid}) status={status}", {
+            "task": "send_email", "ulid": "01H1", "status": "completed"
+        })
+        assert result == "[job] send_email (01H1) status=completed"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: timestamp normalization and entry building
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeTimestamp:
+    def test_epoch_seconds(self):
+        """Standard epoch seconds are converted to ISO 8601."""
+        result = _normalize_timestamp(1705312800, "epoch")
+        assert result == "2024-01-15T10:00:00+00:00"
+
+    def test_epoch_milliseconds(self):
+        """Millisecond epoch timestamps (>1e12) are auto-divided by 1000."""
+        result = _normalize_timestamp(1705312800000, "epoch")
+        assert result == "2024-01-15T10:00:00+00:00"
+
+    def test_iso_passthrough(self):
+        """ISO format timestamps are passed through as strings."""
+        result = _normalize_timestamp("2024-01-15T10:00:00Z", "iso")
+        assert result == "2024-01-15T10:00:00Z"
+
+    def test_invalid_epoch_returns_string(self):
+        """Non-numeric epoch values fall back to str()."""
+        result = _normalize_timestamp("not-a-number", "epoch")
+        assert result == "not-a-number"
+
+
+class TestBuildEntryFallbacks:
+    def test_missing_timestamp_uses_now(self):
+        """Row with no timestamp field gets a generated timestamp."""
+        mapping = DbTableMapping(
+            table="test", timestamp_field="ts", message_template="row {_id}"
+        )
+        entry = _build_entry({"_id": 1}, mapping, 0)
+        assert "T" in entry["timestamp"]
+        assert "+" in entry["timestamp"]
+
+    def test_bad_template_falls_back(self):
+        """Template that raises ValueError falls back to generic message."""
+        mapping = DbTableMapping(
+            table="test",
+            timestamp_field="ts",
+            timestamp_format="iso",
+            message_template="{field.__class__}",  # triggers restricted formatter
+        )
+        entry = _build_entry({"_id": 42, "ts": "2024-01-15T10:00:00Z", "field": "x"}, mapping, 0)
+        assert entry["message"] == "test row 42"
+
+    def test_no_level_map_uppercases_raw(self):
+        """With level_map=None, raw level value is uppercased."""
+        mapping = DbTableMapping(
+            table="test",
+            timestamp_field="ts",
+            timestamp_format="iso",
+            level_field="status",
+            level_map=None,
+            message_template="row {_id}",
+        )
+        entry = _build_entry({"_id": 1, "ts": "2024-01-15T10:00:00Z", "status": "warning"}, mapping, 0)
+        assert entry["level"] == "WARNING"
+
+    def test_no_level_field_defaults_info(self):
+        """With level_field=None, level defaults to INFO."""
+        mapping = DbTableMapping(
+            table="test",
+            timestamp_field="ts",
+            timestamp_format="iso",
+            level_field=None,
+            message_template="row {_id}",
+        )
+        entry = _build_entry({"_id": 1, "ts": "2024-01-15T10:00:00Z"}, mapping, 0)
+        assert entry["level"] == "INFO"
