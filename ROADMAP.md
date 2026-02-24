@@ -23,7 +23,8 @@
 - `session list` shows `has_db` and `correlation_count` fields
 - Security hardening: restricted template formatter, realpath, dir_okay=False
 
-### M-4: Human CLI DB Support ⬚
+### M-4: Human CLI DB Support ⏸️
 - `--db` support in human CLI (`cli.py`)
 - Rich terminal rendering of database-sourced data
 - Interactive database exploration
+- *Paused — GUI handled by logler-web package*
