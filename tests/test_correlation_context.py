@@ -336,6 +336,87 @@ class TestJsonHandlerRobustness:
 # ---------------------------------------------------------------------------
 
 
+class TestCorrelationFilterPreserveExplicit:
+    """CorrelationFilter must not overwrite explicitly-set correlation_id."""
+
+    def test_filter_preserves_explicit_correlation_id(self):
+        filt = CorrelationFilter()
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg="hello", args=(), exc_info=None,
+        )
+        record.correlation_id = "explicit-id"  # type: ignore[attr-defined]
+        with correlation_context("contextvar-id"):
+            filt.filter(record)
+        assert record.correlation_id == "explicit-id"  # type: ignore[attr-defined]
+
+    def test_filter_fills_when_not_set(self):
+        filt = CorrelationFilter()
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg="hello", args=(), exc_info=None,
+        )
+        with correlation_context("contextvar-id"):
+            filt.filter(record)
+        assert record.correlation_id == "contextvar-id"  # type: ignore[attr-defined]
+
+
+class TestJsonHandlerExtraFields:
+    """JsonHandler must forward extra fields to JSON output."""
+
+    def _make_handler_and_logger(self, stream: io.StringIO) -> logging.Logger:
+        handler = JsonHandler(stream=stream)
+        handler.addFilter(CorrelationFilter())
+        logger = logging.getLogger(f"test.extra.{id(stream)}")
+        logger.handlers.clear()
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        return logger
+
+    def test_extra_fields_forwarded(self):
+        buf = io.StringIO()
+        logger = self._make_handler_and_logger(buf)
+        logger.info("lifecycle", extra={"event": "job.enqueued", "job_id": "abc123", "queue": "default"})
+
+        entry = json.loads(buf.getvalue().strip())
+        assert entry["event"] == "job.enqueued"
+        assert entry["job_id"] == "abc123"
+        assert entry["queue"] == "default"
+
+    def test_non_serializable_extra_skipped(self):
+        buf = io.StringIO()
+        logger = self._make_handler_and_logger(buf)
+        logger.info("lifecycle", extra={"good": "value", "bad": object()})
+
+        entry = json.loads(buf.getvalue().strip())
+        assert entry["good"] == "value"
+        assert "bad" not in entry
+
+    def test_standard_attrs_not_duplicated(self):
+        """Standard LogRecord attrs should not leak into JSON output."""
+        buf = io.StringIO()
+        logger = self._make_handler_and_logger(buf)
+        logger.info("test")
+
+        entry = json.loads(buf.getvalue().strip())
+        # These standard attrs should NOT be in the output
+        assert "msg" not in entry
+        assert "args" not in entry
+        assert "lineno" not in entry
+        assert "pathname" not in entry
+
+    def test_extra_with_correlation_id(self):
+        """Extra correlation_id should take precedence over ContextVar."""
+        buf = io.StringIO()
+        logger = self._make_handler_and_logger(buf)
+        logger.info("lifecycle", extra={"correlation_id": "explicit", "event": "job.completed"})
+
+        entry = json.loads(buf.getvalue().strip())
+        assert entry["correlation_id"] == "explicit"
+        assert entry["event"] == "job.completed"
+
+
 class TestOtelBridge:
     def test_otel_bridge_false_default(self):
         """Default behavior unchanged — no OTel imports."""

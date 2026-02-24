@@ -93,8 +93,19 @@ class CorrelationFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.correlation_id = get_correlation_id()  # type: ignore[attr-defined]
+        if not getattr(record, "correlation_id", None):
+            record.correlation_id = get_correlation_id()  # type: ignore[attr-defined]
         return True
+
+
+_STANDARD_ATTRS = frozenset({
+    "name", "msg", "args", "created", "relativeCreated", "exc_info",
+    "exc_text", "stack_info", "lineno", "funcName", "pathname", "filename",
+    "module", "thread", "threadName", "process", "processName", "msecs",
+    "levelname", "levelno", "message", "asctime", "taskName",
+    # Our own fields handled explicitly:
+    "correlation_id", "trace_id",
+})
 
 
 class JsonHandler(logging.Handler):
@@ -160,6 +171,16 @@ class JsonHandler(logging.Handler):
             trace_id = getattr(record, "trace_id", None)
             if trace_id is not None:
                 entry["trace_id"] = trace_id
+
+            # Forward extra fields to JSON output
+            for key, value in record.__dict__.items():
+                if key.startswith("_") or key in _STANDARD_ATTRS or key in entry:
+                    continue
+                try:
+                    json.dumps(value)
+                    entry[key] = value
+                except (TypeError, ValueError):
+                    pass
 
             # Exception info
             if record.exc_info and record.exc_info[0] is not None:
