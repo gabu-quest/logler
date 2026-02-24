@@ -16,10 +16,12 @@
 - Automatic temp file cleanup via context manager
 - Universal test coverage for `--db` across commands
 
-### M-3: Session DB Support ⬚
-- `--db` support in session commands (create, query, note, conclude)
-- Persistent session state backed by sqler database
-- Cross-session correlation tracking
+### M-3: Session DB Support ✅
+- `--db` on `session create` with persistent db_path in session JSON
+- `--db` on `session query` with stored/override db_path via `_db_file_source`
+- Cross-session correlation tracking (correlation IDs recorded per session)
+- `session list` shows `has_db` and `correlation_count` fields
+- Security hardening: restricted template formatter, realpath, dir_okay=False
 
 ### M-4: Human CLI DB Support ⬚
 - `--db` support in human CLI (`cli.py`)

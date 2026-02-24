@@ -238,7 +238,7 @@ def db_source_option(f):
     return click.option(
         "--db",
         "db_path",
-        type=click.Path(exists=True),
+        type=click.Path(exists=True, file_okay=True, dir_okay=False),
         help="sqler database file to use as log source",
     )(f)
 

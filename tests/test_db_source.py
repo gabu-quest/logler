@@ -342,14 +342,27 @@ class TestDbToJsonl:
             db_to_jsonl(db_path)
 
     def test_readonly_access(self, qler_test_db: str):
-        """DB is opened in readonly mode — writes should fail."""
-        # db_to_jsonl opens read-only; verify by checking the JSONL is produced
+        """DB is opened in readonly mode — writes must fail."""
+        import urllib.parse
+
         path = db_to_jsonl(qler_test_db)
         try:
             assert os.path.exists(path)
             assert os.path.getsize(path) > 0
         finally:
             os.unlink(path)
+
+        # Verify the mode=ro URI actually rejects writes
+        safe = urllib.parse.quote(os.path.realpath(qler_test_db), safe="/")
+        conn = sqlite3.connect(f"file:{safe}?mode=ro", uri=True)
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="readonly"):
+                conn.execute(
+                    "INSERT INTO qler_jobs (data, ulid, status, queue_name, priority) "
+                    "VALUES ('{}', 'XTEST', 'ok', 'q', 0)"
+                )
+        finally:
+            conn.close()
 
     def test_job_level_mapping(self, qler_test_db: str):
         """Failed jobs map to ERROR, cancelled to WARN."""

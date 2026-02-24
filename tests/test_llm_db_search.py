@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -14,15 +15,19 @@ EXIT_NO_RESULTS = 1
 EXIT_USER_ERROR = 2
 
 
-def run_llm_command(args, timeout=60):
+def run_llm_command(args, timeout=60, env=None):
     """Run a logler llm command and return result."""
     cmd = [".venv/bin/python", "-m", "logler.cli", "llm"] + args
+    run_env = None
+    if env:
+        run_env = {**os.environ, **env}
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         timeout=timeout,
         cwd=str(Path(__file__).parent.parent),
+        env=run_env,
     )
     return result
 
@@ -217,3 +222,104 @@ class TestDbFlagUniversal:
         """Commands with argument-based FILES give exit 2 with no input."""
         result = run_llm_command(cmd)
         assert result.returncode == EXIT_USER_ERROR
+
+
+class TestSessionDb:
+    """Test --db support in session commands."""
+
+    def test_session_create_db(self, qler_test_db: str, tmp_path: Path):
+        """session create --db persists db_path in session JSON."""
+        env = {"HOME": str(tmp_path)}
+        result = run_llm_command(["session", "create", "--db", qler_test_db], env=env)
+        assert result.returncode == EXIT_SUCCESS, result.stderr
+        output = json.loads(result.stdout)
+        assert output["status"] == "active"
+        assert output["db_path"] == os.path.realpath(qler_test_db)
+        assert output["files"] == []
+
+    def test_session_create_no_files_no_db(self, tmp_path: Path):
+        """session create with neither --files nor --db gives exit 2."""
+        env = {"HOME": str(tmp_path)}
+        result = run_llm_command(["session", "create"], env=env)
+        assert result.returncode == EXIT_USER_ERROR
+
+    def test_session_query_stored_db(self, qler_test_db: str, tmp_path: Path):
+        """session query uses stored db_path from create."""
+        env = {"HOME": str(tmp_path)}
+        # Create session with --db
+        create_result = run_llm_command(
+            ["session", "create", "--db", qler_test_db], env=env
+        )
+        assert create_result.returncode == EXIT_SUCCESS, create_result.stderr
+        session_id = json.loads(create_result.stdout)["session_id"]
+
+        # Query without --db — should use stored db_path
+        query_result = run_llm_command(
+            ["session", "query", session_id], env=env
+        )
+        assert query_result.returncode == EXIT_SUCCESS, query_result.stderr
+        output = json.loads(query_result.stdout)
+        assert output["total_matches"] == 3
+
+    def test_session_query_db_override(self, qler_test_db: str, tmp_path: Path):
+        """session query --db overrides stored session files."""
+        env = {"HOME": str(tmp_path)}
+        # Create a session with no DB (use a dummy log file)
+        dummy_log = tmp_path / "dummy.log"
+        dummy_log.write_text("")
+        create_result = run_llm_command(
+            ["session", "create", "-f", str(dummy_log)], env=env
+        )
+        assert create_result.returncode == EXIT_SUCCESS, create_result.stderr
+        session_id = json.loads(create_result.stdout)["session_id"]
+
+        # Query with --db override
+        query_result = run_llm_command(
+            ["session", "query", session_id, "--db", qler_test_db], env=env
+        )
+        assert query_result.returncode == EXIT_SUCCESS, query_result.stderr
+        output = json.loads(query_result.stdout)
+        assert output["total_matches"] == 3
+
+    def test_session_correlation_tracking(self, qler_test_db: str, tmp_path: Path):
+        """session query tracks correlation IDs in session JSON."""
+        env = {"HOME": str(tmp_path)}
+        # Create session
+        create_result = run_llm_command(
+            ["session", "create", "--db", qler_test_db], env=env
+        )
+        assert create_result.returncode == EXIT_SUCCESS, create_result.stderr
+        session_id = json.loads(create_result.stdout)["session_id"]
+
+        # Query to populate correlations
+        run_llm_command(["session", "query", session_id], env=env)
+
+        # Read session JSON to verify correlation_ids were stored
+        session_file = tmp_path / ".logler" / "sessions" / f"{session_id}.json"
+        with open(session_file) as f:
+            session_data = json.load(f)
+        # qler_test_db has 3 jobs with correlation IDs: corr-123, corr-456, corr-789
+        assert len(session_data["correlation_ids"]) == 3
+        assert "corr-123" in session_data["correlation_ids"]
+        assert "corr-456" in session_data["correlation_ids"]
+        assert "corr-789" in session_data["correlation_ids"]
+
+    def test_session_list_shows_db_info(self, qler_test_db: str, tmp_path: Path):
+        """session list shows has_db and correlation_count."""
+        env = {"HOME": str(tmp_path)}
+        # Create + query to get correlations
+        create_result = run_llm_command(
+            ["session", "create", "--db", qler_test_db], env=env
+        )
+        assert create_result.returncode == EXIT_SUCCESS, create_result.stderr
+        session_id = json.loads(create_result.stdout)["session_id"]
+        run_llm_command(["session", "query", session_id], env=env)
+
+        # List sessions
+        list_result = run_llm_command(["session", "list"], env=env)
+        assert list_result.returncode == EXIT_SUCCESS, list_result.stderr
+        output = json.loads(list_result.stdout)
+        assert len(output["sessions"]) == 1
+        sess = output["sessions"][0]
+        assert sess["has_db"] is True
+        assert sess["correlation_count"] == 3

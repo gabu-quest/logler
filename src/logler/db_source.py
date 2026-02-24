@@ -24,6 +24,7 @@ import dataclasses
 import json
 import os
 import sqlite3
+import string
 import tempfile
 import urllib.parse
 from datetime import datetime, timezone
@@ -139,7 +140,7 @@ def db_to_jsonl(
     Raises:
         ValueError: If the database has no tables or is empty.
     """
-    safe_path = urllib.parse.quote(os.path.abspath(db_path), safe="/")
+    safe_path = urllib.parse.quote(os.path.realpath(db_path), safe="/")
     uri = f"file:{safe_path}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
@@ -274,10 +275,10 @@ def _build_entry(
     else:
         entry["level"] = "INFO"
 
-    # Message
+    # Message (restricted formatter — no attribute/index access)
     try:
         template_vars = {**all_fields, "table_name": mapping.table}
-        entry["message"] = mapping.message_template.format_map(_SafeFormatDict(template_vars))
+        entry["message"] = _safe_format(mapping.message_template, template_vars)
     except (KeyError, ValueError):
         entry["message"] = f"{mapping.table} row {all_fields.get('_id', row_idx)}"
 
@@ -364,8 +365,28 @@ def _auto_detect_mappings(conn: sqlite3.Connection) -> list[DbTableMapping]:
     return mappings
 
 
-class _SafeFormatDict(dict):
-    """A dict subclass that returns {key} for missing keys in format_map."""
+class _RestrictedFormatter(string.Formatter):
+    """Formatter that rejects attribute/index access in field names.
 
-    def __missing__(self, key: str) -> str:
-        return f"{{{key}}}"
+    Prevents template injection via ``{key.__class__}`` or ``{key[0]}``.
+    Missing keys return ``{key}`` as a literal placeholder.
+    """
+
+    def get_field(self, field_name: str, args, kwargs):
+        if "." in field_name or "[" in field_name:
+            raise ValueError(f"Attribute/index access not allowed in template: {field_name!r}")
+        return super().get_field(field_name, args, kwargs)
+
+    def get_value(self, key, args, kwargs):
+        try:
+            return kwargs[key]
+        except KeyError:
+            return f"{{{key}}}"
+
+
+_formatter = _RestrictedFormatter()
+
+
+def _safe_format(template: str, values: dict) -> str:
+    """Format a template string safely, rejecting attribute/index access."""
+    return _formatter.format(template, **values)
