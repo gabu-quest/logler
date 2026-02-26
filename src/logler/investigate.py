@@ -131,6 +131,11 @@ class Investigator:
     Use this when you need to perform multiple operations on the same files
     for better performance.
 
+    Args:
+        sql_db_path: Optional path for a disk-backed DuckDB database.
+            Use this for large datasets (100K+ entries) to avoid OOM.
+            Defaults to in-memory.
+
     Example::
 
         investigator = Investigator()
@@ -139,6 +144,12 @@ class Investigator:
         results = investigator.search(query="error", limit=10)
         patterns = investigator.find_patterns(min_occurrences=5)
         metadata = investigator.get_metadata()
+
+    For large datasets::
+
+        investigator = Investigator(sql_db_path="/tmp/inv.duckdb")
+        investigator.load_files(["huge.log"])
+        results = investigator.sql_query("SELECT level, COUNT(*) FROM logs GROUP BY level")
     """
 
     def __init__(self, sql_db_path: Optional[str] = None):

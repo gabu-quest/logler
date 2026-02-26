@@ -123,17 +123,34 @@ results = investigate.search(["app.log"], level="ERROR", limit=10)
 
 ## SQL/DuckDB Integration
 
-The SQL feature (when enabled) also maintains persistent connections:
+The SQL engine is built once and cached for the lifetime of the Investigator
+(or until `load_files()` is called again, which invalidates the cache):
 
 ```python
 investigator = Investigator()
 investigator.load_files(["app.log"])  # Loads into DuckDB
 
-# All SQL queries use the same DuckDB connection
+# All SQL queries use the same cached DuckDB engine
 investigator.sql_query("SELECT * FROM logs WHERE level = 'ERROR'")
 investigator.sql_query("SELECT COUNT(*) FROM logs GROUP BY level")
-# Connection persists until investigator is destroyed
+# Engine persists until load_files() or investigator is destroyed
 ```
+
+### Disk-Backed Mode
+
+For large datasets that exceed available RAM, use `sql_db_path` to spill
+DuckDB to disk:
+
+```python
+investigator = Investigator(sql_db_path="/tmp/investigation.duckdb")
+investigator.load_files(["app.log"])
+
+# Same API — DuckDB uses memory-mapped I/O but spills to disk
+investigator.sql_query("SELECT level, COUNT(*) FROM logs GROUP BY level")
+```
+
+This is critical for datasets with 100K+ log entries where in-memory DuckDB
+would exhaust available RAM.
 
 ## Future Improvements
 
