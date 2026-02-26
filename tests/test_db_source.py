@@ -759,6 +759,9 @@ class TestNonSqlerTableHandling:
                 entries = [json.loads(line) for line in f]
             assert len(entries) == 1
             assert entries[0]["thread_id"] == "widgets"
+            assert entries[0]["level"] == "ACTIVE"  # no level_map -> uppercased raw
+            assert entries[0]["timestamp"] == "2024-01-15T10:00:00Z"  # iso passthrough
+            assert entries[0]["service_name"] == "widgets"
         finally:
             os.unlink(path)
 
@@ -795,6 +798,7 @@ class TestNonSqlerTableHandling:
         assert rows[1]["message"] == "log: second"
         assert rows[2]["message"] == "log: third"
         assert rows[0]["level"] == "INFO"
+        assert rows[1]["level"] == "WARN"
         assert rows[2]["level"] == "ERROR"
 
     def test_qler_schema_with_job_deps(self, tmp_path: Path):
@@ -869,9 +873,9 @@ class TestNonSqlerTableHandling:
         conn = sqlite3.connect(db_path)
         try:
             mappings = _auto_detect_mappings(conn)
+            assert len(mappings) == 2
             table_names = {m.table for m in mappings}
             assert table_names == {"qler_jobs", "qler_job_attempts"}
-            assert "qler_job_deps" not in table_names
         finally:
             conn.close()
 
@@ -898,6 +902,56 @@ class TestNonSqlerTableHandling:
             assert attempt_entries[0]["level"] == "INFO"
         finally:
             os.unlink(path)
+
+
+    def test_multiple_non_sqler_tables_all_skipped(self, tmp_path: Path):
+        """Multiple non-sqler tables are all skipped (continue, not break)."""
+        db_path = str(tmp_path / "multi_non_sqler.db")
+        conn = sqlite3.connect(db_path)
+
+        # sqler model table
+        conn.execute(
+            "CREATE TABLE events (_id INTEGER PRIMARY KEY, data JSON NOT NULL, status TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO events (_id, data, status) VALUES (1, ?, 'active')",
+            (json.dumps({"name": "deploy", "created_at": "2024-01-15T12:00:00Z"}),),
+        )
+
+        # Two non-sqler tables (no _id)
+        conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO metadata VALUES ('version', '1.0')")
+
+        conn.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)")
+        conn.execute("INSERT INTO schema_migrations VALUES (1, '2024-01-01')")
+
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(db_path)
+        try:
+            mappings = _auto_detect_mappings(conn)
+            assert len(mappings) == 1
+            assert mappings[0].table == "events"
+        finally:
+            conn.close()
+
+    def test_only_non_sqler_tables_raises(self, tmp_path: Path):
+        """Database with only non-sqler tables raises ValueError."""
+        db_path = str(tmp_path / "no_sqler.db")
+        conn = sqlite3.connect(db_path)
+
+        conn.execute("CREATE TABLE qler_job_deps (parent_ulid TEXT, child_ulid TEXT)")
+        conn.execute("INSERT INTO qler_job_deps VALUES ('J001', 'J002')")
+
+        conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO metadata VALUES ('version', '1.0')")
+
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(ValueError, match="No tables found"):
+            db_to_jsonl(db_path)
 
 
 class TestBuildEntryFallbacks:
