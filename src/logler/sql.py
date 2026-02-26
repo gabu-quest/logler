@@ -26,10 +26,21 @@ class SqlEngine:
     SQL query capabilities for advanced analysis.
     """
 
-    def __init__(self) -> None:
-        """Create a new SQL engine with an in-memory database."""
-        self.conn = duckdb.connect(":memory:")
+    def __init__(self, db_path: str | None = None) -> None:
+        """Create a new SQL engine.
+
+        Args:
+            db_path: Optional path for a disk-backed DuckDB database.
+                     Defaults to in-memory (``":memory:"``).
+        """
+        self.conn = duckdb.connect(db_path or ":memory:")
         self._tables_loaded: list[str] = []
+
+    def close(self) -> None:
+        """Close the underlying DuckDB connection."""
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
 
     def load_files(self, indices: Mapping[str, LogIndex]) -> None:
         """Load log files into SQL tables.

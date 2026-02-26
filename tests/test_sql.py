@@ -424,3 +424,134 @@ class TestSqlEdgeCases:
         """get_tables should return exactly logs and metrics."""
         tables = sorted(loaded_engine.get_tables())
         assert tables == ["logs", "metrics"]
+
+
+# ---------------------------------------------------------------------------
+# Disk-backed DuckDB + engine caching
+# ---------------------------------------------------------------------------
+
+
+class TestSqlEngineDiskBacked:
+    """Verify SqlEngine works with a disk-backed DuckDB database."""
+
+    def test_disk_backed_query_matches_memory(self, sql_log_file, tmp_path):
+        """Disk-backed engine should produce identical results to in-memory."""
+        db_file = str(tmp_path / "test.duckdb")
+        index = _build_index(sql_log_file)
+
+        engine_disk = SqlEngine(db_path=db_file)
+        engine_disk.load_files(index)
+
+        engine_mem = SqlEngine()
+        engine_mem.load_files(index)
+
+        disk_result = json.loads(
+            engine_disk.query(
+                "SELECT level, COUNT(*) AS cnt FROM logs GROUP BY level ORDER BY level"
+            )
+        )
+        mem_result = json.loads(
+            engine_mem.query(
+                "SELECT level, COUNT(*) AS cnt FROM logs GROUP BY level ORDER BY level"
+            )
+        )
+        assert disk_result == mem_result
+
+        engine_disk.close()
+        engine_mem.close()
+
+    def test_disk_backed_creates_file(self, sql_log_file, tmp_path):
+        """Disk-backed mode should create a file on disk."""
+        db_file = tmp_path / "test.duckdb"
+        assert not db_file.exists()
+
+        engine = SqlEngine(db_path=str(db_file))
+        engine.load_files(_build_index(sql_log_file))
+        engine.close()
+
+        assert db_file.exists()
+
+    def test_disk_backed_row_count(self, sql_log_file, tmp_path):
+        """Disk-backed engine should hold all rows."""
+        db_file = str(tmp_path / "test.duckdb")
+        engine = SqlEngine(db_path=db_file)
+        engine.load_files(_build_index(sql_log_file))
+
+        result = json.loads(engine.query("SELECT COUNT(*) AS cnt FROM logs"))
+        assert result[0]["cnt"] == TOTAL_ENTRIES
+        engine.close()
+
+    def test_close_idempotent(self, sql_log_file):
+        """Calling close() twice should not raise."""
+        engine = SqlEngine()
+        engine.load_files(_build_index(sql_log_file))
+        engine.close()
+        engine.close()  # should not raise
+
+
+class TestInvestigatorSqlEngineCaching:
+    """Verify the Investigator caches the SQL engine instead of rebuilding."""
+
+    def test_engine_cached_across_queries(self, investigator):
+        """Two sql_query() calls should reuse the same engine instance."""
+        investigator.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        engine1 = investigator._sql_engine
+
+        investigator.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        engine2 = investigator._sql_engine
+
+        assert engine1 is engine2
+
+    def test_engine_invalidated_on_load(self, sql_log_file):
+        """load_files() should invalidate the cached engine."""
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+
+        inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        engine1 = inv._sql_engine
+        assert engine1 is not None
+
+        # Re-load the same file — engine should be invalidated
+        inv.load_files([sql_log_file])
+        assert inv._sql_engine is None
+
+        # Next query builds a fresh engine
+        inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        engine2 = inv._sql_engine
+        assert engine2 is not None
+        assert engine2 is not engine1
+
+    def test_engine_rebuild_count(self, sql_log_file):
+        """Track that the engine is built exactly N times."""
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+
+        build_count = 0
+        original_init = SqlEngine.__init__
+
+        def counting_init(self_inner, *args, **kwargs):
+            nonlocal build_count
+            build_count += 1
+            original_init(self_inner, *args, **kwargs)
+
+        SqlEngine.__init__ = counting_init
+        try:
+            inv.sql_query("SELECT 1")
+            inv.sql_query("SELECT 1")
+            assert build_count == 1  # only one build
+
+            inv.load_files([sql_log_file])
+            inv.sql_query("SELECT 1")
+            assert build_count == 2  # rebuilt after load_files
+        finally:
+            SqlEngine.__init__ = original_init
+
+    def test_disk_backed_investigator(self, sql_log_file, tmp_path):
+        """Investigator with sql_db_path should use disk-backed DuckDB."""
+        db_file = tmp_path / "inv.duckdb"
+        inv = Investigator(sql_db_path=str(db_file))
+        inv.load_files([sql_log_file])
+
+        result = inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        assert result[0]["cnt"] == TOTAL_ENTRIES
+        assert db_file.exists()
