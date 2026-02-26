@@ -15,6 +15,7 @@ from logler.db_source import (
     _build_entry,
     _merge_sqler_row,
     _normalize_timestamp,
+    _read_sqler_table,
     _safe_format,
     db_to_jsonl,
     qler_attempt_mapping,
@@ -703,6 +704,200 @@ class TestNormalizeTimestamp:
         """Non-numeric epoch values fall back to str()."""
         result = _normalize_timestamp("not-a-number", "epoch")
         assert result == "not-a-number"
+
+
+# ---------------------------------------------------------------------------
+# Non-sqler table handling (fix 376157c)
+# ---------------------------------------------------------------------------
+
+
+class TestNonSqlerTableHandling:
+    """Verify db_source handles databases containing non-sqler tables."""
+
+    def test_auto_detect_skips_non_sqler_tables(self, tmp_path: Path):
+        """Auto-detection skips tables without _id column."""
+        db_path = str(tmp_path / "mixed.db")
+        conn = sqlite3.connect(db_path)
+
+        # sqler model table (has _id, data)
+        conn.execute(
+            """
+            CREATE TABLE widgets (
+                _id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data JSON NOT NULL,
+                _version INTEGER NOT NULL DEFAULT 1,
+                status TEXT DEFAULT 'active'
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO widgets (_id, data, status) VALUES (1, ?, 'active')",
+            (json.dumps({"name": "gizmo", "created_at": "2024-01-15T10:00:00Z"}),),
+        )
+
+        # Non-sqler table (NO _id column)
+        conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO metadata VALUES ('version', '1.0')")
+        conn.execute("INSERT INTO metadata VALUES ('env', 'prod')")
+
+        conn.commit()
+        conn.close()
+
+        # Auto-detect should find only the sqler table
+        conn = sqlite3.connect(db_path)
+        try:
+            mappings = _auto_detect_mappings(conn)
+            assert len(mappings) == 1
+            assert mappings[0].table == "widgets"
+        finally:
+            conn.close()
+
+        # Full pipeline should produce entries only from the sqler table
+        path = db_to_jsonl(db_path)
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == 1
+            assert entries[0]["thread_id"] == "widgets"
+        finally:
+            os.unlink(path)
+
+    def test_read_sqler_table_missing_id_uses_rowid(self, tmp_path: Path):
+        """_read_sqler_table falls back to ORDER BY rowid when _id is absent."""
+        db_path = str(tmp_path / "no_id.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE logs (ts TEXT, msg TEXT, level TEXT)"
+        )
+        conn.execute("INSERT INTO logs VALUES ('2024-01-15T10:00:00Z', 'first', 'INFO')")
+        conn.execute("INSERT INTO logs VALUES ('2024-01-15T10:01:00Z', 'second', 'WARN')")
+        conn.execute("INSERT INTO logs VALUES ('2024-01-15T10:02:00Z', 'third', 'ERROR')")
+        conn.commit()
+
+        conn.row_factory = sqlite3.Row
+
+        mapping = DbTableMapping(
+            table="logs",
+            timestamp_field="ts",
+            timestamp_format="iso",
+            level_field="level",
+            level_map=None,
+            message_template="log: {msg}",
+            correlation_id_field=None,
+            service_name="test",
+        )
+
+        rows = _read_sqler_table(conn, mapping)
+        conn.close()
+
+        assert len(rows) == 3
+        assert rows[0]["message"] == "log: first"
+        assert rows[1]["message"] == "log: second"
+        assert rows[2]["message"] == "log: third"
+        assert rows[0]["level"] == "INFO"
+        assert rows[2]["level"] == "ERROR"
+
+    def test_qler_schema_with_job_deps(self, tmp_path: Path):
+        """Simulate real qler schema: qler_jobs + qler_job_attempts + qler_job_deps.
+
+        qler_job_deps has only (parent_ulid, child_ulid) — no _id, no data,
+        no _version. This is the exact table that triggered the original crash.
+        """
+        db_path = str(tmp_path / "qler_full.db")
+        conn = sqlite3.connect(db_path)
+        base_ts = 1705312800
+
+        # qler_jobs (sqler model)
+        conn.execute(
+            """
+            CREATE TABLE qler_jobs (
+                _id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data JSON NOT NULL,
+                _version INTEGER NOT NULL DEFAULT 1,
+                ulid TEXT UNIQUE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                queue_name TEXT NOT NULL DEFAULT 'default',
+                priority INTEGER NOT NULL DEFAULT 0,
+                eta INTEGER NOT NULL DEFAULT 0,
+                lease_expires_at INTEGER
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO qler_jobs (data, ulid, status) VALUES (?, ?, ?)",
+            (json.dumps({"task": "parent_job", "created_at": base_ts, "correlation_id": "c1"}), "J001", "completed"),
+        )
+        conn.execute(
+            "INSERT INTO qler_jobs (data, ulid, status) VALUES (?, ?, ?)",
+            (json.dumps({"task": "child_job", "created_at": base_ts + 60, "correlation_id": "c2"}), "J002", "pending"),
+        )
+
+        # qler_job_attempts (sqler model)
+        conn.execute(
+            """
+            CREATE TABLE qler_job_attempts (
+                _id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data JSON NOT NULL,
+                _version INTEGER NOT NULL DEFAULT 1,
+                ulid TEXT UNIQUE NOT NULL,
+                job_ulid TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running'
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO qler_job_attempts (data, ulid, job_ulid, status) VALUES (?, ?, ?, ?)",
+            (json.dumps({"attempt_number": 1, "worker_id": "w-1", "started_at": base_ts + 1}), "A001", "J001", "completed"),
+        )
+
+        # qler_job_deps — the problematic table (NO _id, NO data, NO _version)
+        conn.execute(
+            """
+            CREATE TABLE qler_job_deps (
+                parent_ulid TEXT NOT NULL,
+                child_ulid TEXT NOT NULL,
+                PRIMARY KEY (parent_ulid, child_ulid)
+            )
+            """
+        )
+        conn.execute("INSERT INTO qler_job_deps VALUES ('J001', 'J002')")
+
+        conn.commit()
+        conn.close()
+
+        # Auto-detect must skip qler_job_deps and not crash
+        conn = sqlite3.connect(db_path)
+        try:
+            mappings = _auto_detect_mappings(conn)
+            table_names = {m.table for m in mappings}
+            assert table_names == {"qler_jobs", "qler_job_attempts"}
+            assert "qler_job_deps" not in table_names
+        finally:
+            conn.close()
+
+        # Full pipeline: 2 jobs + 1 attempt = 3 entries
+        path = db_to_jsonl(db_path)
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == 3
+
+            job_entries = [e for e in entries if e["thread_id"] == "qler_jobs"]
+            attempt_entries = [e for e in entries if e["thread_id"] == "qler_job_attempts"]
+            assert len(job_entries) == 2
+            assert len(attempt_entries) == 1
+
+            # Verify job content
+            assert job_entries[0]["message"] == "[job] parent_job (J001) status=completed"
+            assert job_entries[0]["level"] == "INFO"
+            assert job_entries[1]["message"] == "[job] child_job (J002) status=pending"
+            assert job_entries[1]["level"] == "INFO"
+
+            # Verify attempt content
+            assert attempt_entries[0]["message"] == "[attempt] job=J001 attempt=1 status=completed"
+            assert attempt_entries[0]["level"] == "INFO"
+        finally:
+            os.unlink(path)
 
 
 class TestBuildEntryFallbacks:
