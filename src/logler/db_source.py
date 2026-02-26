@@ -208,8 +208,9 @@ def _read_sqler_table(
     if not columns:
         return []
 
-    # Read rows ordered by _id
-    cursor = conn.execute(f"SELECT * FROM {_safe_identifier(mapping.table)} ORDER BY _id")
+    # Read rows ordered by _id (fall back to rowid for non-sqler tables)
+    order_col = "_id" if "_id" in columns else "rowid"
+    cursor = conn.execute(f"SELECT * FROM {_safe_identifier(mapping.table)} ORDER BY {order_col}")
     rows = cursor.fetchall()
 
     entries = []
@@ -341,6 +342,9 @@ def _auto_detect_mappings(conn: sqlite3.Connection) -> list[DbTableMapping]:
         else:
             # Generic mapping for unknown sqler tables
             columns = [row[1] for row in conn.execute(f"PRAGMA table_info({_safe_identifier(table)})").fetchall()]
+            # Skip non-sqler tables (no _id column)
+            if "_id" not in columns:
+                continue
             # Try to guess reasonable defaults
             ts_field = "created_at"
             if "created_at" not in columns:
