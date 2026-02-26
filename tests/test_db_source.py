@@ -1057,8 +1057,8 @@ class TestFetchmanyStreaming:
         finally:
             os.unlink(path)
 
-    def test_timestamps_sorted(self, large_db: str):
-        """All entries are sorted by timestamp after batched reading."""
+    def test_timestamps_sorted_with_bounds(self, large_db: str):
+        """All entries are sorted by timestamp; first/last match expected values."""
         path = db_to_jsonl(large_db)
         try:
             with open(path) as f:
@@ -1066,38 +1066,76 @@ class TestFetchmanyStreaming:
             assert len(entries) == self.TOTAL_ENTRIES
             timestamps = [e["timestamp"] for e in entries]
             assert timestamps == sorted(timestamps)
+            # base_ts = 1705312800 -> 2024-01-15T10:00:00+00:00
+            assert timestamps[0] == "2024-01-15T10:00:00+00:00"
+            # Both jobs and attempts start at base_ts+0, last is base_ts+2499
+            assert timestamps[-1] == "2024-01-15T10:41:39+00:00"
         finally:
             os.unlink(path)
 
-    def test_batch_boundary_content(self, large_db: str):
-        """Entries at batch boundaries (999, 1000, 1001) have correct content."""
+    def test_no_gaps_or_duplicates_across_batches(self, large_db: str):
+        """Correlation IDs must be a contiguous sequence — catches off-by-one at any batch seam."""
         path = db_to_jsonl(large_db, [qler_job_mapping()])
         try:
             with open(path) as f:
                 entries = [json.loads(line) for line in f]
             assert len(entries) == self.TOTAL_JOBS
 
-            # Entries are sorted by timestamp (=created_at=base_ts+i),
-            # so entry[i] corresponds to job i
-            for i in [0, 999, 1000, 1001, self.TOTAL_JOBS - 1]:
-                assert entries[i]["correlation_id"] == f"corr-{i:04d}"
-                assert f"task_{i}" in entries[i]["message"]
-                assert entries[i]["service_name"] == "qler"
+            # Exact sequence check: catches gaps, duplicates, and reordering
+            seen_ids = [e["correlation_id"] for e in entries]
+            expected_ids = [f"corr-{i:04d}" for i in range(self.TOTAL_JOBS)]
+            assert seen_ids == expected_ids
         finally:
             os.unlink(path)
 
-    def test_read_sqler_table_count_matches(self, large_db: str):
-        """_read_sqler_table returns exact row count for a large table."""
-        conn = sqlite3.connect(large_db)
-        conn.row_factory = sqlite3.Row
-        try:
-            rows = _read_sqler_table(conn, qler_job_mapping())
-            assert len(rows) == self.TOTAL_JOBS
+    def test_fetchmany_actually_called(self, large_db: str):
+        """Verify _read_sqler_table uses fetchmany in multiple batches, not fetchall."""
+        fetchmany_calls = []
 
-            rows2 = _read_sqler_table(conn, qler_attempt_mapping())
-            assert len(rows2) == self.TOTAL_ATTEMPTS
+        class SpyCursor:
+            """Wraps a real cursor, tracking fetchmany calls."""
+
+            def __init__(self, real_cursor):
+                self._cursor = real_cursor
+
+            def fetchone(self):
+                return self._cursor.fetchone()
+
+            def fetchall(self):
+                return self._cursor.fetchall()
+
+            def fetchmany(self, size=1):
+                result = self._cursor.fetchmany(size)
+                fetchmany_calls.append((size, len(result)))
+                return result
+
+            def __iter__(self):
+                return iter(self._cursor)
+
+        class SpyConnection:
+            """Wraps a real connection, returning SpyCursors."""
+
+            def __init__(self, real_conn):
+                self._conn = real_conn
+
+            def execute(self, sql, *args, **kwargs):
+                cursor = self._conn.execute(sql, *args, **kwargs)
+                return SpyCursor(cursor)
+
+        real_conn = sqlite3.connect(large_db)
+        real_conn.row_factory = sqlite3.Row
+        spy_conn = SpyConnection(real_conn)
+        try:
+            rows = _read_sqler_table(spy_conn, qler_job_mapping())
+            assert len(rows) == self.TOTAL_JOBS
+            # ceil(2500/1000) = 3 data batches + 1 empty sentinel = 4 calls
+            assert len(fetchmany_calls) == 4
+            assert fetchmany_calls[0] == (1000, 1000)  # batch 1: full
+            assert fetchmany_calls[1] == (1000, 1000)  # batch 2: full
+            assert fetchmany_calls[2] == (1000, 500)   # batch 3: partial
+            assert fetchmany_calls[3] == (1000, 0)     # sentinel: empty
         finally:
-            conn.close()
+            real_conn.close()
 
     def test_level_distribution_large(self, large_db: str):
         """Level distribution is correct across batched reads."""
