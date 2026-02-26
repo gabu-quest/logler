@@ -211,15 +211,20 @@ def _read_sqler_table(
     # Read rows ordered by _id (fall back to rowid for non-sqler tables)
     order_col = "_id" if "_id" in columns else "rowid"
     cursor = conn.execute(f"SELECT * FROM {_safe_identifier(mapping.table)} ORDER BY {order_col}")
-    rows = cursor.fetchall()
 
+    # Stream in batches to avoid holding raw rows + converted entries simultaneously
     entries = []
-    for idx, row in enumerate(rows):
-        row_dict = dict(row)
-        # Merge promoted columns with JSON data blob
-        all_fields = _merge_sqler_row(row_dict, columns)
-        entry = _build_entry(all_fields, mapping, idx)
-        entries.append(entry)
+    idx = 0
+    while True:
+        batch = cursor.fetchmany(1000)
+        if not batch:
+            break
+        for row in batch:
+            row_dict = dict(row)
+            all_fields = _merge_sqler_row(row_dict, columns)
+            entry = _build_entry(all_fields, mapping, idx)
+            entries.append(entry)
+            idx += 1
 
     return entries
 

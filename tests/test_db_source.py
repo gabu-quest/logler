@@ -954,6 +954,172 @@ class TestNonSqlerTableHandling:
             db_to_jsonl(db_path)
 
 
+# ---------------------------------------------------------------------------
+# Fix 2: Streaming fetchmany in _read_sqler_table
+# ---------------------------------------------------------------------------
+
+
+class TestFetchmanyStreaming:
+    """Verify _read_sqler_table batched reading produces correct output.
+
+    The batch size is 1000, so we need >1000 rows to exercise multiple
+    batches. We use 3500 rows across 2 tables to verify:
+    - Exact row count survives batching
+    - Row order is preserved (ORDER BY _id)
+    - Timestamps sort correctly after db_to_jsonl
+    - Entry content is correct at batch boundaries
+    """
+
+    TOTAL_JOBS = 2500
+    TOTAL_ATTEMPTS = 1000
+    TOTAL_ENTRIES = TOTAL_JOBS + TOTAL_ATTEMPTS  # 3500
+
+    @pytest.fixture()
+    def large_db(self, tmp_path: Path) -> str:
+        """Create a DB with 2500 jobs + 1000 attempts (3500 total entries)."""
+        db_path = str(tmp_path / "large.db")
+        conn = sqlite3.connect(db_path)
+
+        conn.execute(
+            """
+            CREATE TABLE qler_jobs (
+                _id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data JSON NOT NULL,
+                _version INTEGER NOT NULL DEFAULT 1,
+                ulid TEXT UNIQUE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                queue_name TEXT NOT NULL DEFAULT 'default',
+                priority INTEGER NOT NULL DEFAULT 0,
+                eta INTEGER NOT NULL DEFAULT 0,
+                lease_expires_at INTEGER
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE qler_job_attempts (
+                _id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data JSON NOT NULL,
+                _version INTEGER NOT NULL DEFAULT 1,
+                ulid TEXT UNIQUE NOT NULL,
+                job_ulid TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running'
+            )
+            """
+        )
+
+        base_ts = 1705312800  # 2024-01-15T10:00:00Z
+        statuses = ["completed", "completed", "completed", "failed", "pending"]
+
+        # Insert 2500 jobs
+        job_rows = []
+        for i in range(self.TOTAL_JOBS):
+            data = json.dumps({
+                "task": f"task_{i}",
+                "attempts": 1,
+                "correlation_id": f"corr-{i:04d}",
+                "created_at": base_ts + i,
+            })
+            job_rows.append((data, f"J{i:05d}", statuses[i % 5]))
+
+        conn.executemany(
+            "INSERT INTO qler_jobs (data, ulid, status) VALUES (?, ?, ?)",
+            job_rows,
+        )
+
+        # Insert 1000 attempts
+        attempt_rows = []
+        for i in range(self.TOTAL_ATTEMPTS):
+            data = json.dumps({
+                "attempt_number": 1,
+                "worker_id": f"w-{i % 4}",
+                "started_at": base_ts + i,
+            })
+            attempt_rows.append((data, f"A{i:05d}", f"J{i:05d}", "completed"))
+
+        conn.executemany(
+            "INSERT INTO qler_job_attempts (data, ulid, job_ulid, status) VALUES (?, ?, ?, ?)",
+            attempt_rows,
+        )
+
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_exact_entry_count(self, large_db: str):
+        """db_to_jsonl produces exactly TOTAL_JOBS + TOTAL_ATTEMPTS entries."""
+        path = db_to_jsonl(large_db)
+        try:
+            with open(path) as f:
+                lines = f.readlines()
+            assert len(lines) == self.TOTAL_ENTRIES
+        finally:
+            os.unlink(path)
+
+    def test_timestamps_sorted(self, large_db: str):
+        """All entries are sorted by timestamp after batched reading."""
+        path = db_to_jsonl(large_db)
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == self.TOTAL_ENTRIES
+            timestamps = [e["timestamp"] for e in entries]
+            assert timestamps == sorted(timestamps)
+        finally:
+            os.unlink(path)
+
+    def test_batch_boundary_content(self, large_db: str):
+        """Entries at batch boundaries (999, 1000, 1001) have correct content."""
+        path = db_to_jsonl(large_db, [qler_job_mapping()])
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == self.TOTAL_JOBS
+
+            # Entries are sorted by timestamp (=created_at=base_ts+i),
+            # so entry[i] corresponds to job i
+            for i in [0, 999, 1000, 1001, self.TOTAL_JOBS - 1]:
+                assert entries[i]["correlation_id"] == f"corr-{i:04d}"
+                assert f"task_{i}" in entries[i]["message"]
+                assert entries[i]["service_name"] == "qler"
+        finally:
+            os.unlink(path)
+
+    def test_read_sqler_table_count_matches(self, large_db: str):
+        """_read_sqler_table returns exact row count for a large table."""
+        conn = sqlite3.connect(large_db)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = _read_sqler_table(conn, qler_job_mapping())
+            assert len(rows) == self.TOTAL_JOBS
+
+            rows2 = _read_sqler_table(conn, qler_attempt_mapping())
+            assert len(rows2) == self.TOTAL_ATTEMPTS
+        finally:
+            conn.close()
+
+    def test_level_distribution_large(self, large_db: str):
+        """Level distribution is correct across batched reads."""
+        path = db_to_jsonl(large_db, [qler_job_mapping()])
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == self.TOTAL_JOBS
+
+            level_counts: dict[str, int] = {}
+            for e in entries:
+                level_counts[e["level"]] = level_counts.get(e["level"], 0) + 1
+
+            # statuses cycle: completed, completed, completed, failed, pending
+            # 3/5 completed=INFO, 1/5 failed=ERROR, 1/5 pending=INFO
+            # So INFO = 4/5 * 2500 = 2000, ERROR = 1/5 * 2500 = 500
+            assert level_counts["INFO"] == 2000
+            assert level_counts["ERROR"] == 500
+        finally:
+            os.unlink(path)
+
+
 class TestBuildEntryFallbacks:
     def test_missing_timestamp_uses_now(self):
         """Row with no timestamp field gets a generated timestamp."""
