@@ -303,15 +303,24 @@ class TestDbToJsonl:
         finally:
             os.unlink(path)
 
-    def test_db_to_jsonl_sorted(self, qler_test_db: str):
+    def test_db_to_jsonl_per_table_order(self, qler_test_db: str):
+        """Entries are ordered per-table by _id (no cross-table sort)."""
         path = db_to_jsonl(qler_test_db)
         try:
             with open(path) as f:
                 entries = [json.loads(line) for line in f]
 
             assert len(entries) == 22
-            timestamps = [e["timestamp"] for e in entries]
-            assert timestamps == sorted(timestamps)
+
+            # Group by thread_id (table name) and verify per-table ordering
+            from itertools import groupby
+
+            for _, group in groupby(entries, key=lambda e: e["thread_id"]):
+                table_entries = list(group)
+                timestamps = [e["timestamp"] for e in table_entries]
+                assert timestamps == sorted(timestamps), (
+                    "entries within a single table must be in timestamp order"
+                )
         finally:
             os.unlink(path)
 
@@ -966,7 +975,7 @@ class TestFetchmanyStreaming:
     batches. We use 3500 rows across 2 tables to verify:
     - Exact row count survives batching
     - Row order is preserved (ORDER BY _id)
-    - Timestamps sort correctly after db_to_jsonl
+    - Per-table timestamps are ordered after db_to_jsonl
     - Entry content is correct at batch boundaries
     """
 
@@ -1057,19 +1066,36 @@ class TestFetchmanyStreaming:
         finally:
             os.unlink(path)
 
-    def test_timestamps_sorted_with_bounds(self, large_db: str):
-        """All entries are sorted by timestamp; first/last match expected values."""
+    def test_per_table_timestamps_sorted_with_bounds(self, large_db: str):
+        """Entries within each table are sorted by timestamp; bounds match expected values."""
         path = db_to_jsonl(large_db)
         try:
             with open(path) as f:
                 entries = [json.loads(line) for line in f]
             assert len(entries) == self.TOTAL_ENTRIES
-            timestamps = [e["timestamp"] for e in entries]
-            assert timestamps == sorted(timestamps)
-            # base_ts = 1705312800 -> 2024-01-15T10:00:00+00:00
-            assert timestamps[0] == "2024-01-15T10:00:00+00:00"
-            # Both jobs and attempts start at base_ts+0, last is base_ts+2499
-            assert timestamps[-1] == "2024-01-15T10:41:39+00:00"
+
+            # Split into per-table groups (streamed contiguously)
+            from itertools import groupby
+
+            tables = {}
+            for table_name, group in groupby(entries, key=lambda e: e["thread_id"]):
+                tables[table_name] = list(group)
+
+            assert set(tables.keys()) == {"qler_jobs", "qler_job_attempts"}
+
+            # Jobs: 2500 entries, timestamps from base_ts+0 to base_ts+2499
+            job_ts = [e["timestamp"] for e in tables["qler_jobs"]]
+            assert len(job_ts) == self.TOTAL_JOBS
+            assert job_ts == sorted(job_ts)
+            assert job_ts[0] == "2024-01-15T10:00:00+00:00"
+            assert job_ts[-1] == "2024-01-15T10:41:39+00:00"
+
+            # Attempts: 1000 entries, timestamps from base_ts+0 to base_ts+999
+            attempt_ts = [e["timestamp"] for e in tables["qler_job_attempts"]]
+            assert len(attempt_ts) == self.TOTAL_ATTEMPTS
+            assert attempt_ts == sorted(attempt_ts)
+            assert attempt_ts[0] == "2024-01-15T10:00:00+00:00"
+            assert attempt_ts[-1] == "2024-01-15T10:16:39+00:00"
         finally:
             os.unlink(path)
 

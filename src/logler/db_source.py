@@ -127,8 +127,9 @@ def db_to_jsonl(
     """Convert a sqler database to a temporary JSONL file.
 
     Opens the database read-only, reads tables according to the provided
-    mappings (or auto-detects if None), and writes sorted JSONL to a
-    temporary file.
+    mappings (or auto-detects if None), and streams JSONL to a temporary
+    file. Entries are ordered per-table (by ``_id``); no cross-table sort
+    is performed — the Rust parser builds indices and sorts at query time.
 
     Args:
         db_path: Path to the SQLite database file.
@@ -152,27 +153,22 @@ def db_to_jsonl(
         if not mappings:
             raise ValueError(f"No tables found in database: {db_path}")
 
-        all_entries: list[dict] = []
-        for mapping in mappings:
-            rows = _read_sqler_table(conn, mapping)
-            all_entries.extend(rows)
-
-        if not all_entries:
-            raise ValueError(f"No rows found in database: {db_path}")
-
-        # Sort by timestamp
-        all_entries.sort(key=lambda e: e.get("timestamp", ""))
-
-        # Write to temp file
+        # Stream entries per-table directly to temp file.
+        # Each table is already ordered by _id (roughly chronological).
+        # No cross-table accumulation or sort — saves ~80 MB at 80K rows.
         tmp = tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".jsonl",
             delete=False,
             encoding="utf-8",
         )
+        row_count = 0
         try:
-            for entry in all_entries:
-                tmp.write(json.dumps(entry) + "\n")
+            for mapping in mappings:
+                rows = _read_sqler_table(conn, mapping)
+                for entry in rows:
+                    tmp.write(json.dumps(entry) + "\n")
+                    row_count += 1
         except Exception:
             tmp.close()
             try:
@@ -182,6 +178,13 @@ def db_to_jsonl(
             raise
         finally:
             tmp.close()
+
+        if row_count == 0:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            raise ValueError(f"No rows found in database: {db_path}")
 
         return tmp.name
     finally:
