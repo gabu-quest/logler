@@ -304,7 +304,7 @@ class TestDbToJsonl:
             os.unlink(path)
 
     def test_db_to_jsonl_per_table_order(self, qler_test_db: str):
-        """Entries are ordered per-table by _id (no cross-table sort)."""
+        """Entries are ordered per-table by _id, each table contiguous."""
         path = db_to_jsonl(qler_test_db)
         try:
             with open(path) as f:
@@ -312,15 +312,24 @@ class TestDbToJsonl:
 
             assert len(entries) == 22
 
-            # Group by thread_id (table name) and verify per-table ordering
+            # Verify both tables present
+            table_names = {e["thread_id"] for e in entries}
+            assert table_names == {"qler_jobs", "qler_job_attempts"}
+
+            # Verify each table appears as one contiguous block, internally sorted
             from itertools import groupby
 
-            for _, group in groupby(entries, key=lambda e: e["thread_id"]):
+            seen_tables: dict[str, list] = {}
+            for table_name, group in groupby(entries, key=lambda e: e["thread_id"]):
+                assert table_name not in seen_tables, (
+                    f"table '{table_name}' appears non-contiguously in output"
+                )
                 table_entries = list(group)
                 timestamps = [e["timestamp"] for e in table_entries]
                 assert timestamps == sorted(timestamps), (
-                    "entries within a single table must be in timestamp order"
+                    f"entries within '{table_name}' must be in timestamp order"
                 )
+                seen_tables[table_name] = table_entries
         finally:
             os.unlink(path)
 
@@ -1074,11 +1083,14 @@ class TestFetchmanyStreaming:
                 entries = [json.loads(line) for line in f]
             assert len(entries) == self.TOTAL_ENTRIES
 
-            # Split into per-table groups (streamed contiguously)
+            # Verify each table appears as one contiguous block
             from itertools import groupby
 
             tables = {}
             for table_name, group in groupby(entries, key=lambda e: e["thread_id"]):
+                assert table_name not in tables, (
+                    f"table '{table_name}' appears non-contiguously in output"
+                )
                 tables[table_name] = list(group)
 
             assert set(tables.keys()) == {"qler_jobs", "qler_job_attempts"}
@@ -1096,6 +1108,31 @@ class TestFetchmanyStreaming:
             assert attempt_ts == sorted(attempt_ts)
             assert attempt_ts[0] == "2024-01-15T10:00:00+00:00"
             assert attempt_ts[-1] == "2024-01-15T10:16:39+00:00"
+        finally:
+            os.unlink(path)
+
+    def test_mapping_order_controls_output_order(self, large_db: str):
+        """Output table order follows the mappings list, not SQLite internal order."""
+        # Pass mappings in reversed order: attempts first, then jobs
+        reversed_mappings = [qler_attempt_mapping(), qler_job_mapping()]
+        path = db_to_jsonl(large_db, reversed_mappings)
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == self.TOTAL_ENTRIES
+
+            # First entry should be from attempts (reversed order)
+            assert entries[0]["thread_id"] == "qler_job_attempts"
+            # Last entry should be from jobs
+            assert entries[-1]["thread_id"] == "qler_jobs"
+
+            # Verify contiguous blocks in the reversed order
+            from itertools import groupby
+
+            block_order = []
+            for table_name, _ in groupby(entries, key=lambda e: e["thread_id"]):
+                block_order.append(table_name)
+            assert block_order == ["qler_job_attempts", "qler_jobs"]
         finally:
             os.unlink(path)
 
