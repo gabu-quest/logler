@@ -8,6 +8,20 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
+/// Safety cap: maximum results returned when no limit/tail is specified.
+/// Prevents a single unbounded query from allocating gigabytes of memory.
+const DEFAULT_MAX_RESULTS: usize = 100_000;
+
+/// Lightweight match candidate produced in the filter phase.
+/// ~40 bytes per candidate vs ~2-4 KB per full SearchResult with cloned entry.
+struct MatchCandidate {
+    file_key: usize,
+    entry_idx: usize,
+    entry_line_number: usize,
+    timestamp: Option<DateTime<Utc>>,
+    relevance_score: f64,
+}
+
 /// Main investigation API for LLM agents
 pub struct Investigator {
     indices: HashMap<String, LogIndex>,
@@ -40,7 +54,11 @@ impl Investigator {
         Ok(())
     }
 
-    /// Search logs with filters
+    /// Search logs with filters.
+    ///
+    /// Uses a two-phase approach to minimize memory:
+    /// - Phase 1: Filter + score → lightweight `MatchCandidate` (~40 bytes each)
+    /// - Phase 2: Materialize full `SearchResult` only for the final N results
     pub fn search(&self, query: &SearchQuery) -> anyhow::Result<SearchResults> {
         let start = Instant::now();
 
@@ -54,54 +72,81 @@ impl Investigator {
             None
         };
 
-        let mut all_results = Vec::new();
-
-        for (file_path, index) in &self.indices {
-            if !query.files.is_empty() {
-                let file_matches = query
-                    .files
-                    .iter()
-                    .any(|f| f.to_string_lossy().as_ref() == file_path);
-                if !file_matches {
-                    continue;
+        // Build file list for stable indexing between phases
+        let file_list: Vec<(&String, &LogIndex)> = self
+            .indices
+            .iter()
+            .filter(|(file_path, _)| {
+                if query.files.is_empty() {
+                    true
+                } else {
+                    query
+                        .files
+                        .iter()
+                        .any(|f| f.to_string_lossy().as_ref() == *file_path)
                 }
-            }
+            })
+            .collect();
 
-            let entries = self.search_in_index(index, query, exclude_regex.as_ref())?;
-            all_results.extend(entries);
+        // Phase 1: Collect lightweight candidates (no cloning, no context fetching)
+        let mut all_candidates = Vec::new();
+        for (file_key, (_, index)) in file_list.iter().enumerate() {
+            let candidates =
+                self.collect_candidates(file_key, index, query, exclude_regex.as_ref())?;
+            all_candidates.extend(candidates);
         }
 
-        let total_matches = all_results.len();
+        let total_matches = all_candidates.len();
 
-        // Handle tail vs limit
-        let results = if let Some(tail_n) = query.tail {
+        // Sort and truncate candidates before materializing
+        let selected: Vec<MatchCandidate> = if let Some(tail_n) = query.tail {
             // Sort by timestamp ASC and take last N
-            all_results.sort_by(|a, b| match (&a.entry.timestamp, &b.entry.timestamp) {
+            all_candidates.sort_by(|a, b| match (&a.timestamp, &b.timestamp) {
                 (Some(t1), Some(t2)) => t1.cmp(t2),
                 (Some(_), None) => std::cmp::Ordering::Less,
                 (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => a.entry.line_number.cmp(&b.entry.line_number),
+                (None, None) => a.entry_line_number.cmp(&b.entry_line_number),
             });
-            let skip = all_results.len().saturating_sub(tail_n);
-            all_results.into_iter().skip(skip).collect()
+            let skip = all_candidates.len().saturating_sub(tail_n);
+            all_candidates.into_iter().skip(skip).collect()
         } else {
             // Sort by relevance and timestamp
-            all_results.sort_by(|a, b| {
+            all_candidates.sort_by(|a, b| {
                 b.relevance_score
                     .total_cmp(&a.relevance_score)
-                    .then_with(|| match (&a.entry.timestamp, &b.entry.timestamp) {
+                    .then_with(|| match (&a.timestamp, &b.timestamp) {
                         (Some(t1), Some(t2)) => t1.cmp(t2),
                         (Some(_), None) => std::cmp::Ordering::Less,
                         (None, Some(_)) => std::cmp::Ordering::Greater,
                         (None, None) => std::cmp::Ordering::Equal,
                     })
             });
-            if let Some(limit) = query.limit {
-                all_results.into_iter().take(limit).collect()
-            } else {
-                all_results
-            }
+            let cap = query.limit.unwrap_or(DEFAULT_MAX_RESULTS);
+            all_candidates.into_iter().take(cap).collect()
         };
+
+        // Phase 2: Materialize only the selected candidates (clone entry + fetch context)
+        let results: Vec<SearchResult> = selected
+            .into_iter()
+            .map(|candidate| {
+                let (_, index) = file_list[candidate.file_key];
+                let entries = index.entries.as_ref().unwrap();
+                let entry = &entries[candidate.entry_idx];
+
+                let (context_before, context_after) = if let Some(n) = query.context_lines {
+                    index.get_context(entry.line_number, n, n)
+                } else {
+                    (Vec::new(), Vec::new())
+                };
+
+                SearchResult {
+                    entry: entry.clone(),
+                    context_before,
+                    context_after,
+                    relevance_score: candidate.relevance_score,
+                }
+            })
+            .collect();
 
         Ok(SearchResults {
             results,
@@ -110,34 +155,32 @@ impl Investigator {
         })
     }
 
-    /// Search within a single index
-    fn search_in_index(
+    /// Phase 1: Collect lightweight match candidates from a single index.
+    /// Returns entry indices and scores without cloning entries or fetching context.
+    fn collect_candidates(
         &self,
+        file_key: usize,
         index: &LogIndex,
         query: &SearchQuery,
         exclude_regex: Option<&Regex>,
-    ) -> anyhow::Result<Vec<SearchResult>> {
+    ) -> anyhow::Result<Vec<MatchCandidate>> {
         let entries = index
             .entries
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Index has no entries loaded"))?;
 
-        let results: Vec<SearchResult> = entries
+        let candidates: Vec<MatchCandidate> = entries
             .par_iter()
-            .filter(|entry| self.matches_filters(entry, &query.filters, exclude_regex))
-            .filter_map(|entry| {
+            .enumerate()
+            .filter(|(_, entry)| self.matches_filters(entry, &query.filters, exclude_regex))
+            .filter_map(|(idx, entry)| {
                 let score = self.calculate_relevance(entry, query);
                 if score > 0.0 {
-                    let (context_before, context_after) = if let Some(n) = query.context_lines {
-                        index.get_context(entry.line_number, n, n)
-                    } else {
-                        (Vec::new(), Vec::new())
-                    };
-
-                    Some(SearchResult {
-                        entry: entry.clone(),
-                        context_before,
-                        context_after,
+                    Some(MatchCandidate {
+                        file_key,
+                        entry_idx: idx,
+                        entry_line_number: entry.line_number,
+                        timestamp: entry.timestamp,
                         relevance_score: score,
                     })
                 } else {
@@ -146,7 +189,7 @@ impl Investigator {
             })
             .collect();
 
-        Ok(results)
+        Ok(candidates)
     }
 
     /// Check if entry matches filters
@@ -1071,6 +1114,109 @@ mod tests {
             0,
             "patterns without timestamps should be skipped"
         );
+    }
+
+    #[test]
+    fn test_search_limit_enforced() {
+        // Create 200 entries, search with limit=5
+        let mut entries = Vec::new();
+        for i in 0..200 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:{:02}:{:02}Z", i / 60, i % 60),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: Some(5),
+            tail: None,
+            context_lines: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.results.len(), 5, "limit should cap returned results");
+        assert_eq!(
+            results.total_matches, 200,
+            "total_matches should reflect all matches before limit"
+        );
+    }
+
+    #[test]
+    fn test_search_no_limit_returns_all() {
+        // Without limit, all matches should be returned (under safety cap)
+        let mut entries = Vec::new();
+        for i in 0..50 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: None,
+            tail: None,
+            context_lines: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.results.len(), 50);
+        assert_eq!(results.total_matches, 50);
+    }
+
+    #[test]
+    fn test_search_limit_with_query() {
+        // Limit should work correctly with a text query
+        let mut entries = Vec::new();
+        for i in 0..100 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i % 60),
+                "INFO",
+                &format!("target event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        // Add some non-matching entries
+        for i in 0..50 {
+            entries.push(json_entry(
+                &format!("2024-01-15T11:00:{:02}Z", i % 60),
+                "INFO",
+                &format!("other stuff {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: Some("target".to_string()),
+            filters: SearchFilters::default(),
+            limit: Some(10),
+            tail: None,
+            context_lines: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.results.len(), 10);
+        assert_eq!(results.total_matches, 100);
     }
 
     #[test]
