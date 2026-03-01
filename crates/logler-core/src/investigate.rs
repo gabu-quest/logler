@@ -62,6 +62,12 @@ impl Investigator {
     /// Uses a two-phase approach to minimize memory:
     /// - Phase 1: Filter + score → lightweight `MatchCandidate` (~40 bytes each)
     /// - Phase 2: Materialize full `SearchResult` only for the final N results
+    ///
+    /// When `count_only` is set, Phase 2 is skipped entirely — returns
+    /// `total_matches` with an empty `results` vec (zero serialization cost).
+    ///
+    /// `offset` is applied after sorting and before `take(limit)`, enabling
+    /// server-side pagination without re-materializing skipped entries.
     pub fn search(&self, query: &SearchQuery) -> anyhow::Result<SearchResults> {
         let start = Instant::now();
 

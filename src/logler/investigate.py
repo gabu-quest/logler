@@ -230,7 +230,14 @@ class Investigator:
         count_only: bool = False,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        """Search loaded files."""
+        """Search loaded files.
+
+        Args:
+            count_only: If True, return only ``total_matches`` (no results).
+                Skips Rust Phase 2 materialization — zero memory overhead.
+            offset: Skip first *N* sorted results before taking ``limit``.
+                Server-side pagination: ``offset=100, limit=100`` → page 2.
+        """
         filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
         if level:
             filters["levels"] = _parse_levels(level)

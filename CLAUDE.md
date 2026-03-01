@@ -184,12 +184,14 @@ Only `context` (needs file+line) and session commands lack `--db`.
 ### Search CLI Flags
 
 Key flags for `logler llm search`:
-- `--count-only` — Return only match count (no results array)
-- `--offset N` — Skip first N results (pagination)
+- `--count-only` — Rust-side: skips materialization entirely, returns `{"total_matches": N}` with zero memory overhead
+- `--offset N` — Rust-side pagination: candidates are sorted once, then `skip(N).take(limit)` before materialization
 - `--compact` — Short field names (ln/ts/lv/msg/src/th/cid/trc/sid/svc)
-- `--metadata-only` — Aggregations only, no results
+- `--metadata-only` — Aggregations only, no results array
 - `--max-bytes N` — Truncate output to fit byte budget
-- `--after/-before` — Supports relative time: `--after=-1h --before=-30m`
+- `--after/--before` — Supports relative time: `--after=-1h --before=-30m`
+
+Pagination example: `--offset 100 --limit 100` fetches page 2. `has_more` in the response indicates more pages exist.
 
 `--max-bytes` also available on: correlate, hierarchy, bottleneck, summarize.
 

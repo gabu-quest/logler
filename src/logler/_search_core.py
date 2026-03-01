@@ -335,6 +335,12 @@ def search(
         fields: List of fields to include in output (projection).
         parser_format: Optional log format hint.
         custom_regex: Optional custom parsing regex.
+        count_only: If True, skip materialization and return only
+            ``total_matches`` with an empty ``results`` list.
+            Handled Rust-side — zero JSON serialization overhead.
+        offset: Number of sorted results to skip before taking ``limit``.
+            Enables server-side pagination (e.g. ``offset=100, limit=100``
+            for page 2).  Applied Rust-side before materialization.
 
     Returns:
         SearchResult dict with shape::
