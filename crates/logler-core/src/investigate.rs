@@ -10,7 +10,10 @@ use std::time::Instant;
 
 /// Safety cap: maximum results returned when no limit/tail is specified.
 /// Prevents a single unbounded query from allocating gigabytes of memory.
-const DEFAULT_MAX_RESULTS: usize = 100_000;
+/// At ~80 bytes per materialized result + JSON serialization overhead,
+/// 10K results ≈ 80 MB total (Rust + Python). Callers needing more
+/// can pass an explicit `limit`.
+const DEFAULT_MAX_RESULTS: usize = 10_000;
 
 /// Lightweight match candidate produced in the filter phase.
 /// ~40 bytes per candidate vs ~2-4 KB per full SearchResult with cloned entry.
