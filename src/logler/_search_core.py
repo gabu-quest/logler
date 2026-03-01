@@ -307,6 +307,8 @@ def search(
     fields: Optional[List[str]] = None,
     parser_format: Optional[str] = None,
     custom_regex: Optional[str] = None,
+    count_only: bool = False,
+    offset: int = 0,
 ) -> Dict[str, Any]:
     """Search log entries across one or more files.
 
@@ -413,6 +415,10 @@ def search(
     }
     if tail is not None:
         query_dict["tail"] = tail
+    if count_only:
+        query_dict["count_only"] = True
+    if offset > 0:
+        query_dict["offset"] = offset
 
     # Call Rust engine
     result_json = investigator.search(json.dumps(query_dict))

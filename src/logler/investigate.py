@@ -227,6 +227,8 @@ class Investigator:
         time_start: Optional[str] = None,
         time_end: Optional[str] = None,
         context_lines: int = 3,
+        count_only: bool = False,
+        offset: int = 0,
     ) -> Dict[str, Any]:
         """Search loaded files."""
         filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
@@ -277,6 +279,10 @@ class Investigator:
         }
         if tail is not None:
             query_dict["tail"] = tail
+        if count_only:
+            query_dict["count_only"] = True
+        if offset > 0:
+            query_dict["offset"] = offset
 
         result_json = self._investigator.search(json.dumps(query_dict))
         result = json.loads(result_json)

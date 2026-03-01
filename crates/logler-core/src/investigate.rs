@@ -101,9 +101,19 @@ impl Investigator {
 
         let total_matches = all_candidates.len();
 
+        // count_only: skip Phase 2 entirely — no sorting, no materialization
+        if query.count_only.unwrap_or(false) {
+            return Ok(SearchResults {
+                results: Vec::new(),
+                total_matches,
+                search_time_ms: start.elapsed().as_millis() as u64,
+            });
+        }
+
         // Sort and truncate candidates before materializing
+        let skip_n = query.offset.unwrap_or(0);
         let selected: Vec<MatchCandidate> = if let Some(tail_n) = query.tail {
-            // Sort by timestamp ASC and take last N
+            // Sort by timestamp ASC and take last N (offset not applied to tail)
             all_candidates.sort_by(|a, b| match (&a.timestamp, &b.timestamp) {
                 (Some(t1), Some(t2)) => t1.cmp(t2),
                 (Some(_), None) => std::cmp::Ordering::Less,
@@ -125,7 +135,7 @@ impl Investigator {
                     })
             });
             let cap = query.limit.unwrap_or(DEFAULT_MAX_RESULTS);
-            all_candidates.into_iter().take(cap).collect()
+            all_candidates.into_iter().skip(skip_n).take(cap).collect()
         };
 
         // Phase 2: Materialize only the selected candidates (clone entry + fetch context)
@@ -834,6 +844,8 @@ mod tests {
             limit: None,
             tail: None,
             context_lines: None,
+            count_only: None,
+            offset: None,
         }
     }
 
@@ -934,6 +946,8 @@ mod tests {
             limit: None,
             tail: Some(10),
             context_lines: None,
+            count_only: None,
+            offset: None,
         };
         let results = inv.search(&q).unwrap();
         assert_eq!(results.total_matches, 100);
@@ -1143,6 +1157,8 @@ mod tests {
             limit: Some(5),
             tail: None,
             context_lines: None,
+            count_only: None,
+            offset: None,
         };
         let results = inv.search(&q).unwrap();
         assert_eq!(results.results.len(), 5, "limit should cap returned results");
@@ -1176,6 +1192,8 @@ mod tests {
             limit: None,
             tail: None,
             context_lines: None,
+            count_only: None,
+            offset: None,
         };
         let results = inv.search(&q).unwrap();
         assert_eq!(results.results.len(), 50);
@@ -1216,6 +1234,8 @@ mod tests {
             limit: Some(10),
             tail: None,
             context_lines: None,
+            count_only: None,
+            offset: None,
         };
         let results = inv.search(&q).unwrap();
         assert_eq!(results.results.len(), 10);
@@ -1267,5 +1287,71 @@ mod tests {
         assert_eq!(patterns.patterns.len(), 1);
         assert_eq!(patterns.patterns[0].occurrences, 3);
         assert!(patterns.patterns[0].pattern.contains("disk full"));
+    }
+
+    #[test]
+    fn test_search_count_only() {
+        let mut entries = Vec::new();
+        for i in 0..50 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: None,
+            tail: None,
+            context_lines: None,
+            count_only: Some(true),
+            offset: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 50, "count_only should report all matches");
+        assert_eq!(
+            results.results.len(),
+            0,
+            "count_only should return empty results vec"
+        );
+    }
+
+    #[test]
+    fn test_search_offset() {
+        let mut entries = Vec::new();
+        for i in 0..20 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: Some(5),
+            tail: None,
+            context_lines: None,
+            count_only: None,
+            offset: Some(10),
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 20, "total_matches unaffected by offset");
+        assert_eq!(results.results.len(), 5, "limit respected after offset");
     }
 }

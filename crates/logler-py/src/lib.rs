@@ -207,6 +207,8 @@ fn search(files: Vec<String>, query: String, limit: Option<usize>) -> PyResult<S
         limit,
         tail: None,
         context_lines: Some(3),
+        count_only: None,
+        offset: None,
     };
 
     let results = investigator

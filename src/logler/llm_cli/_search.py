@@ -244,12 +244,6 @@ def search(
             # --head is alias for --limit
             effective_limit = limit or head_n
 
-            # When using offset, we need to fetch offset + limit from Rust
-            # so we have enough results to skip the first `offset` entries
-            backend_limit = effective_limit
-            if offset > 0 and effective_limit:
-                backend_limit = effective_limit + offset
-
             # Parse fields list
             field_list = [f.strip() for f in fields.split(",")] if fields else None
 
@@ -264,13 +258,15 @@ def search(
                 correlation_id=correlation,
                 trace_id=trace,
                 service_name=service,
-                limit=backend_limit,
+                limit=effective_limit,
                 tail=tail_n,
                 time_start=time_start,
                 time_end=time_end,
                 context_lines=context,
                 output_format="full",
                 fields=field_list,
+                count_only=count_only,
+                offset=offset,
             )
 
             # Build LLM-optimized output
@@ -348,14 +344,6 @@ def search(
                     out_entry = {k: v for k, v in out_entry.items() if k in field_list}
 
                 output_results.append(out_entry)
-
-            # Apply offset for pagination
-            if offset > 0:
-                output_results = output_results[offset:]
-
-            # Trim back to effective_limit after offset
-            if effective_limit and len(output_results) > effective_limit:
-                output_results = output_results[:effective_limit]
 
             has_more = (offset + len(output_results)) < total_matches
 
