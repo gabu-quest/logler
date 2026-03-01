@@ -1353,5 +1353,74 @@ mod tests {
         let results = inv.search(&q).unwrap();
         assert_eq!(results.total_matches, 20, "total_matches unaffected by offset");
         assert_eq!(results.results.len(), 5, "limit respected after offset");
+        // Verify correct entries returned (no query → all score 1.0, sorted by timestamp)
+        assert_eq!(results.results[0].entry.message, "event 10");
+        assert_eq!(results.results[4].entry.message, "event 14");
+    }
+
+    #[test]
+    fn test_search_offset_beyond_total() {
+        let mut entries = Vec::new();
+        for i in 0..20 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: Some(10),
+            tail: None,
+            context_lines: None,
+            count_only: None,
+            offset: Some(25),
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 20, "total_matches still reported");
+        assert_eq!(results.results.len(), 0, "offset past end returns empty");
+    }
+
+    #[test]
+    fn test_search_count_only_with_filter() {
+        let mut entries = Vec::new();
+        for i in 0..50 {
+            let level = if i % 2 == 0 { "ERROR" } else { "INFO" };
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i % 60),
+                level,
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters {
+                levels: vec![LogLevel::Error],
+                ..Default::default()
+            },
+            limit: None,
+            tail: None,
+            context_lines: None,
+            count_only: Some(true),
+            offset: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 25, "count_only with filter counts correctly");
+        assert_eq!(results.results.len(), 0, "count_only returns no entries");
     }
 }
