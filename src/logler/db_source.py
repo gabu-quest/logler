@@ -28,6 +28,7 @@ import string
 import tempfile
 import urllib.parse
 from datetime import datetime, timezone
+from collections.abc import Iterator
 from typing import Optional
 
 
@@ -194,8 +195,12 @@ def db_to_jsonl(
 def _read_sqler_table(
     conn: sqlite3.Connection,
     mapping: DbTableMapping,
-) -> list[dict]:
-    """Read all rows from a sqler table and convert to log entries."""
+) -> Iterator[dict]:
+    """Read rows from a sqler table, yielding log entries.
+
+    Yields entries one at a time (fetched in batches of 1000) to avoid
+    holding all raw rows + converted entries in memory simultaneously.
+    """
     # Validate table exists (parameterized query — safe from injection)
     exists = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -209,14 +214,13 @@ def _read_sqler_table(
     columns = [row[1] for row in cursor.fetchall()]
 
     if not columns:
-        return []
+        return
 
     # Read rows ordered by _id (fall back to rowid for non-sqler tables)
     order_col = "_id" if "_id" in columns else "rowid"
     cursor = conn.execute(f"SELECT * FROM {_safe_identifier(mapping.table)} ORDER BY {order_col}")
 
-    # Stream in batches to avoid holding raw rows + converted entries simultaneously
-    entries = []
+    # Stream in batches, yield entries one at a time
     idx = 0
     while True:
         batch = cursor.fetchmany(1000)
@@ -226,10 +230,8 @@ def _read_sqler_table(
             row_dict = dict(row)
             all_fields = _merge_sqler_row(row_dict, columns)
             entry = _build_entry(all_fields, mapping, idx)
-            entries.append(entry)
+            yield entry
             idx += 1
-
-    return entries
 
 
 def _merge_sqler_row(row_dict: dict, columns: list[str]) -> dict:

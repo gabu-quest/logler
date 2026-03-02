@@ -327,6 +327,8 @@ def search(
         trace_id: Filter by trace ID (comma-separated for multi).
         service_name: Filter by service name (comma-separated for multi).
         limit: Maximum number of results (first *N* by relevance).
+            ``0`` means no cap (bypasses ``DEFAULT_MAX_RESULTS``).
+            ``None`` applies the safety cap (10K).
         tail: Return last *N* matches by timestamp.
         time_start: Start of time range (ISO 8601).
         time_end: End of time range (ISO 8601).

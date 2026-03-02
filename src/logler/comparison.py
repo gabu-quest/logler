@@ -78,48 +78,61 @@ def cross_service_timeline(
             result = follow_thread(service_files, trace_id=trace_id)
             entries = result.get("entries", [])
         else:
-            # Get all entries
+            # Get all entries (limit=0 bypasses DEFAULT_MAX_RESULTS)
             result = search(
-                service_files, limit=None, parser_format=parser_format, custom_regex=custom_regex
+                service_files, limit=0, parser_format=parser_format, custom_regex=custom_regex
             )
             entries = [r["entry"] for r in result.get("results", [])]
 
-        # Add service label to each entry
+        # Accumulate entries with raw timestamp strings (defer parsing)
         for entry in entries:
-            # Parse timestamp if present
-            timestamp_str = entry.get("timestamp")
-            if timestamp_str:
-                try:
-                    timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-                except (ValueError, TypeError):
-                    timestamp = None
-            else:
-                timestamp = None
-
             all_entries.append(
                 {
                     "service": service_name_key,
-                    "timestamp": timestamp,
-                    "timestamp_str": timestamp_str,
+                    "timestamp_str": entry.get("timestamp"),
                     "entry": entry,
                 }
             )
             service_counts[service_name_key] += 1
 
-    # Filter by time window if specified
+    # Filter by time window if specified (parse timestamps only for filtering)
     if time_window:
         start_time, end_time = time_window
         try:
             start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
             end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
-            all_entries = [
-                e for e in all_entries if e["timestamp"] and start_dt <= e["timestamp"] <= end_dt
-            ]
+            filtered = []
+            for e in all_entries:
+                ts_str = e["timestamp_str"]
+                if not ts_str:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    continue
+                if start_dt <= ts <= end_dt:
+                    filtered.append(e)
+            all_entries = filtered
         except Exception as e:
             warnings.warn(f"Could not parse time window: {e}", stacklevel=2)
 
-    # Sort by timestamp
-    all_entries.sort(key=lambda e: e["timestamp"] if e["timestamp"] else datetime.min)
+    # Sort by timestamp string (ISO 8601 sorts correctly lexicographically)
+    all_entries.sort(key=lambda e: e["timestamp_str"] or "")
+
+    # Apply limit before expensive datetime parsing
+    if limit:
+        all_entries = all_entries[:limit]
+
+    # Parse timestamps only for the final entries (after limit)
+    for e in all_entries:
+        ts_str = e["timestamp_str"]
+        if ts_str:
+            try:
+                e["timestamp"] = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                e["timestamp"] = None
+        else:
+            e["timestamp"] = None
 
     # Calculate relative times
     if all_entries and all_entries[0]["timestamp"]:
@@ -133,10 +146,6 @@ def cross_service_timeline(
     else:
         for entry in all_entries:
             entry["relative_time_ms"] = None
-
-    # Apply limit if specified
-    if limit:
-        all_entries = all_entries[:limit]
 
     # Calculate duration
     duration_ms = None
@@ -293,8 +302,8 @@ def compare_time_periods(
     inv = Investigator()
     inv.load_files(files)
 
-    results_a = search(files, limit=None)
-    results_b = search(files, limit=None)
+    results_a = search(files, limit=0)
+    results_b = search(files, limit=0)
 
     # Filter by time
     entries_a = [

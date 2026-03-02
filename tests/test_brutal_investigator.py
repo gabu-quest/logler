@@ -179,9 +179,9 @@ class TestSearchFunction:
         assert "50" in str(entry)
 
     def test_search_limit_zero(self, temp_log_file):
-        """Search with limit=0"""
+        """limit=0 means 'no cap' — returns all matches (like MongoDB cursor.limit(0))"""
         result = search(files=[temp_log_file], query="message", limit=0)
-        assert result.get("results", []) == [] or len(result.get("results", [])) == 0
+        assert len(result.get("results", [])) == 100
 
     def test_search_limit_one(self, temp_log_file):
         """Search with limit=1"""
