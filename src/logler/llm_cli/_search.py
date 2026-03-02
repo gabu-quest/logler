@@ -936,7 +936,7 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
                 import sys as _sys
 
                 query = _sys.stdin.read().strip()
-            elif not query:
+            if not query:
                 _error_json("SQL query required. Provide as argument or use --stdin.")
 
             # Parse log files

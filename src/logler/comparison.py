@@ -128,7 +128,7 @@ def cross_service_timeline(
         else:
             e["timestamp"] = None
 
-    all_entries.sort(key=lambda e: e["timestamp"] if e["timestamp"] else datetime.min)
+    all_entries.sort(key=lambda e: e["timestamp"] if e["timestamp"] else datetime.max)
 
     # Apply limit after sorting — limit=0 and limit=None both skip (falsy)
     if limit:
@@ -479,7 +479,7 @@ def _analyze_period(entries: List[Dict], start: str, end: str) -> Dict[str, Any]
         "error_count": error_count,
         "error_rate": error_rate,
         "log_levels": dict(level_counts),
-        "top_errors": list(set(error_messages))[:10],
+        "top_errors": list(dict.fromkeys(error_messages))[:10],
         "unique_threads": len(threads),
     }
 

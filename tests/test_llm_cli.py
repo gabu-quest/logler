@@ -891,8 +891,7 @@ class TestSqlCommandSecurity:
         assert result.returncode == EXIT_USER_ERROR
         data = json.loads(result.stdout)
         assert "error" in data
-        assert "file system operations are disabled" in data["error"].lower() or \
-               "permission" in data["error"].lower()
+        assert "file system operations are disabled" in data["error"].lower()
 
     def test_sql_blocks_copy_to(self, sample_log_file):
         """COPY ... TO must be blocked — prevents data exfiltration."""

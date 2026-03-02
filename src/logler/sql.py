@@ -249,7 +249,10 @@ class SqlEngine:
         Returns:
             List of table names
         """
-        result = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        result = self.conn.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'main'"
+        )
         return [row[0] for row in result.fetchall()]
 
     def get_schema(self, table: str) -> str:
