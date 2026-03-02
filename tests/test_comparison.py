@@ -8,6 +8,7 @@ import pytest
 from logler.comparison import (
     _analyze_thread,
     _DEFAULT_TIMELINE_LIMIT,
+    compare_threads,
     compare_time_periods,
     cross_service_timeline,
 )
@@ -58,11 +59,11 @@ class TestCompareTimePeriodsTimeFilters:
             limit=0,
         )
 
-        # Result should have period analysis structure
-        assert "period_a" in result
-        assert "period_b" in result
-        assert "changes" in result
-        assert "summary" in result
+        # Both periods empty → zero logs, zero errors
+        assert result["period_a"]["total_logs"] == 0
+        assert result["period_a"]["error_count"] == 0
+        assert result["period_b"]["total_logs"] == 0
+        assert result["period_b"]["error_count"] == 0
 
     @patch("logler.comparison.search")
     @patch("logler._search_core.RUST_AVAILABLE", True)
@@ -166,9 +167,15 @@ class TestAnalyzeThreadDuration:
         assert result["duration_ms"] == 0
 
     def test_empty_entries(self):
-        """No entries: duration is 0."""
+        """No entries: full return shape with zeroes."""
         result = _analyze_thread([], "t1")
+        assert result["id"] == "t1"
+        assert result["entries"] == []
+        assert result["entry_count"] == 0
         assert result["duration_ms"] == 0
+        assert result["error_count"] == 0
+        assert result["log_levels"] == {}
+        assert result["unique_messages"] == 0
 
     def test_entries_with_missing_timestamps(self):
         """Entries missing timestamps are skipped — duration from valid ones."""
@@ -216,3 +223,80 @@ class TestAnalyzeThreadDuration:
         assert result["log_levels"] == {"ERROR": 1, "INFO": 1, "WARN": 1}
         assert result["unique_messages"] == 3
         assert result["duration_ms"] == 3000
+
+
+# ---------------------------------------------------------------------------
+# compare_threads integration (uses follow_thread mock)
+# ---------------------------------------------------------------------------
+
+
+class TestCompareThreads:
+    """Verify compare_threads produces correct diffs and survives edge cases."""
+
+    @patch("logler.comparison.follow_thread")
+    @patch("logler._search_core.RUST_AVAILABLE", True)
+    def test_two_threads_duration_and_errors(self, mock_follow):
+        """Duration diff and error diff computed from two real threads."""
+        mock_follow.side_effect = [
+            {
+                "entries": [
+                    {"timestamp": "2024-01-01T10:00:00Z", "level": "INFO", "message": "start"},
+                    {"timestamp": "2024-01-01T10:00:02Z", "level": "INFO", "message": "end"},
+                ]
+            },
+            {
+                "entries": [
+                    {"timestamp": "2024-01-01T10:00:00Z", "level": "INFO", "message": "start"},
+                    {"timestamp": "2024-01-01T10:00:05Z", "level": "ERROR", "message": "crash"},
+                ]
+            },
+        ]
+
+        result = compare_threads(["app.log"], correlation_a="ok", correlation_b="fail")
+
+        assert result["thread_a"]["duration_ms"] == 2000
+        assert result["thread_b"]["duration_ms"] == 5000
+        assert result["differences"]["duration_diff_ms"] == 3000
+        assert result["thread_a"]["error_count"] == 0
+        assert result["thread_b"]["error_count"] == 1
+        assert result["differences"]["error_diff"] == 1
+
+    @patch("logler.comparison.follow_thread")
+    @patch("logler._search_core.RUST_AVAILABLE", True)
+    def test_one_thread_empty(self, mock_follow):
+        """Empty thread must not crash — exercises entry_count in empty return."""
+        mock_follow.side_effect = [
+            {"entries": []},
+            {
+                "entries": [
+                    {"timestamp": "2024-01-01T10:00:00Z", "level": "ERROR", "message": "fail"},
+                    {"timestamp": "2024-01-01T10:00:01Z", "level": "ERROR", "message": "fail2"},
+                ]
+            },
+        ]
+
+        result = compare_threads(["app.log"], correlation_a="gone", correlation_b="here")
+
+        assert result["thread_a"]["entry_count"] == 0
+        assert result["thread_b"]["entry_count"] == 2
+        assert result["differences"]["entry_count_diff"] == 2
+        assert result["differences"]["error_diff"] == 2
+
+    @patch("logler.comparison.follow_thread")
+    @patch("logler._search_core.RUST_AVAILABLE", True)
+    def test_identical_threads(self, mock_follow):
+        """Identical threads: all diffs are zero, summary says 'similar'."""
+        entries = [
+            {"timestamp": "2024-01-01T10:00:00Z", "level": "INFO", "message": "hello"},
+        ]
+        mock_follow.side_effect = [
+            {"entries": entries},
+            {"entries": entries},
+        ]
+
+        result = compare_threads(["app.log"], thread_a="t1", thread_b="t1")
+
+        assert result["differences"]["duration_diff_ms"] == 0
+        assert result["differences"]["error_diff"] == 0
+        assert result["differences"]["entry_count_diff"] == 0
+        assert "similar" in result["summary"].lower()

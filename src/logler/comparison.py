@@ -332,6 +332,7 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
         return {
             "id": thread_id,
             "entries": [],
+            "entry_count": 0,
             "duration_ms": 0,
             "error_count": 0,
             "log_levels": {},
