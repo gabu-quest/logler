@@ -68,7 +68,11 @@ class SqlEngine:
         """
         )
 
-        # Insert entries from all indices
+        # Insert entries from all indices in batches
+        _BATCH_SIZE = 5000
+        batch: list[tuple] = []
+        insert_sql = "INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+
         for file_path, index in indices.items():
             entries = getattr(index, "entries", None)
             if entries is None:
@@ -90,21 +94,24 @@ class SqlEngine:
                 elif level is not None and not isinstance(level, str):
                     level = str(level)
 
-                self.conn.execute(
-                    "INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [
-                        file_path,
-                        getattr(entry, "line_number", None),
-                        ts,
-                        level,
-                        getattr(entry, "message", None),
-                        getattr(entry, "thread_id", None),
-                        getattr(entry, "correlation_id", None),
-                        getattr(entry, "trace_id", None),
-                        getattr(entry, "span_id", None),
-                        getattr(entry, "raw", None),
-                    ],
-                )
+                batch.append((
+                    file_path,
+                    getattr(entry, "line_number", None),
+                    ts,
+                    level,
+                    getattr(entry, "message", None),
+                    getattr(entry, "thread_id", None),
+                    getattr(entry, "correlation_id", None),
+                    getattr(entry, "trace_id", None),
+                    getattr(entry, "span_id", None),
+                    getattr(entry, "raw", None),
+                ))
+                if len(batch) >= _BATCH_SIZE:
+                    self.conn.executemany(insert_sql, batch)
+                    batch.clear()
+
+        if batch:
+            self.conn.executemany(insert_sql, batch)
 
         if "logs" not in self._tables_loaded:
             self._tables_loaded.append("logs")
@@ -165,19 +172,26 @@ class SqlEngine:
 
             all_series = extract_numeric_fields(entry_dicts)
 
+            _BATCH_SIZE = 5000
+            batch: list[tuple] = []
+            insert_sql = "INSERT INTO metrics VALUES (?, ?, ?, ?, ?, ?)"
+
             for field_name, points in all_series.items():
                 for point in points:
-                    self.conn.execute(
-                        "INSERT INTO metrics VALUES (?, ?, ?, ?, ?, ?)",
-                        [
-                            point.file,
-                            point.line_number,
-                            point.timestamp,
-                            field_name,
-                            point.value,
-                            point.unit,
-                        ],
-                    )
+                    batch.append((
+                        point.file,
+                        point.line_number,
+                        point.timestamp,
+                        field_name,
+                        point.value,
+                        point.unit,
+                    ))
+                    if len(batch) >= _BATCH_SIZE:
+                        self.conn.executemany(insert_sql, batch)
+                        batch.clear()
+
+            if batch:
+                self.conn.executemany(insert_sql, batch)
 
         if "metrics" not in self._tables_loaded:
             self._tables_loaded.append("metrics")
