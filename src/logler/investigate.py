@@ -354,7 +354,10 @@ class Investigator:
             fp = entry.get("file", "unknown")
             if fp not in indices:
                 indices[fp] = SimpleNamespace(entries=[])
-            indices[fp].entries.append(SimpleNamespace(**entry))
+            ns = SimpleNamespace()
+            for k, v in entry.items():
+                setattr(ns, k, v)
+            indices[fp].entries.append(ns)
 
         engine = SqlEngine(db_path=self._sql_db_path)
         engine.load_files(indices)

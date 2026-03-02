@@ -116,14 +116,8 @@ def cross_service_timeline(
         except Exception as e:
             warnings.warn(f"Could not parse time window: {e}", stacklevel=2)
 
-    # Sort by timestamp string (ISO 8601 sorts correctly lexicographically)
-    all_entries.sort(key=lambda e: e["timestamp_str"] or "")
-
-    # Apply limit before expensive datetime parsing
-    if limit:
-        all_entries = all_entries[:limit]
-
-    # Parse timestamps only for the final entries (after limit)
+    # Parse timestamps and sort by actual datetime (lexicographic sort
+    # fails when timestamps have mixed timezone offsets)
     for e in all_entries:
         ts_str = e["timestamp_str"]
         if ts_str:
@@ -133,6 +127,12 @@ def cross_service_timeline(
                 e["timestamp"] = None
         else:
             e["timestamp"] = None
+
+    all_entries.sort(key=lambda e: e["timestamp"] if e["timestamp"] else datetime.min)
+
+    # Apply limit after sorting
+    if limit:
+        all_entries = all_entries[:limit]
 
     # Calculate relative times
     if all_entries and all_entries[0]["timestamp"]:
@@ -293,27 +293,22 @@ def compare_time_periods(
         >>> print(diff["summary"])
     """
     from ._search_core import RUST_AVAILABLE
-    from .investigate import Investigator
 
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Search each period
-    inv = Investigator()
-    inv.load_files(files)
+    # Fetch all entries once and filter into both periods
+    all_results = search(files, limit=0)
+    all_items = all_results.get("results", [])
 
-    results_a = search(files, limit=0)
-    results_b = search(files, limit=0)
-
-    # Filter by time
     entries_a = [
         r["entry"]
-        for r in results_a.get("results", [])
+        for r in all_items
         if _in_time_range(r["entry"], period_a_start, period_a_end)
     ]
     entries_b = [
         r["entry"]
-        for r in results_b.get("results", [])
+        for r in all_items
         if _in_time_range(r["entry"], period_b_start, period_b_end)
     ]
 

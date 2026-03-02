@@ -179,8 +179,8 @@ def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, p
 @click.option("--trace", help="Filter by trace ID (comma-separated)")
 @click.option("--service", help="Filter by service name (comma-separated)")
 @time_filter_options
-@click.option("--limit", type=int, help="Limit number of results (first N)")
-@click.option("--head", "head_n", type=int, help="Alias for --limit")
+@click.option("--limit", type=click.IntRange(min=1), default=None, help="Limit number of results (first N)")
+@click.option("--head", "head_n", type=click.IntRange(min=1), default=None, help="Alias for --limit")
 @click.option("--tail", "tail_n", type=int, help="Return last N matches by timestamp")
 @click.option("--context", type=int, default=0, help="Include N context lines")
 @click.option("--fields", help="Comma-separated fields to include in output")

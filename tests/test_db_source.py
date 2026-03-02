@@ -1167,6 +1167,9 @@ class TestFetchmanyStreaming:
             def __init__(self, real_cursor):
                 self._cursor = real_cursor
 
+            def close(self):
+                return self._cursor.close()
+
             def fetchone(self):
                 return self._cursor.fetchone()
 

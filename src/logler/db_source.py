@@ -220,18 +220,23 @@ def _read_sqler_table(
     order_col = "_id" if "_id" in columns else "rowid"
     cursor = conn.execute(f"SELECT * FROM {_safe_identifier(mapping.table)} ORDER BY {order_col}")
 
-    # Stream in batches, yield entries one at a time
-    idx = 0
-    while True:
-        batch = cursor.fetchmany(1000)
-        if not batch:
-            break
-        for row in batch:
-            row_dict = dict(row)
-            all_fields = _merge_sqler_row(row_dict, columns)
-            entry = _build_entry(all_fields, mapping, idx)
-            yield entry
-            idx += 1
+    # Stream in batches, yield entries one at a time.
+    # try/finally ensures cursor is closed even if the caller abandons
+    # the generator mid-stream (Python sends GeneratorExit).
+    try:
+        idx = 0
+        while True:
+            batch = cursor.fetchmany(1000)
+            if not batch:
+                break
+            for row in batch:
+                row_dict = dict(row)
+                all_fields = _merge_sqler_row(row_dict, columns)
+                entry = _build_entry(all_fields, mapping, idx)
+                yield entry
+                idx += 1
+    finally:
+        cursor.close()
 
 
 def _merge_sqler_row(row_dict: dict, columns: list[str]) -> dict:
