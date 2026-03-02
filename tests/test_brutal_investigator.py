@@ -179,14 +179,37 @@ class TestSearchFunction:
         assert "50" in str(entry)
 
     def test_search_limit_zero(self, temp_log_file):
-        """limit=0 means 'no cap' — returns all matches (like MongoDB cursor.limit(0))"""
+        """limit=0 means 'no cap' — returns all 100 matches (like MongoDB cursor.limit(0))."""
         result = search(files=[temp_log_file], query="message", limit=0)
-        assert len(result.get("results", [])) == 100
+        assert result["total_matches"] == 100
+        assert len(result["results"]) == 100
+
+    def test_search_limit_zero_bypasses_default_max_results(self, tmp_path):
+        """limit=0 returns ALL entries even when count > DEFAULT_MAX_RESULTS (10K)."""
+        entry_count = 10_500
+        log_path = str(tmp_path / "big.log")
+        with open(log_path, "w") as f:
+            for i in range(entry_count):
+                f.write(json.dumps({"message": f"entry {i}", "level": "INFO"}) + "\n")
+        result = search(files=[log_path], query="entry", limit=0)
+        assert result["total_matches"] == entry_count
+        assert len(result["results"]) == entry_count
+
+    def test_search_limit_none_caps_at_default(self, tmp_path):
+        """limit=None applies DEFAULT_MAX_RESULTS (10K) — contrast with limit=0."""
+        entry_count = 10_500
+        log_path = str(tmp_path / "big.log")
+        with open(log_path, "w") as f:
+            for i in range(entry_count):
+                f.write(json.dumps({"message": f"entry {i}", "level": "INFO"}) + "\n")
+        result = search(files=[log_path], query="entry", limit=None)
+        assert result["total_matches"] == entry_count
+        assert len(result["results"]) == 10_000
 
     def test_search_limit_one(self, temp_log_file):
-        """Search with limit=1"""
+        """Search with limit=1 returns exactly 1 result."""
         result = search(files=[temp_log_file], query="message", limit=1)
-        assert len(result.get("results", [])) <= 1
+        assert len(result.get("results", [])) == 1
 
     def test_search_nonexistent_pattern(self, temp_log_file):
         """Search for pattern that doesn't exist"""

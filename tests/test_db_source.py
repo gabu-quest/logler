@@ -808,7 +808,13 @@ class TestNonSqlerTableHandling:
             service_name="test",
         )
 
-        rows = list(_read_sqler_table(conn, mapping))
+        import types as _types
+
+        raw = _read_sqler_table(conn, mapping)
+        assert isinstance(raw, _types.GeneratorType), (
+            "_read_sqler_table must return a generator for streaming memory"
+        )
+        rows = list(raw)
         conn.close()
 
         assert len(rows) == 3
@@ -1189,7 +1195,13 @@ class TestFetchmanyStreaming:
         real_conn.row_factory = sqlite3.Row
         spy_conn = SpyConnection(real_conn)
         try:
-            rows = list(_read_sqler_table(spy_conn, qler_job_mapping()))
+            import types as _types
+
+            raw = _read_sqler_table(spy_conn, qler_job_mapping())
+            assert isinstance(raw, _types.GeneratorType), (
+                "_read_sqler_table must return a generator for streaming memory"
+            )
+            rows = list(raw)
             assert len(rows) == self.TOTAL_JOBS
             # ceil(2500/1000) = 3 data batches + 1 empty sentinel = 4 calls
             assert len(fetchmany_calls) == 4
