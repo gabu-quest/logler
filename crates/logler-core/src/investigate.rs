@@ -11,8 +11,12 @@ use std::time::Instant;
 /// Safety cap: maximum results returned when no limit/tail is specified.
 /// Prevents a single unbounded query from allocating gigabytes of memory.
 /// At ~80 bytes per materialized result + JSON serialization overhead,
-/// 10K results ≈ 80 MB total (Rust + Python). Callers needing more
-/// can pass an explicit `limit`.
+/// 10K results ≈ 80 MB total (Rust + Python).
+///
+/// Callers can override:
+///   - `limit: Some(N)` for N > 0 → return at most N results
+///   - `limit: Some(0)` → no cap (like MongoDB `cursor.limit(0)`)
+///   - `limit: None` → apply this safety cap
 const DEFAULT_MAX_RESULTS: usize = 10_000;
 
 /// Lightweight match candidate produced in the filter phase.
@@ -140,7 +144,11 @@ impl Investigator {
                         (None, None) => std::cmp::Ordering::Equal,
                     })
             });
-            let cap = query.limit.unwrap_or(DEFAULT_MAX_RESULTS);
+            let cap = match query.limit {
+                Some(0) => usize::MAX,   // 0 = no limit (like MongoDB cursor.limit(0))
+                Some(n) => n,
+                None => DEFAULT_MAX_RESULTS,
+            };
             all_candidates.into_iter().skip(skip_n).take(cap).collect()
         };
 
@@ -1428,5 +1436,37 @@ mod tests {
         let results = inv.search(&q).unwrap();
         assert_eq!(results.total_matches, 25, "count_only with filter counts correctly");
         assert_eq!(results.results.len(), 0, "count_only returns no entries");
+    }
+
+    #[test]
+    fn test_search_limit_zero_returns_all() {
+        // limit=0 means "no cap" — return all matches (like MongoDB cursor.limit(0))
+        let mut entries = Vec::new();
+        for i in 0..200 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:{:02}:{:02}Z", i / 60, i % 60),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: Some(0),
+            tail: None,
+            context_lines: None,
+            count_only: None,
+            offset: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.results.len(), 200, "limit=0 should return all results");
+        assert_eq!(results.total_matches, 200);
     }
 }
