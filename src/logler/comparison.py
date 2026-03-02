@@ -130,7 +130,7 @@ def cross_service_timeline(
 
     all_entries.sort(key=lambda e: e["timestamp"] if e["timestamp"] else datetime.min)
 
-    # Apply limit after sorting
+    # Apply limit after sorting — limit=0 and limit=None both skip (falsy)
     if limit:
         all_entries = all_entries[:limit]
 

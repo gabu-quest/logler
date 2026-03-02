@@ -34,6 +34,7 @@ class SqlEngine:
                      Defaults to in-memory (``":memory:"``).
         """
         self.conn = duckdb.connect(db_path or ":memory:")
+        self.conn.execute("SET enable_external_access = false")
         self._tables_loaded: list[str] = []
 
     def close(self) -> None:
@@ -68,16 +69,20 @@ class SqlEngine:
         """
         )
 
+        # Materialize entries once per file — avoids double-iteration if
+        # index.entries is a one-shot iterable (generator / cursor).
+        materialized: dict[str, list] = {}
+        for file_path, index in indices.items():
+            entries = list(getattr(index, "entries", None) or [])
+            if entries:
+                materialized[file_path] = entries
+
         # Insert entries from all indices in batches
         _BATCH_SIZE = 5000
         batch: list[tuple] = []
         insert_sql = "INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
-        for file_path, index in indices.items():
-            entries = getattr(index, "entries", None)
-            if entries is None:
-                continue
-
+        for file_path, entries in materialized.items():
             for entry in entries:
                 # Handle timestamp - convert to string for DuckDB
                 ts = getattr(entry, "timestamp", None)
@@ -117,9 +122,13 @@ class SqlEngine:
             self._tables_loaded.append("logs")
 
         # Also populate metrics table from numeric extraction
-        self._load_metrics(indices)
+        self._load_metrics(indices, materialized)
 
-    def _load_metrics(self, indices: Mapping[str, LogIndex]) -> None:
+    def _load_metrics(
+        self,
+        indices: Mapping[str, LogIndex],
+        materialized: dict[str, list] | None = None,
+    ) -> None:
         """Extract numeric values from log entries and load into a metrics table.
 
         This enables SQL queries like:
@@ -127,6 +136,13 @@ class SqlEngine:
             SELECT m.*, l.message FROM metrics m JOIN logs l
                 ON m.file = l.file AND m.line_number = l.line_number
                 WHERE m.value > 1000
+
+        Args:
+            indices: Original indices mapping (used as fallback).
+            materialized: Pre-materialized ``{path: [entry, ...]}`` from
+                :meth:`load_files`.  When provided the entries are reused
+                instead of re-iterating ``index.entries`` (which may be
+                exhausted if it was a one-shot iterable).
         """
         self.conn.execute(
             """
@@ -143,9 +159,15 @@ class SqlEngine:
 
         from .metrics import extract_numeric_fields
 
-        for file_path, index in indices.items():
-            entries = getattr(index, "entries", None)
-            if entries is None:
+        # Prefer pre-materialized entries; fall back to indices for
+        # callers that invoke _load_metrics directly.
+        source = materialized if materialized is not None else {
+            fp: list(getattr(idx, "entries", None) or [])
+            for fp, idx in indices.items()
+        }
+
+        for file_path, entries in source.items():
+            if not entries:
                 continue
 
             # Build entry dicts for the metrics extractor

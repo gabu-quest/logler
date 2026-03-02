@@ -616,3 +616,84 @@ class TestInvestigatorSqlEngineCaching:
         )
         assert verify_result[0]["cnt"] == TOTAL_ENTRIES
         verify_engine.close()
+
+
+# ---------------------------------------------------------------------------
+# Security: external access disabled
+# ---------------------------------------------------------------------------
+
+
+class TestSqlEngineExternalAccessDisabled:
+    """Verify DuckDB connections block filesystem operations."""
+
+    def test_read_csv_auto_blocked(self, loaded_engine):
+        """read_csv_auto must be blocked by enable_external_access=false."""
+        with pytest.raises(duckdb.PermissionException, match="file system operations are disabled"):
+            loaded_engine.query("SELECT * FROM read_csv_auto('/etc/passwd')")
+
+    def test_read_json_auto_blocked(self, loaded_engine):
+        """read_json_auto must be blocked."""
+        with pytest.raises(duckdb.PermissionException, match="file system operations are disabled"):
+            loaded_engine.query("SELECT * FROM read_json_auto('/etc/passwd')")
+
+    def test_copy_to_blocked(self, loaded_engine):
+        """COPY ... TO must be blocked — prevents data exfiltration."""
+        with pytest.raises(duckdb.PermissionException, match="file system operations are disabled"):
+            loaded_engine.query("COPY logs TO '/tmp/exfil.csv'")
+
+    def test_normal_queries_still_work(self, loaded_engine):
+        """SELECT, aggregate, JOIN on logs/metrics still function."""
+        # Basic SELECT
+        result = json.loads(loaded_engine.query("SELECT COUNT(*) AS cnt FROM logs"))
+        assert result[0]["cnt"] == TOTAL_ENTRIES
+
+        # Aggregate
+        result = json.loads(
+            loaded_engine.query(
+                "SELECT level, COUNT(*) AS cnt FROM logs GROUP BY level ORDER BY level"
+            )
+        )
+        assert len(result) == 4
+
+        # JOIN
+        result = json.loads(
+            loaded_engine.query(
+                "SELECT l.line_number, m.value FROM logs l "
+                "JOIN metrics m ON l.file = m.file AND l.line_number = m.line_number "
+                "ORDER BY l.line_number LIMIT 1"
+            )
+        )
+        assert len(result) == 1
+        assert result[0]["line_number"] == 1
+        assert result[0]["value"] == 100.0
+
+
+class TestSqlEngineGeneratorEntries:
+    """Verify load_files works when index.entries is a one-shot generator."""
+
+    def test_generator_entries_populate_both_tables(self, sql_log_file):
+        """If entries is a generator, both logs and metrics should be populated."""
+        parser = LogParser()
+        raw_entries = []
+        with open(sql_log_file, encoding="utf-8", errors="replace") as f:
+            for line_number, line in enumerate(f, start=1):
+                line = line.rstrip("\n\r")
+                if line:
+                    raw_entries.append(parser.parse_line(line_number, line))
+
+        class GeneratorIndex:
+            """Index whose .entries is a generator (exhausted after one pass)."""
+            def __init__(self, items):
+                self._items = items
+            @property
+            def entries(self):
+                return (e for e in self._items)
+
+        engine = SqlEngine()
+        engine.load_files({sql_log_file: GeneratorIndex(raw_entries)})
+
+        logs_count = json.loads(engine.query("SELECT COUNT(*) AS cnt FROM logs"))
+        assert logs_count[0]["cnt"] == TOTAL_ENTRIES
+
+        metrics_count = json.loads(engine.query("SELECT COUNT(*) AS cnt FROM metrics"))
+        assert metrics_count[0]["cnt"] == TOTAL_ENTRIES

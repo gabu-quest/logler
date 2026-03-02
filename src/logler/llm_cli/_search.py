@@ -986,6 +986,7 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
 
             # Create DuckDB connection and load data
             conn = duckdb.connect(":memory:")
+            conn.execute("SET enable_external_access = false")
 
             # Create table from entries
             conn.execute(

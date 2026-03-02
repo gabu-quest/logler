@@ -871,3 +871,36 @@ class TestRelativeTime:
 
         result = _parse_time_arg("2024-01-15T10:00:00Z", "--after")
         assert "2024-01-15" in result
+
+
+# ---------------------------------------------------------------------------
+# Security: SQL command blocks filesystem access
+# ---------------------------------------------------------------------------
+
+
+class TestSqlCommandSecurity:
+    """Verify the logler llm sql command blocks DuckDB filesystem functions."""
+
+    def test_sql_blocks_read_csv_auto(self, sample_log_file):
+        """read_csv_auto must be blocked — prevents host file reads."""
+        result = run_llm_command([
+            "sql",
+            "SELECT * FROM read_csv_auto('/etc/passwd')",
+            "-f", sample_log_file,
+        ])
+        assert result.returncode == EXIT_USER_ERROR
+        data = json.loads(result.stdout)
+        assert "error" in data
+        assert "file system operations are disabled" in data["error"].lower() or \
+               "permission" in data["error"].lower()
+
+    def test_sql_blocks_copy_to(self, sample_log_file):
+        """COPY ... TO must be blocked — prevents data exfiltration."""
+        result = run_llm_command([
+            "sql",
+            "COPY logs TO '/tmp/exfil.csv'",
+            "-f", sample_log_file,
+        ])
+        assert result.returncode == EXIT_USER_ERROR
+        data = json.loads(result.stdout)
+        assert "error" in data
