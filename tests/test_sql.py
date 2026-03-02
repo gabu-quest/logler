@@ -681,16 +681,13 @@ class TestSqlEngineGeneratorEntries:
                 if line:
                     raw_entries.append(parser.parse_line(line_number, line))
 
-        class GeneratorIndex:
-            """Index whose .entries is a generator (exhausted after one pass)."""
+        class OneShotIndex:
+            """Index whose .entries is a stored generator (exhausted after one pass)."""
             def __init__(self, items):
-                self._items = items
-            @property
-            def entries(self):
-                return (e for e in self._items)
+                self.entries = (e for e in items)
 
         engine = SqlEngine()
-        engine.load_files({sql_log_file: GeneratorIndex(raw_entries)})
+        engine.load_files({sql_log_file: OneShotIndex(raw_entries)})
 
         logs_count = json.loads(engine.query("SELECT COUNT(*) AS cnt FROM logs"))
         assert logs_count[0]["cnt"] == TOTAL_ENTRIES

@@ -904,3 +904,4 @@ class TestSqlCommandSecurity:
         assert result.returncode == EXIT_USER_ERROR
         data = json.loads(result.stdout)
         assert "error" in data
+        assert "file system operations are disabled" in data["error"].lower()
