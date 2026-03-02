@@ -939,56 +939,10 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
             if not query:
                 _error_json("SQL query required. Provide as argument or use --stdin.")
 
-            # Parse log files
-            from ..parser import LogParser
-
-            parser = LogParser()
-            entries = []
-
-            for file_path in file_list:
-                try:
-                    with open(file_path, "r", errors="replace") as f:
-                        for i, line in enumerate(f):
-                            line = line.rstrip()
-                            if not line:
-                                continue
-
-                            entry = parser.parse_line(i + 1, line)
-                            entries.append(
-                                {
-                                    "line_number": i + 1,
-                                    "timestamp": str(entry.timestamp) if entry.timestamp else None,
-                                    "level": str(entry.level).upper() if entry.level else None,
-                                    "message": entry.message,
-                                    "thread_id": entry.thread_id,
-                                    "correlation_id": entry.correlation_id,
-                                    "trace_id": getattr(entry, "trace_id", None),
-                                    "span_id": getattr(entry, "span_id", None),
-                                    "file": file_path,
-                                    "raw": line,
-                                }
-                            )
-                except (FileNotFoundError, PermissionError) as e:
-                    _error_json(f"Cannot read file {file_path}: {e}")
-
-            if not entries:
-                _output_json(
-                    {
-                        "query": query,
-                        "files": file_list,
-                        "total_entries": 0,
-                        "results": [],
-                        "error": "No log entries found",
-                    },
-                    pretty,
-                )
-                sys.exit(EXIT_NO_RESULTS)
-
             # Create DuckDB connection and load data
             conn = duckdb.connect(":memory:")
             conn.execute("SET enable_external_access = false")
 
-            # Create table from entries
             conn.execute(
                 """
                 CREATE TABLE logs (
@@ -1006,27 +960,61 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
             """
             )
 
-            # Insert entries
-            conn.executemany(
-                """
-                INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        e["line_number"],
-                        e["timestamp"],
-                        e["level"],
-                        e["message"],
-                        e["thread_id"],
-                        e["correlation_id"],
-                        e["trace_id"],
-                        e["span_id"],
-                        e["file"],
-                        e["raw"],
-                    )
-                    for e in entries
-                ],
-            )
+            # Stream-parse log files directly into DuckDB in batches
+            from ..parser import LogParser
+
+            parser = LogParser()
+            _SQL_BATCH = 5000
+            insert_sql = "INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            batch: list = []
+            total_entries = 0
+
+            for file_path in file_list:
+                try:
+                    with open(file_path, "r", errors="replace") as f:
+                        for i, line in enumerate(f):
+                            line = line.rstrip()
+                            if not line:
+                                continue
+
+                            entry = parser.parse_line(i + 1, line)
+                            batch.append(
+                                (
+                                    i + 1,
+                                    str(entry.timestamp) if entry.timestamp else None,
+                                    str(entry.level).upper() if entry.level else None,
+                                    entry.message,
+                                    entry.thread_id,
+                                    entry.correlation_id,
+                                    getattr(entry, "trace_id", None),
+                                    getattr(entry, "span_id", None),
+                                    file_path,
+                                    line,
+                                )
+                            )
+                            total_entries += 1
+                            if len(batch) >= _SQL_BATCH:
+                                conn.executemany(insert_sql, batch)
+                                batch.clear()
+                except (FileNotFoundError, PermissionError) as e:
+                    _error_json(f"Cannot read file {file_path}: {e}")
+
+            if batch:
+                conn.executemany(insert_sql, batch)
+                batch.clear()
+
+            if total_entries == 0:
+                _output_json(
+                    {
+                        "query": query,
+                        "files": file_list,
+                        "total_entries": 0,
+                        "results": [],
+                        "error": "No log entries found",
+                    },
+                    pretty,
+                )
+                sys.exit(EXIT_NO_RESULTS)
 
             # Execute the user's query
             try:
@@ -1041,7 +1029,7 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
             output = {
                 "query": query,
                 "files": file_list,
-                "total_entries": len(entries),
+                "total_entries": total_entries,
                 "columns": columns,
                 "row_count": len(rows),
                 "results": rows,

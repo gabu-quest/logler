@@ -11,6 +11,7 @@ from collections import defaultdict
 
 from ._search_core import search, follow_thread
 
+_DEFAULT_TIMELINE_LIMIT = 10_000
 
 # ---------------------------------------------------------------------------
 # Cross-service timeline
@@ -78,9 +79,12 @@ def cross_service_timeline(
             result = follow_thread(service_files, trace_id=trace_id)
             entries = result.get("entries", [])
         else:
-            # Get all entries (limit=0 bypasses DEFAULT_MAX_RESULTS)
+            # Cap the fallback to prevent unbounded materialisation
             result = search(
-                service_files, limit=0, parser_format=parser_format, custom_regex=custom_regex
+                service_files,
+                limit=_DEFAULT_TIMELINE_LIMIT,
+                parser_format=parser_format,
+                custom_regex=custom_regex,
             )
             entries = [r["entry"] for r in result.get("results", [])]
 
@@ -297,20 +301,12 @@ def compare_time_periods(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Fetch all entries once and filter into both periods
-    all_results = search(files, limit=0)
-    all_items = all_results.get("results", [])
+    # Push time filters to Rust — only materialise entries within each window
+    results_a = search(files, time_start=period_a_start, time_end=period_a_end, limit=0)
+    entries_a = [r["entry"] for r in results_a.get("results", [])]
 
-    entries_a = [
-        r["entry"]
-        for r in all_items
-        if _in_time_range(r["entry"], period_a_start, period_a_end)
-    ]
-    entries_b = [
-        r["entry"]
-        for r in all_items
-        if _in_time_range(r["entry"], period_b_start, period_b_end)
-    ]
+    results_b = search(files, time_start=period_b_start, time_end=period_b_end, limit=0)
+    entries_b = [r["entry"] for r in results_b.get("results", [])]
 
     # Analyse periods
     analysis_a = _analyze_period(entries_a, period_a_start, period_a_end)
@@ -363,13 +359,19 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
         if service:
             services.add(service)
 
-    # Calculate duration
+    # Calculate duration from min/max timestamps (robust to unsorted input)
     duration_ms = 0
     if len(entries) >= 2:
         try:
-            start = datetime.fromisoformat(entries[0].get("timestamp", "").replace("Z", "+00:00"))
-            end = datetime.fromisoformat(entries[-1].get("timestamp", "").replace("Z", "+00:00"))
-            duration_ms = int((end - start).total_seconds() * 1000)
+            timestamps = []
+            for e in entries:
+                ts_str = e.get("timestamp", "")
+                if ts_str:
+                    timestamps.append(datetime.fromisoformat(ts_str.replace("Z", "+00:00")))
+            if len(timestamps) >= 2:
+                duration_ms = int(
+                    (max(timestamps) - min(timestamps)).total_seconds() * 1000
+                )
         except (ValueError, TypeError, AttributeError):
             pass  # Skip if timestamps are missing or invalid
 
