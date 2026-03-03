@@ -332,15 +332,18 @@ class Investigator:
 
     _SQL_ENGINE_PAGE_SIZE = 10_000
 
+    def _get_entries_page(self, offset: int, limit: int) -> str:
+        """Fetch a page of raw entries from the Rust index (JSON string)."""
+        return self._investigator.get_entries_page(offset, limit)
+
     def _get_sql_engine(self):
         """Get a SQL engine loaded with current log data.
 
         The engine is built once and cached for the lifetime of this
         Investigator (or until :meth:`load_files` is called again).
 
-        Reuses Rust-parsed entries via paginated ``self.search()`` — fetches
-        in pages of ``_SQL_ENGINE_PAGE_SIZE`` to stay memory-bounded
-        regardless of total entry count.
+        Uses ``get_entries_page()`` to iterate the Rust index directly —
+        O(page_size) per call, O(N) total. No search/filter/sort overhead.
         """
         if self._sql_engine is not None:
             return self._sql_engine
@@ -353,26 +356,32 @@ class Investigator:
         offset = 0
 
         while True:
-            result = self.search(limit=self._SQL_ENGINE_PAGE_SIZE, offset=offset)
-            items = result.get("results", [])
+            page_json = self._get_entries_page(
+                offset, self._SQL_ENGINE_PAGE_SIZE
+            )
+            page = json.loads(page_json)
+            items = page.get("entries", [])
             if not items:
                 break
 
             indices: Dict[str, Any] = {}
-            for item in items:
-                entry = item.get("entry", {})
+            for entry in items:
                 fp = entry.get("file", "unknown")
                 if fp not in indices:
                     indices[fp] = SimpleNamespace(entries=[])
                 ns = SimpleNamespace()
                 for k, v in entry.items():
+                    # Rust serializes LogLevel as title-case ("Info");
+                    # normalize to uppercase for consistency with search().
+                    if k == "level" and isinstance(v, str):
+                        v = v.upper()
                     setattr(ns, k, v)
                 indices[fp].entries.append(ns)
 
             engine.load_files(indices)
             offset += self._SQL_ENGINE_PAGE_SIZE
 
-            if len(items) < self._SQL_ENGINE_PAGE_SIZE:
+            if not page.get("has_more", False):
                 break
 
         self._sql_engine = engine

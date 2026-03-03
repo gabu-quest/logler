@@ -155,6 +155,13 @@ impl PyInvestigator {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
+    /// Return a page of raw entries by direct index iteration (no search overhead).
+    fn get_entries_page(&self, offset: usize, limit: usize) -> PyResult<String> {
+        let page = self.investigator.get_entries_page(offset, limit);
+        serde_json::to_string(&page)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
     /// Build hierarchical view of threads/spans
     fn build_hierarchy(
         &self,

@@ -382,6 +382,57 @@ impl Investigator {
         }
     }
 
+    /// Return a page of raw entries by slicing the in-memory index directly.
+    ///
+    /// O(page_size) per call — no filtering, scoring, or sorting.
+    /// File keys are sorted for deterministic pagination across calls.
+    pub fn get_entries_page(&self, offset: usize, limit: usize) -> EntriesPage {
+        let mut file_keys: Vec<&String> = self.indices.keys().collect();
+        file_keys.sort();
+
+        let mut total_entries = 0;
+        for key in &file_keys {
+            if let Some(entries) = &self.indices[*key].entries {
+                total_entries += entries.len();
+            }
+        }
+
+        let mut result = Vec::with_capacity(limit.min(total_entries.saturating_sub(offset)));
+        let mut global_idx = 0;
+
+        for key in &file_keys {
+            if let Some(entries) = &self.indices[*key].entries {
+                let file_len = entries.len();
+                if global_idx + file_len <= offset {
+                    global_idx += file_len;
+                    continue;
+                }
+                let start = if offset > global_idx {
+                    offset - global_idx
+                } else {
+                    0
+                };
+                for entry in &entries[start..] {
+                    if result.len() >= limit {
+                        return EntriesPage {
+                            entries: result,
+                            total_entries,
+                            has_more: true,
+                        };
+                    }
+                    result.push(entry.clone());
+                }
+                global_idx += file_len;
+            }
+        }
+
+        EntriesPage {
+            entries: result,
+            total_entries,
+            has_more: false,
+        }
+    }
+
     /// Follow a thread/correlation/trace
     pub fn follow_thread(
         &self,

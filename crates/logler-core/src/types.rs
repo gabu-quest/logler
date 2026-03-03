@@ -151,6 +151,14 @@ pub struct SearchResults {
     pub search_time_ms: u64,
 }
 
+/// Page of raw entries for bulk export (no search/filter/sort overhead).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntriesPage {
+    pub entries: Vec<LogEntry>,
+    pub total_entries: usize,
+    pub has_more: bool,
+}
+
 /// Thread timeline containing all entries for a thread
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadTimeline {

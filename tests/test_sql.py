@@ -722,28 +722,26 @@ class TestSqlEnginePagination:
         # Fixture: 10 each of DEBUG, ERROR, INFO, WARN
         assert by_level == {"DEBUG": 10, "ERROR": 10, "INFO": 10, "WARN": 10}
 
-    def test_paginated_search_call_count(self, sql_log_file):
-        """With page size 15 and 40 entries: ceil(40/15) = 3 search calls."""
+    def test_paginated_get_entries_page_call_count(self, sql_log_file):
+        """With page size 15 and 40 entries: 3 _get_entries_page() calls."""
         from unittest.mock import patch
 
         inv = Investigator()
         inv.load_files([sql_log_file])
         inv._SQL_ENGINE_PAGE_SIZE = 15
 
-        original_search = inv.search
-
+        original = inv._get_entries_page
         call_count = 0
 
-        def counting_search(**kwargs):
+        def counting_get_page(offset, limit):
             nonlocal call_count
             call_count += 1
-            return original_search(**kwargs)
+            return original(offset, limit)
 
-        with patch.object(inv, "search", side_effect=counting_search):
+        with patch.object(inv, "_get_entries_page", side_effect=counting_get_page):
             inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
 
-        # 40 entries / 15 per page = 3 pages (15+15+10), each returns items
-        # plus one final call that returns empty → 3 calls total
-        # (last page has 10 < 15, so the loop breaks without an extra call)
+        # 40 entries / 15 per page = 3 pages (15+15+10)
+        # Last page has_more=false → loop breaks without an extra call
         assert call_count == 3
         assert inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")[0]["cnt"] == TOTAL_ENTRIES
