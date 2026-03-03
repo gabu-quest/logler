@@ -947,116 +947,118 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
             import tempfile
 
             conn = duckdb.connect(":memory:")
-
-            conn.execute(
-                """
-                CREATE TABLE logs (
-                    line_number INTEGER,
-                    timestamp VARCHAR,
-                    level VARCHAR,
-                    message VARCHAR,
-                    thread_id VARCHAR,
-                    correlation_id VARCHAR,
-                    trace_id VARCHAR,
-                    span_id VARCHAR,
-                    file VARCHAR,
-                    raw VARCHAR
-                )
-            """
-            )
-
-            # Stream-parse log files into a temp CSV, then bulk-load via
-            # read_csv() (230x faster than executemany at scale).
-            from ..parser import LogParser
-
-            parser = LogParser()
-            total_entries = 0
-
-            tmp = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".csv", delete=False, newline=""
-            )
             try:
-                writer = csv.writer(tmp, lineterminator="\n")
-
-                for file_path in file_list:
-                    try:
-                        with open(file_path, "r", errors="replace") as f:
-                            for i, line in enumerate(f):
-                                line = line.rstrip()
-                                if not line:
-                                    continue
-
-                                entry = parser.parse_line(i + 1, line)
-                                writer.writerow([
-                                    i + 1,
-                                    str(entry.timestamp) if entry.timestamp else None,
-                                    str(entry.level).upper() if entry.level else None,
-                                    entry.message,
-                                    entry.thread_id,
-                                    entry.correlation_id,
-                                    getattr(entry, "trace_id", None),
-                                    getattr(entry, "span_id", None),
-                                    file_path,
-                                    line,
-                                ])
-                                total_entries += 1
-                    except (FileNotFoundError, PermissionError) as e:
-                        _error_json(f"Cannot read file {file_path}: {e}")
-
-            finally:
-                tmp.close()
-
-            try:
-                if total_entries > 0:
-                    conn.execute(
-                        f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
-                        "header=false, nullstr='', columns={"
-                        "'line_number': 'INTEGER', 'timestamp': 'VARCHAR', "
-                        "'level': 'VARCHAR', 'message': 'VARCHAR', "
-                        "'thread_id': 'VARCHAR', 'correlation_id': 'VARCHAR', "
-                        "'trace_id': 'VARCHAR', 'span_id': 'VARCHAR', "
-                        "'file': 'VARCHAR', 'raw': 'VARCHAR'})"
+                conn.execute(
+                    """
+                    CREATE TABLE logs (
+                        line_number INTEGER,
+                        timestamp VARCHAR,
+                        level VARCHAR,
+                        message VARCHAR,
+                        thread_id VARCHAR,
+                        correlation_id VARCHAR,
+                        trace_id VARCHAR,
+                        span_id VARCHAR,
+                        file VARCHAR,
+                        raw VARCHAR
                     )
-            finally:
-                os.unlink(tmp.name)
-
-            # Lock filesystem access before running user SQL
-            conn.execute("SET enable_external_access = false")
-
-            if total_entries == 0:
-                _output_json(
-                    {
-                        "query": query,
-                        "files": file_list,
-                        "total_entries": 0,
-                        "results": [],
-                        "error": "No log entries found",
-                    },
-                    pretty,
+                """
                 )
-                sys.exit(EXIT_NO_RESULTS)
 
-            # Execute the user's query
-            try:
-                result = conn.execute(query).fetchall()
-                columns = [desc[0] for desc in conn.description]
-            except duckdb.Error as e:
-                _error_json(f"SQL error: {e}", EXIT_USER_ERROR)
+                # Stream-parse log files into a temp CSV, then bulk-load via
+                # read_csv() (230x faster than executemany at scale).
+                from ..parser import LogParser
 
-            # Convert results to list of dicts
-            rows = [dict(zip(columns, row)) for row in result]
+                parser = LogParser()
+                total_entries = 0
 
-            output = {
-                "query": query,
-                "files": file_list,
-                "total_entries": total_entries,
-                "columns": columns,
-                "row_count": len(rows),
-                "results": rows,
-            }
+                tmp = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".csv", delete=False, newline=""
+                )
+                try:
+                    writer = csv.writer(tmp, lineterminator="\n")
 
-            _output_json(output, pretty)
-            sys.exit(EXIT_SUCCESS if rows else EXIT_NO_RESULTS)
+                    for file_path in file_list:
+                        try:
+                            with open(file_path, "r", errors="replace") as f:
+                                for i, line in enumerate(f):
+                                    line = line.rstrip()
+                                    if not line:
+                                        continue
+
+                                    entry = parser.parse_line(i + 1, line)
+                                    writer.writerow([
+                                        i + 1,
+                                        str(entry.timestamp) if entry.timestamp else None,
+                                        str(entry.level).upper() if entry.level else None,
+                                        entry.message,
+                                        entry.thread_id,
+                                        entry.correlation_id,
+                                        getattr(entry, "trace_id", None),
+                                        getattr(entry, "span_id", None),
+                                        file_path,
+                                        line,
+                                    ])
+                                    total_entries += 1
+                        except (FileNotFoundError, PermissionError) as e:
+                            _error_json(f"Cannot read file {file_path}: {e}")
+
+                finally:
+                    tmp.close()
+
+                try:
+                    if total_entries > 0:
+                        conn.execute(
+                            f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
+                            "header=false, nullstr='', columns={"
+                            "'line_number': 'INTEGER', 'timestamp': 'VARCHAR', "
+                            "'level': 'VARCHAR', 'message': 'VARCHAR', "
+                            "'thread_id': 'VARCHAR', 'correlation_id': 'VARCHAR', "
+                            "'trace_id': 'VARCHAR', 'span_id': 'VARCHAR', "
+                            "'file': 'VARCHAR', 'raw': 'VARCHAR'})"
+                        )
+                finally:
+                    os.unlink(tmp.name)
+
+                # Lock filesystem access before running user SQL
+                conn.execute("SET enable_external_access = false")
+
+                if total_entries == 0:
+                    _output_json(
+                        {
+                            "query": query,
+                            "files": file_list,
+                            "total_entries": 0,
+                            "results": [],
+                            "error": "No log entries found",
+                        },
+                        pretty,
+                    )
+                    sys.exit(EXIT_NO_RESULTS)
+
+                # Execute the user's query
+                try:
+                    result = conn.execute(query).fetchall()
+                    columns = [desc[0] for desc in conn.description]
+                except duckdb.Error as e:
+                    _error_json(f"SQL error: {e}", EXIT_USER_ERROR)
+
+                # Convert results to list of dicts
+                rows = [dict(zip(columns, row)) for row in result]
+
+                output = {
+                    "query": query,
+                    "files": file_list,
+                    "total_entries": total_entries,
+                    "columns": columns,
+                    "row_count": len(rows),
+                    "results": rows,
+                }
+
+                _output_json(output, pretty)
+                sys.exit(EXIT_SUCCESS if rows else EXIT_NO_RESULTS)
+            finally:
+                conn.close()
 
         except Exception as e:
             _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)

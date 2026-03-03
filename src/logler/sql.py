@@ -27,6 +27,8 @@ class SqlEngine:
 
     Loads log entries into an in-memory DuckDB database and provides
     SQL query capabilities for advanced analysis.
+
+    Not thread-safe — create one instance per thread.
     """
 
     def __init__(self, db_path: str | None = None) -> None:
@@ -44,6 +46,8 @@ class SqlEngine:
 
     def _lock_external_access(self) -> None:
         """Disable filesystem access. One-way — cannot be re-enabled."""
+        if self.conn is None:
+            raise RuntimeError("SqlEngine has been closed")
         if not self._external_access_locked:
             self.conn.execute("SET enable_external_access = false")
             self._external_access_locked = True
@@ -62,6 +66,8 @@ class SqlEngine:
         Args:
             indices: Mapping of file paths to LogIndex objects
         """
+        if self.conn is None:
+            raise RuntimeError("SqlEngine has been closed")
         # Create logs table
         self.conn.execute(
             """
@@ -155,6 +161,9 @@ class SqlEngine:
         materialized: dict[str, list] | None = None,
     ) -> None:
         """Extract numeric values from log entries and load into a metrics table.
+
+        Called only from load_files() before external access is locked.
+        Do NOT call after _lock_external_access() — read_csv() needs filesystem access.
 
         This enables SQL queries like:
             SELECT field_name, AVG(value), MAX(value) FROM metrics GROUP BY field_name
