@@ -126,8 +126,10 @@ class SqlEngine:
                     ])
                     row_count += 1
 
+        finally:
             tmp.close()
 
+        try:
             if row_count > 0:
                 self.conn.execute(
                     f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
@@ -236,8 +238,10 @@ class SqlEngine:
                         ])
                         row_count += 1
 
+        finally:
             tmp.close()
 
+        try:
             if row_count > 0:
                 self.conn.execute(
                     f"INSERT INTO metrics SELECT * FROM read_csv('{tmp.name}', "

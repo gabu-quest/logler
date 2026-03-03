@@ -1003,8 +1003,10 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
                     except (FileNotFoundError, PermissionError) as e:
                         _error_json(f"Cannot read file {file_path}: {e}")
 
+            finally:
                 tmp.close()
 
+            try:
                 if total_entries > 0:
                     conn.execute(
                         f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
