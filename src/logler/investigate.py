@@ -330,14 +330,17 @@ class Investigator:
         result_json = engine.get_schema(table)
         return json.loads(result_json)
 
+    _SQL_ENGINE_PAGE_SIZE = 10_000
+
     def _get_sql_engine(self):
         """Get a SQL engine loaded with current log data.
 
         The engine is built once and cached for the lifetime of this
         Investigator (or until :meth:`load_files` is called again).
 
-        Reuses Rust-parsed entries via ``self.search(limit=0)`` instead
-        of re-parsing files with Python's LogParser — ~3x faster at scale.
+        Reuses Rust-parsed entries via paginated ``self.search()`` — fetches
+        in pages of ``_SQL_ENGINE_PAGE_SIZE`` to stay memory-bounded
+        regardless of total entry count.
         """
         if self._sql_engine is not None:
             return self._sql_engine
@@ -346,21 +349,32 @@ class Investigator:
 
         from logler.sql import SqlEngine
 
-        result = self.search(limit=0)
-
-        indices: Dict[str, Any] = {}
-        for item in result.get("results", []):
-            entry = item.get("entry", {})
-            fp = entry.get("file", "unknown")
-            if fp not in indices:
-                indices[fp] = SimpleNamespace(entries=[])
-            ns = SimpleNamespace()
-            for k, v in entry.items():
-                setattr(ns, k, v)
-            indices[fp].entries.append(ns)
-
         engine = SqlEngine(db_path=self._sql_db_path)
-        engine.load_files(indices)
+        offset = 0
+
+        while True:
+            result = self.search(limit=self._SQL_ENGINE_PAGE_SIZE, offset=offset)
+            items = result.get("results", [])
+            if not items:
+                break
+
+            indices: Dict[str, Any] = {}
+            for item in items:
+                entry = item.get("entry", {})
+                fp = entry.get("file", "unknown")
+                if fp not in indices:
+                    indices[fp] = SimpleNamespace(entries=[])
+                ns = SimpleNamespace()
+                for k, v in entry.items():
+                    setattr(ns, k, v)
+                indices[fp].entries.append(ns)
+
+            engine.load_files(indices)
+            offset += self._SQL_ENGINE_PAGE_SIZE
+
+            if len(items) < self._SQL_ENGINE_PAGE_SIZE:
+                break
+
         self._sql_engine = engine
         return engine
 

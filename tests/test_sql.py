@@ -694,3 +694,56 @@ class TestSqlEngineGeneratorEntries:
 
         metrics_count = json.loads(engine.query("SELECT COUNT(*) AS cnt FROM metrics"))
         assert metrics_count[0]["cnt"] == TOTAL_ENTRIES
+
+
+class TestSqlEnginePagination:
+    """Verify _get_sql_engine() paginates instead of materialising all at once."""
+
+    def test_paginated_load_all_entries_present(self, sql_log_file):
+        """With a small page size, all 40 entries must still reach DuckDB."""
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+
+        # Shrink page size so 40 entries span multiple pages
+        inv._SQL_ENGINE_PAGE_SIZE = 7
+        result = inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        assert result[0]["cnt"] == TOTAL_ENTRIES
+
+    def test_paginated_load_correct_data(self, sql_log_file):
+        """Paginated load must preserve level distribution across pages."""
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+
+        inv._SQL_ENGINE_PAGE_SIZE = 7
+        result = inv.sql_query(
+            "SELECT level, COUNT(*) AS cnt FROM logs GROUP BY level ORDER BY level"
+        )
+        by_level = {r["level"]: r["cnt"] for r in result}
+        # Fixture: 10 each of DEBUG, ERROR, INFO, WARN
+        assert by_level == {"DEBUG": 10, "ERROR": 10, "INFO": 10, "WARN": 10}
+
+    def test_paginated_search_call_count(self, sql_log_file):
+        """With page size 15 and 40 entries: ceil(40/15) = 3 search calls."""
+        from unittest.mock import patch
+
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+        inv._SQL_ENGINE_PAGE_SIZE = 15
+
+        original_search = inv.search
+
+        call_count = 0
+
+        def counting_search(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            return original_search(**kwargs)
+
+        with patch.object(inv, "search", side_effect=counting_search):
+            inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+
+        # 40 entries / 15 per page = 3 pages (15+15+10), each returns items
+        # plus one final call that returns empty → 3 calls total
+        # (last page has 10 < 15, so the loop breaks without an extra call)
+        assert call_count == 3
+        assert inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")[0]["cnt"] == TOTAL_ENTRIES
