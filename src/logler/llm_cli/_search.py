@@ -940,8 +940,13 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
                 _error_json("SQL query required. Provide as argument or use --stdin.")
 
             # Create DuckDB connection and load data
+            # External access stays enabled during CSV bulk load, then locked
+            # before executing the user's SQL query.
+            import csv
+            import os
+            import tempfile
+
             conn = duckdb.connect(":memory:")
-            conn.execute("SET enable_external_access = false")
 
             conn.execute(
                 """
@@ -960,26 +965,29 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
             """
             )
 
-            # Stream-parse log files directly into DuckDB in batches
+            # Stream-parse log files into a temp CSV, then bulk-load via
+            # read_csv() (230x faster than executemany at scale).
             from ..parser import LogParser
 
             parser = LogParser()
-            _SQL_BATCH = 5000
-            insert_sql = "INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            batch: list = []
             total_entries = 0
 
-            for file_path in file_list:
-                try:
-                    with open(file_path, "r", errors="replace") as f:
-                        for i, line in enumerate(f):
-                            line = line.rstrip()
-                            if not line:
-                                continue
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".csv", delete=False, newline=""
+            )
+            try:
+                writer = csv.writer(tmp, lineterminator="\n")
 
-                            entry = parser.parse_line(i + 1, line)
-                            batch.append(
-                                (
+                for file_path in file_list:
+                    try:
+                        with open(file_path, "r", errors="replace") as f:
+                            for i, line in enumerate(f):
+                                line = line.rstrip()
+                                if not line:
+                                    continue
+
+                                entry = parser.parse_line(i + 1, line)
+                                writer.writerow([
                                     i + 1,
                                     str(entry.timestamp) if entry.timestamp else None,
                                     str(entry.level).upper() if entry.level else None,
@@ -990,18 +998,28 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
                                     getattr(entry, "span_id", None),
                                     file_path,
                                     line,
-                                )
-                            )
-                            total_entries += 1
-                            if len(batch) >= _SQL_BATCH:
-                                conn.executemany(insert_sql, batch)
-                                batch.clear()
-                except (FileNotFoundError, PermissionError) as e:
-                    _error_json(f"Cannot read file {file_path}: {e}")
+                                ])
+                                total_entries += 1
+                    except (FileNotFoundError, PermissionError) as e:
+                        _error_json(f"Cannot read file {file_path}: {e}")
 
-            if batch:
-                conn.executemany(insert_sql, batch)
-                batch.clear()
+                tmp.close()
+
+                if total_entries > 0:
+                    conn.execute(
+                        f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
+                        "header=false, nullstr='', columns={"
+                        "'line_number': 'INTEGER', 'timestamp': 'VARCHAR', "
+                        "'level': 'VARCHAR', 'message': 'VARCHAR', "
+                        "'thread_id': 'VARCHAR', 'correlation_id': 'VARCHAR', "
+                        "'trace_id': 'VARCHAR', 'span_id': 'VARCHAR', "
+                        "'file': 'VARCHAR', 'raw': 'VARCHAR'})"
+                    )
+            finally:
+                os.unlink(tmp.name)
+
+            # Lock filesystem access before running user SQL
+            conn.execute("SET enable_external_access = false")
 
             if total_entries == 0:
                 _output_json(

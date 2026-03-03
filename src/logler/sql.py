@@ -7,7 +7,10 @@ to avoid the long build times from bundled DuckDB compilation.
 
 from __future__ import annotations
 
+import csv
 import json
+import os
+import tempfile
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -34,8 +37,16 @@ class SqlEngine:
                      Defaults to in-memory (``":memory:"``).
         """
         self.conn = duckdb.connect(db_path or ":memory:")
-        self.conn.execute("SET enable_external_access = false")
+        # External access locked lazily before first user SQL — load_files()
+        # needs filesystem access for bulk CSV loading via read_csv().
+        self._external_access_locked = False
         self._tables_loaded: list[str] = []
+
+    def _lock_external_access(self) -> None:
+        """Disable filesystem access. One-way — cannot be re-enabled."""
+        if not self._external_access_locked:
+            self.conn.execute("SET enable_external_access = false")
+            self._external_access_locked = True
 
     def close(self) -> None:
         """Close the underlying DuckDB connection."""
@@ -77,46 +88,58 @@ class SqlEngine:
             if entries:
                 materialized[file_path] = entries
 
-        # Insert entries from all indices in batches
-        _BATCH_SIZE = 5000
-        batch: list[tuple] = []
-        insert_sql = "INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        # Bulk-load entries via temp CSV + read_csv() (230x faster than
+        # executemany at scale — DuckDB parses CSV in C++, zero Python overhead).
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, newline=""
+        )
+        try:
+            writer = csv.writer(tmp, lineterminator="\n")
+            row_count = 0
 
-        for file_path, entries in materialized.items():
-            for entry in entries:
-                # Handle timestamp - convert to string for DuckDB
-                ts = getattr(entry, "timestamp", None)
-                if ts is not None:
-                    if isinstance(ts, datetime):
-                        ts = ts.isoformat()
-                    elif hasattr(ts, "to_rfc3339"):
-                        ts = ts.to_rfc3339()
+            for file_path, entries in materialized.items():
+                for entry in entries:
+                    ts = getattr(entry, "timestamp", None)
+                    if ts is not None:
+                        if isinstance(ts, datetime):
+                            ts = ts.isoformat()
+                        elif hasattr(ts, "to_rfc3339"):
+                            ts = ts.to_rfc3339()
 
-                # Handle level - convert enum to string
-                level = getattr(entry, "level", None)
-                if level is not None and hasattr(level, "value"):
-                    level = level.value
-                elif level is not None and not isinstance(level, str):
-                    level = str(level)
+                    level = getattr(entry, "level", None)
+                    if level is not None and hasattr(level, "value"):
+                        level = level.value
+                    elif level is not None and not isinstance(level, str):
+                        level = str(level)
 
-                batch.append((
-                    file_path,
-                    getattr(entry, "line_number", None),
-                    ts,
-                    level,
-                    getattr(entry, "message", None),
-                    getattr(entry, "thread_id", None),
-                    getattr(entry, "correlation_id", None),
-                    getattr(entry, "trace_id", None),
-                    getattr(entry, "span_id", None),
-                    getattr(entry, "raw", None),
-                ))
-                if len(batch) >= _BATCH_SIZE:
-                    self.conn.executemany(insert_sql, batch)
-                    batch.clear()
+                    writer.writerow([
+                        file_path,
+                        getattr(entry, "line_number", None),
+                        ts,
+                        level,
+                        getattr(entry, "message", None),
+                        getattr(entry, "thread_id", None),
+                        getattr(entry, "correlation_id", None),
+                        getattr(entry, "trace_id", None),
+                        getattr(entry, "span_id", None),
+                        getattr(entry, "raw", None),
+                    ])
+                    row_count += 1
 
-        if batch:
-            self.conn.executemany(insert_sql, batch)
+            tmp.close()
+
+            if row_count > 0:
+                self.conn.execute(
+                    f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
+                    "header=false, nullstr='', columns={"
+                    "'file': 'TEXT', 'line_number': 'INTEGER', "
+                    "'timestamp': 'TIMESTAMP', 'level': 'TEXT', "
+                    "'message': 'TEXT', 'thread_id': 'TEXT', "
+                    "'correlation_id': 'TEXT', 'trace_id': 'TEXT', "
+                    "'span_id': 'TEXT', 'raw': 'TEXT'})"
+                )
+        finally:
+            os.unlink(tmp.name)
 
         if "logs" not in self._tables_loaded:
             self._tables_loaded.append("logs")
@@ -166,54 +189,65 @@ class SqlEngine:
             for fp, idx in indices.items()
         }
 
-        for file_path, entries in source.items():
-            if not entries:
-                continue
+        # Collect all metric points across all files, then bulk-load via CSV.
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, newline=""
+        )
+        try:
+            writer = csv.writer(tmp, lineterminator="\n")
+            row_count = 0
 
-            # Build entry dicts for the metrics extractor
-            entry_dicts = []
-            for entry in entries:
-                ts = getattr(entry, "timestamp", None)
-                if ts is not None:
-                    if isinstance(ts, datetime):
-                        ts = ts.isoformat()
-                    elif hasattr(ts, "to_rfc3339"):
-                        ts = ts.to_rfc3339()
+            for file_path, entries in source.items():
+                if not entries:
+                    continue
 
-                entry_dicts.append(
-                    {
-                        "file": file_path,
-                        "line_number": getattr(entry, "line_number", None),
-                        "timestamp": ts,
-                        "message": getattr(entry, "message", None)
-                        or getattr(entry, "raw", None)
-                        or "",
-                        "fields": getattr(entry, "fields", None) or {},
-                    }
+                entry_dicts = []
+                for entry in entries:
+                    ts = getattr(entry, "timestamp", None)
+                    if ts is not None:
+                        if isinstance(ts, datetime):
+                            ts = ts.isoformat()
+                        elif hasattr(ts, "to_rfc3339"):
+                            ts = ts.to_rfc3339()
+
+                    entry_dicts.append(
+                        {
+                            "file": file_path,
+                            "line_number": getattr(entry, "line_number", None),
+                            "timestamp": ts,
+                            "message": getattr(entry, "message", None)
+                            or getattr(entry, "raw", None)
+                            or "",
+                            "fields": getattr(entry, "fields", None) or {},
+                        }
+                    )
+
+                all_series = extract_numeric_fields(entry_dicts)
+
+                for field_name, points in all_series.items():
+                    for point in points:
+                        writer.writerow([
+                            point.file,
+                            point.line_number,
+                            point.timestamp,
+                            field_name,
+                            point.value,
+                            point.unit,
+                        ])
+                        row_count += 1
+
+            tmp.close()
+
+            if row_count > 0:
+                self.conn.execute(
+                    f"INSERT INTO metrics SELECT * FROM read_csv('{tmp.name}', "
+                    "header=false, nullstr='', columns={"
+                    "'file': 'TEXT', 'line_number': 'INTEGER', "
+                    "'timestamp': 'TIMESTAMP', 'field_name': 'TEXT', "
+                    "'value': 'DOUBLE', 'unit': 'TEXT'})"
                 )
-
-            all_series = extract_numeric_fields(entry_dicts)
-
-            _BATCH_SIZE = 5000
-            batch: list[tuple] = []
-            insert_sql = "INSERT INTO metrics VALUES (?, ?, ?, ?, ?, ?)"
-
-            for field_name, points in all_series.items():
-                for point in points:
-                    batch.append((
-                        point.file,
-                        point.line_number,
-                        point.timestamp,
-                        field_name,
-                        point.value,
-                        point.unit,
-                    ))
-                    if len(batch) >= _BATCH_SIZE:
-                        self.conn.executemany(insert_sql, batch)
-                        batch.clear()
-
-            if batch:
-                self.conn.executemany(insert_sql, batch)
+        finally:
+            os.unlink(tmp.name)
 
         if "metrics" not in self._tables_loaded:
             self._tables_loaded.append("metrics")
@@ -227,6 +261,7 @@ class SqlEngine:
         Returns:
             JSON string containing array of result objects
         """
+        self._lock_external_access()
         result = self.conn.execute(sql)
         columns = [desc[0] for desc in result.description]
 
@@ -249,6 +284,7 @@ class SqlEngine:
         Returns:
             List of table names
         """
+        self._lock_external_access()
         result = self.conn.execute(
             "SELECT table_name FROM information_schema.tables "
             "WHERE table_schema = 'main'"
@@ -267,6 +303,7 @@ class SqlEngine:
         """
         import re
 
+        self._lock_external_access()
         if not re.fullmatch(r"[A-Za-z_]\w*", table):
             return json.dumps([])
         try:
