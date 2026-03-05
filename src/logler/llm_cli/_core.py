@@ -7,8 +7,10 @@ and max-bytes truncation used across all command submodules.
 
 import click
 import json
+import os
 import sys
 import re
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -229,3 +231,46 @@ def _extract_patterns(values: List[str]) -> List[str]:
                 patterns.add(val)
 
     return sorted(list(patterns))[:10]
+
+
+def db_source_option(f):
+    """Add --db option to a command."""
+    return click.option(
+        "--db",
+        "db_path",
+        type=click.Path(exists=True, file_okay=True, dir_okay=False),
+        help="sqler database file to use as log source",
+    )(f)
+
+
+@contextmanager
+def _db_file_source(files, db_path, default_glob=None):
+    """Resolve files + optional --db into a file list with cleanup.
+
+    Args:
+        files: File paths or glob patterns from CLI.
+        db_path: Optional sqler database path.
+        default_glob: If set, use as fallback when neither files nor --db given.
+    """
+    db_jsonl_path = None
+    try:
+        if not files and not db_path:
+            if default_glob:
+                files = [default_glob]
+            else:
+                _error_json("Either FILES or --db is required", EXIT_USER_ERROR)
+        file_list = _expand_globs(list(files)) if files else []
+        if db_path:
+            from ..db_source import db_to_jsonl
+
+            db_jsonl_path = db_to_jsonl(db_path)
+            file_list.insert(0, db_jsonl_path)
+        if not file_list:
+            _error_json(f"No files found matching: {files}")
+        yield file_list
+    finally:
+        if db_jsonl_path:
+            try:
+                os.unlink(db_jsonl_path)
+            except OSError:
+                pass

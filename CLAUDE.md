@@ -3,6 +3,9 @@
 Rust-powered log viewer optimized for AI agents. Three-tier architecture:
 Rust core -> PyO3 bridge -> Python API/CLI.
 
+## Active Roadmaps
+- [Sqler Bridge](./ROADMAP.md) — current milestone: M-2 (complete)
+
 ## Architecture
 
 ```
@@ -146,6 +149,13 @@ python -m logler.cli llm <command>
 ```
 
 Exit codes: 0=success, 1=no results, 2=user error, 3=internal error
+
+### Database Source (`--db`)
+
+All file-based LLM commands accept `--db path/to/sqler.db` as an alternative to FILES.
+Converts sqler database rows to JSONL on the fly; auto-detects qler tables.
+Can combine `--db` with FILES to search both sources.
+Only `context` (needs file+line) and session commands lack `--db`.
 
 ### LLM Commands (JSON output)
 

@@ -7,6 +7,7 @@ import io
 import json
 import logging
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -257,3 +258,248 @@ class TestAsyncIsolation:
 
         assert results["task_a"] == ["aaa", "aaa"]
         assert results["task_b"] == ["bbb", "bbb"]
+
+
+# ---------------------------------------------------------------------------
+# IMP-2: JsonHandler robustness (consecutive error tracking)
+# ---------------------------------------------------------------------------
+
+
+class TestJsonHandlerRobustness:
+    def _make_record(self, msg: str = "test") -> logging.LogRecord:
+        return logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=msg,
+            args=(),
+            exc_info=None,
+        )
+
+    def test_emit_resets_consecutive_errors(self):
+        buf = io.StringIO()
+        handler = JsonHandler(stream=buf)
+        handler.emit(self._make_record())
+        assert handler._consecutive_errors == 0
+        assert handler.degraded is False
+
+    def test_emit_tracks_consecutive_errors(self):
+        """Broken stream increments error counter and sets degraded."""
+        buf = MagicMock()
+        buf.write = MagicMock(side_effect=OSError("disk full"))
+        handler = JsonHandler(stream=buf)
+
+        for _ in range(5):
+            handler.emit(self._make_record())
+
+        assert handler._consecutive_errors == 5
+        assert handler.degraded is True
+
+    def test_emit_stops_calling_handle_error_after_3(self):
+        """handleError is called at most 3 times, then suppressed."""
+        buf = MagicMock()
+        buf.write = MagicMock(side_effect=OSError("broken pipe"))
+        handler = JsonHandler(stream=buf)
+        handler.handleError = MagicMock()
+
+        for _ in range(5):
+            handler.emit(self._make_record())
+
+        assert handler.handleError.call_count == 3
+
+    def test_degraded_resets_on_success(self):
+        """Successful emit after failures resets degraded state."""
+        buf = io.StringIO()
+        handler = JsonHandler(stream=buf)
+
+        # Force a failure
+        handler._consecutive_errors = 2
+        assert handler.degraded is True
+
+        # Successful emit resets
+        handler.emit(self._make_record())
+        assert handler._consecutive_errors == 0
+        assert handler.degraded is False
+
+    def test_flush_failure_increments_errors(self):
+        """flush() failure also triggers error tracking."""
+        buf = MagicMock()
+        buf.write = MagicMock(return_value=None)
+        buf.flush = MagicMock(side_effect=BrokenPipeError("broken pipe"))
+        handler = JsonHandler(stream=buf)
+        handler.handleError = MagicMock()
+
+        handler.emit(self._make_record())
+        assert handler._consecutive_errors == 1
+        assert handler.degraded is True
+        assert handler.handleError.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# IMP-4: OTel bridge for correlation_context
+# ---------------------------------------------------------------------------
+
+
+class TestCorrelationFilterPreserveExplicit:
+    """CorrelationFilter must not overwrite explicitly-set correlation_id."""
+
+    def test_filter_preserves_explicit_correlation_id(self):
+        filt = CorrelationFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="hello",
+            args=(),
+            exc_info=None,
+        )
+        record.correlation_id = "explicit-id"  # type: ignore[attr-defined]
+        with correlation_context("contextvar-id"):
+            filt.filter(record)
+        assert record.correlation_id == "explicit-id"  # type: ignore[attr-defined]
+
+    def test_filter_fills_when_not_set(self):
+        filt = CorrelationFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="hello",
+            args=(),
+            exc_info=None,
+        )
+        with correlation_context("contextvar-id"):
+            filt.filter(record)
+        assert record.correlation_id == "contextvar-id"  # type: ignore[attr-defined]
+
+
+class TestJsonHandlerExtraFields:
+    """JsonHandler must forward extra fields to JSON output."""
+
+    def _make_handler_and_logger(self, stream: io.StringIO) -> logging.Logger:
+        handler = JsonHandler(stream=stream)
+        handler.addFilter(CorrelationFilter())
+        logger = logging.getLogger(f"test.extra.{id(stream)}")
+        logger.handlers.clear()
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        return logger
+
+    def test_extra_fields_forwarded(self):
+        buf = io.StringIO()
+        logger = self._make_handler_and_logger(buf)
+        logger.info(
+            "lifecycle", extra={"event": "job.enqueued", "job_id": "abc123", "queue": "default"}
+        )
+
+        entry = json.loads(buf.getvalue().strip())
+        assert entry["event"] == "job.enqueued"
+        assert entry["job_id"] == "abc123"
+        assert entry["queue"] == "default"
+
+    def test_non_serializable_extra_skipped(self):
+        buf = io.StringIO()
+        logger = self._make_handler_and_logger(buf)
+        logger.info("lifecycle", extra={"good": "value", "bad": object()})
+
+        entry = json.loads(buf.getvalue().strip())
+        assert entry["good"] == "value"
+        assert "bad" not in entry
+
+    def test_standard_attrs_not_duplicated(self):
+        """Standard LogRecord attrs should not leak into JSON output."""
+        buf = io.StringIO()
+        logger = self._make_handler_and_logger(buf)
+        logger.info("test")
+
+        entry = json.loads(buf.getvalue().strip())
+        # These standard attrs should NOT be in the output
+        assert "msg" not in entry
+        assert "args" not in entry
+        assert "lineno" not in entry
+        assert "pathname" not in entry
+
+    def test_extra_with_correlation_id(self):
+        """Extra correlation_id should take precedence over ContextVar."""
+        buf = io.StringIO()
+        logger = self._make_handler_and_logger(buf)
+        logger.info("lifecycle", extra={"correlation_id": "explicit", "event": "job.completed"})
+
+        entry = json.loads(buf.getvalue().strip())
+        assert entry["correlation_id"] == "explicit"
+        assert entry["event"] == "job.completed"
+
+
+class TestOtelBridge:
+    def test_otel_bridge_false_default(self):
+        """Default behavior unchanged — no OTel imports."""
+        with correlation_context("job-123") as cid:
+            assert cid == "job-123"
+            assert get_correlation_id() == "job-123"
+        assert get_correlation_id() is None
+
+    def test_otel_bridge_without_otel_installed(self):
+        """otel_bridge=True gracefully handles missing opentelemetry."""
+        with patch.dict("sys.modules", {"opentelemetry": None}):
+            with correlation_context("job-456", otel_bridge=True) as cid:
+                assert cid == "job-456"
+                assert get_correlation_id() == "job-456"
+        assert get_correlation_id() is None
+
+    def test_otel_bridge_with_mock_otel(self):
+        """When opentelemetry is available, baggage is set and detached."""
+        mock_baggage = MagicMock()
+        mock_context = MagicMock()
+        mock_ctx = MagicMock()
+        mock_token = MagicMock()
+
+        mock_baggage.set_baggage = MagicMock(return_value=mock_ctx)
+        mock_context.attach = MagicMock(return_value=mock_token)
+
+        # The production code does `from opentelemetry import baggage, context`
+        # lazily inside the if-block, so patching sys.modules is sufficient.
+        with patch.dict(
+            "sys.modules",
+            {
+                "opentelemetry": MagicMock(baggage=mock_baggage, context=mock_context),
+                "opentelemetry.baggage": mock_baggage,
+                "opentelemetry.context": mock_context,
+            },
+        ):
+            with correlation_context("job-789", otel_bridge=True) as cid:
+                assert cid == "job-789"
+                mock_baggage.set_baggage.assert_called_once_with("correlation_id", "job-789")
+                mock_context.attach.assert_called_once_with(mock_ctx)
+
+            mock_context.detach.assert_called_once_with(mock_token)
+
+    def test_otel_bridge_detaches_on_exception(self):
+        """OTel context.detach() is called even when body raises."""
+        mock_baggage = MagicMock()
+        mock_context = MagicMock()
+        mock_ctx = MagicMock()
+        mock_token = MagicMock()
+
+        mock_baggage.set_baggage = MagicMock(return_value=mock_ctx)
+        mock_context.attach = MagicMock(return_value=mock_token)
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "opentelemetry": MagicMock(baggage=mock_baggage, context=mock_context),
+                "opentelemetry.baggage": mock_baggage,
+                "opentelemetry.context": mock_context,
+            },
+        ):
+            with pytest.raises(RuntimeError, match="boom"):
+                with correlation_context("job-explode", otel_bridge=True):
+                    raise RuntimeError("boom")
+
+            # detach must still be called despite the exception
+            mock_context.detach.assert_called_once_with(mock_token)
+        # correlation_id must also be reset
+        assert get_correlation_id() is None

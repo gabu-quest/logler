@@ -32,7 +32,7 @@ _correlation_id: ContextVar[Optional[str]] = ContextVar("_correlation_id", defau
 
 
 @contextmanager
-def correlation_context(correlation_id: str):
+def correlation_context(correlation_id: str, otel_bridge: bool = False):
     """Set correlation_id for the duration of the context.
 
     Works correctly with asyncio (each task gets its own copy) and
@@ -40,6 +40,10 @@ def correlation_context(correlation_id: str):
 
     Args:
         correlation_id: The correlation ID to set.
+        otel_bridge: If True, also propagate correlation_id as
+            OpenTelemetry baggage. Requires ``opentelemetry-api``
+            (install with ``logler[otel]``). Silently ignored if
+            the package is not installed.
 
     Yields:
         The correlation_id that was set.
@@ -52,9 +56,22 @@ def correlation_context(correlation_id: str):
         # get_correlation_id() returns None (or previous value)
     """
     token = _correlation_id.set(correlation_id)
+    otel_token = None
     try:
+        if otel_bridge:
+            try:
+                from opentelemetry import baggage, context  # type: ignore[import-untyped]
+
+                ctx = baggage.set_baggage("correlation_id", correlation_id)
+                otel_token = context.attach(ctx)
+            except Exception:
+                pass
         yield correlation_id
     finally:
+        if otel_bridge and otel_token is not None:
+            from opentelemetry import context  # type: ignore[import-untyped]
+
+            context.detach(otel_token)
         _correlation_id.reset(token)
 
 
@@ -76,8 +93,41 @@ class CorrelationFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.correlation_id = get_correlation_id()  # type: ignore[attr-defined]
+        if not getattr(record, "correlation_id", None):
+            record.correlation_id = get_correlation_id()  # type: ignore[attr-defined]
         return True
+
+
+_STANDARD_ATTRS = frozenset(
+    {
+        "name",
+        "msg",
+        "args",
+        "created",
+        "relativeCreated",
+        "exc_info",
+        "exc_text",
+        "stack_info",
+        "lineno",
+        "funcName",
+        "pathname",
+        "filename",
+        "module",
+        "thread",
+        "threadName",
+        "process",
+        "processName",
+        "msecs",
+        "levelname",
+        "levelno",
+        "message",
+        "asctime",
+        "taskName",
+        # Our own fields handled explicitly:
+        "correlation_id",
+        "trace_id",
+    }
+)
 
 
 class JsonHandler(logging.Handler):
@@ -116,6 +166,12 @@ class JsonHandler(logging.Handler):
             self._owns_stream = False
         else:
             raise ValueError("Must specify either filename or stream")
+        self._consecutive_errors = 0
+
+    @property
+    def degraded(self) -> bool:
+        """True if the handler has experienced write errors."""
+        return self._consecutive_errors > 0
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -138,6 +194,16 @@ class JsonHandler(logging.Handler):
             if trace_id is not None:
                 entry["trace_id"] = trace_id
 
+            # Forward extra fields to JSON output
+            for key, value in record.__dict__.items():
+                if key.startswith("_") or key in _STANDARD_ATTRS or key in entry:
+                    continue
+                try:
+                    json.dumps(value)
+                    entry[key] = value
+                except (TypeError, ValueError):
+                    pass
+
             # Exception info
             if record.exc_info and record.exc_info[0] is not None:
                 entry["exception"] = {
@@ -148,8 +214,11 @@ class JsonHandler(logging.Handler):
 
             self._stream.write(json.dumps(entry) + "\n")
             self._stream.flush()
+            self._consecutive_errors = 0
         except Exception:
-            self.handleError(record)
+            self._consecutive_errors += 1
+            if self._consecutive_errors <= 3:
+                self.handleError(record)
 
     def close(self) -> None:
         if self._owns_stream:

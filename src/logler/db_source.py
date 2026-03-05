@@ -1,8 +1,8 @@
 """Read sqler SQLite databases as a logler data source.
 
 Converts rows from sqler tables into JSONL that logler's Rust parser can
-ingest. Works with any sqler database; auto-detects qler tables (``jobs``,
-``job_attempts``) and applies smart defaults.
+ingest. Works with any sqler database; auto-detects qler tables (``qler_jobs``,
+``qler_job_attempts``) and applies smart defaults.
 
 Example::
 
@@ -22,10 +22,18 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import sqlite3
+import string
 import tempfile
+import urllib.parse
 from datetime import datetime, timezone
 from typing import Optional
+
+
+def _safe_identifier(name: str) -> str:
+    """Return a safely double-quoted SQL identifier."""
+    return '"' + name.replace('"', '""') + '"'
 
 
 @dataclasses.dataclass
@@ -63,54 +71,52 @@ class DbTableMapping:
 
 
 def qler_job_mapping() -> DbTableMapping:
-    """Pre-built mapping for qler's ``jobs`` table."""
+    """Pre-built mapping for qler's ``qler_jobs`` table."""
     return DbTableMapping(
-        table="jobs",
+        table="qler_jobs",
         timestamp_field="created_at",
-        timestamp_format="iso",
+        timestamp_format="epoch",
         level_field="status",
         level_map={
             "pending": "INFO",
-            "claimed": "INFO",
             "running": "INFO",
-            "success": "INFO",
+            "completed": "INFO",
             "failed": "ERROR",
-            "dead": "ERROR",
             "cancelled": "WARN",
         },
-        message_template="[job] {task_name} ({ulid}) status={status}",
+        message_template="[job] {task} ({ulid}) status={status}",
         correlation_id_field="correlation_id",
-        extra_fields=["queue", "priority", "attempt_count", "task_name", "ulid"],
+        extra_fields=["queue_name", "priority", "attempts", "task", "ulid"],
         service_name="qler",
         id_field="ulid",
     )
 
 
 def qler_attempt_mapping() -> DbTableMapping:
-    """Pre-built mapping for qler's ``job_attempts`` table."""
+    """Pre-built mapping for qler's ``qler_job_attempts`` table."""
     return DbTableMapping(
-        table="job_attempts",
+        table="qler_job_attempts",
         timestamp_field="started_at",
-        timestamp_format="iso",
-        level_field="outcome",
+        timestamp_format="epoch",
+        level_field="status",
         level_map={
-            "success": "INFO",
-            "failure": "ERROR",
-            "timeout": "WARN",
-            "retry": "WARN",
+            "running": "INFO",
+            "completed": "INFO",
+            "failed": "ERROR",
+            "lease_expired": "WARN",
         },
-        message_template="[attempt] job={job_ulid} attempt={attempt_number} outcome={outcome}",
-        correlation_id_field="correlation_id",
+        message_template="[attempt] job={job_ulid} attempt={attempt_number} status={status}",
+        correlation_id_field=None,
         extra_fields=[
             "job_ulid",
             "attempt_number",
             "worker_id",
-            "outcome",
-            "error_message",
-            "duration_ms",
+            "status",
+            "error",
+            "failure_kind",
         ],
         service_name="qler",
-        id_field=None,
+        id_field="ulid",
     )
 
 
@@ -134,7 +140,8 @@ def db_to_jsonl(
     Raises:
         ValueError: If the database has no tables or is empty.
     """
-    uri = f"file:{db_path}?mode=ro"
+    safe_path = urllib.parse.quote(os.path.realpath(db_path), safe="/")
+    uri = f"file:{safe_path}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
 
@@ -166,6 +173,13 @@ def db_to_jsonl(
         try:
             for entry in all_entries:
                 tmp.write(json.dumps(entry) + "\n")
+        except Exception:
+            tmp.close()
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            raise
         finally:
             tmp.close()
 
@@ -179,15 +193,24 @@ def _read_sqler_table(
     mapping: DbTableMapping,
 ) -> list[dict]:
     """Read all rows from a sqler table and convert to log entries."""
+    # Validate table exists (parameterized query — safe from injection)
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (mapping.table,),
+    ).fetchone()
+    if exists is None:
+        raise ValueError(f"Table '{mapping.table}' not found in database")
+
     # Discover columns
-    cursor = conn.execute(f'PRAGMA table_info("{mapping.table}")')
+    cursor = conn.execute(f"PRAGMA table_info({_safe_identifier(mapping.table)})")
     columns = [row[1] for row in cursor.fetchall()]
 
     if not columns:
         return []
 
-    # Read rows ordered by _id
-    cursor = conn.execute(f'SELECT * FROM "{mapping.table}" ORDER BY _id')
+    # Read rows ordered by _id (fall back to rowid for non-sqler tables)
+    order_col = "_id" if "_id" in columns else "rowid"
+    cursor = conn.execute(f"SELECT * FROM {_safe_identifier(mapping.table)} ORDER BY {order_col}")
     rows = cursor.fetchall()
 
     entries = []
@@ -253,10 +276,10 @@ def _build_entry(
     else:
         entry["level"] = "INFO"
 
-    # Message
+    # Message (restricted formatter — no attribute/index access)
     try:
         template_vars = {**all_fields, "table_name": mapping.table}
-        entry["message"] = mapping.message_template.format_map(_SafeFormatDict(template_vars))
+        entry["message"] = _safe_format(mapping.message_template, template_vars)
     except (KeyError, ValueError):
         entry["message"] = f"{mapping.table} row {all_fields.get('_id', row_idx)}"
 
@@ -312,13 +335,19 @@ def _auto_detect_mappings(conn: sqlite3.Connection) -> list[DbTableMapping]:
 
     mappings = []
     for table in tables:
-        if table == "jobs":
+        if table == "qler_jobs":
             mappings.append(qler_job_mapping())
-        elif table == "job_attempts":
+        elif table == "qler_job_attempts":
             mappings.append(qler_attempt_mapping())
         else:
             # Generic mapping for unknown sqler tables
-            columns = [row[1] for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()]
+            columns = [
+                row[1]
+                for row in conn.execute(f"PRAGMA table_info({_safe_identifier(table)})").fetchall()
+            ]
+            # Skip non-sqler tables (no _id column)
+            if "_id" not in columns:
+                continue
             # Try to guess reasonable defaults
             ts_field = "created_at"
             if "created_at" not in columns:
@@ -343,8 +372,28 @@ def _auto_detect_mappings(conn: sqlite3.Connection) -> list[DbTableMapping]:
     return mappings
 
 
-class _SafeFormatDict(dict):
-    """A dict subclass that returns {key} for missing keys in format_map."""
+class _RestrictedFormatter(string.Formatter):
+    """Formatter that rejects attribute/index access in field names.
 
-    def __missing__(self, key: str) -> str:
-        return f"{{{key}}}"
+    Prevents template injection via ``{key.__class__}`` or ``{key[0]}``.
+    Missing keys return ``{key}`` as a literal placeholder.
+    """
+
+    def get_field(self, field_name: str, args, kwargs):
+        if "." in field_name or "[" in field_name:
+            raise ValueError(f"Attribute/index access not allowed in template: {field_name!r}")
+        return super().get_field(field_name, args, kwargs)
+
+    def get_value(self, key, args, kwargs):
+        try:
+            return kwargs[key]
+        except KeyError:
+            return f"{{{key}}}"
+
+
+_formatter = _RestrictedFormatter()
+
+
+def _safe_format(template: str, values: dict) -> str:
+    """Format a template string safely, rejecting attribute/index access."""
+    return _formatter.format(template, **values)

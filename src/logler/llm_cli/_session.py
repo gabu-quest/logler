@@ -2,6 +2,7 @@
 
 import click
 import json
+import os
 import sys
 from typing import Optional
 from datetime import datetime
@@ -10,10 +11,13 @@ from ._core import (
     llm,
     EXIT_SUCCESS,
     EXIT_NO_RESULTS,
+    EXIT_USER_ERROR,
     EXIT_INTERNAL_ERROR,
     _output_json,
     _error_json,
     _expand_globs,
+    db_source_option,
+    _db_file_source,
 )
 
 
@@ -29,18 +33,29 @@ def session():
 
 
 @session.command("create")
-@click.option("--files", "-f", multiple=True, required=True, help="Files to include")
+@click.option("--files", "-f", multiple=True, help="Files to include")
+@db_source_option
 @click.option("--name", help="Session name")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
-def session_create(files: tuple, name: Optional[str], pretty: bool):
+def session_create(files: tuple, db_path: Optional[str], name: Optional[str], pretty: bool):
     """Create a new investigation session."""
     import uuid
     from pathlib import Path
 
     try:
-        file_list = _expand_globs(list(files))
-        if not file_list:
-            _error_json(f"No files found matching: {files}")
+        if not files and not db_path:
+            _error_json("Either --files or --db is required", EXIT_USER_ERROR)
+
+        file_list = _expand_globs(list(files)) if files else []
+
+        # Validate DB is readable and has data
+        abs_db_path = None
+        if db_path:
+            from ..db_source import db_to_jsonl
+
+            test_jsonl = db_to_jsonl(db_path)
+            os.unlink(test_jsonl)
+            abs_db_path = os.path.realpath(db_path)
 
         session_id = f"sess_{uuid.uuid4().hex[:12]}"
         session_name = name or f"investigation-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -50,8 +65,10 @@ def session_create(files: tuple, name: Optional[str], pretty: bool):
             "name": session_name,
             "created_at": datetime.now().isoformat(),
             "files": file_list,
+            "db_path": abs_db_path,
             "status": "active",
             "log": [],
+            "correlation_ids": [],
         }
 
         # Save session
@@ -67,6 +84,7 @@ def session_create(files: tuple, name: Optional[str], pretty: bool):
             "name": session_name,
             "created_at": session_data["created_at"],
             "files": file_list,
+            "db_path": abs_db_path,
             "status": "active",
             "session_file": str(session_file),
         }
@@ -74,6 +92,8 @@ def session_create(files: tuple, name: Optional[str], pretty: bool):
         _output_json(output, pretty)
         sys.exit(EXIT_SUCCESS)
 
+    except SystemExit:
+        raise
     except Exception as e:
         _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
 
@@ -103,6 +123,8 @@ def session_list(pretty: bool):
                             "created_at": data.get("created_at"),
                             "status": data.get("status"),
                             "files_count": len(data.get("files", [])),
+                            "has_db": data.get("db_path") is not None,
+                            "correlation_count": len(data.get("correlation_ids", [])),
                         }
                     )
             except (json.JSONDecodeError, KeyError):
@@ -114,18 +136,26 @@ def session_list(pretty: bool):
         _output_json({"sessions": sessions}, pretty)
         sys.exit(EXIT_SUCCESS)
 
+    except SystemExit:
+        raise
     except Exception as e:
         _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
 
 
 @session.command("query")
 @click.argument("session_id")
+@db_source_option
 @click.option("--level", help="Filter by level")
 @click.option("--query", help="Search pattern")
 @click.option("--limit", type=int, help="Limit results")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def session_query(
-    session_id: str, level: Optional[str], query: Optional[str], limit: Optional[int], pretty: bool
+    session_id: str,
+    db_path: Optional[str],
+    level: Optional[str],
+    query: Optional[str],
+    limit: Optional[int],
+    pretty: bool,
 ):
     """Query logs within a session context."""
     from pathlib import Path
@@ -141,11 +171,23 @@ def session_query(
         with open(session_file) as f:
             session_data = json.load(f)
 
-        files = session_data.get("files", [])
+        files = tuple(session_data.get("files", []))
+        # CLI --db overrides stored db_path
+        effective_db = db_path or session_data.get("db_path")
 
-        result = investigate.search(
-            files=files, query=query, level=level, limit=limit, output_format="full"
-        )
+        with _db_file_source(files, effective_db) as file_list:
+            result = investigate.search(
+                files=file_list, query=query, level=level, limit=limit, output_format="full"
+            )
+
+        # Track correlation IDs seen in this session
+        correlations = set(session_data.get("correlation_ids", []))
+        for item in result.get("results", []):
+            entry = item.get("entry", item)
+            cid = entry.get("correlation_id")
+            if cid:
+                correlations.add(cid)
+        session_data["correlation_ids"] = sorted(correlations)
 
         # Log the query
         session_data["log"].append(
@@ -163,6 +205,8 @@ def session_query(
         _output_json(result, pretty)
         sys.exit(EXIT_SUCCESS if result.get("results") else EXIT_NO_RESULTS)
 
+    except SystemExit:
+        raise
     except Exception as e:
         _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
 
@@ -195,6 +239,8 @@ def session_note(session_id: str, text: str, pretty: bool):
         _output_json({"status": "ok", "note": note_entry}, pretty)
         sys.exit(EXIT_SUCCESS)
 
+    except SystemExit:
+        raise
     except Exception as e:
         _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
 
@@ -250,5 +296,7 @@ def session_conclude(
         _output_json(output, pretty)
         sys.exit(EXIT_SUCCESS)
 
+    except SystemExit:
+        raise
     except Exception as e:
         _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)

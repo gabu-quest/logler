@@ -410,6 +410,13 @@ class Investigator:
                 pass
         self._db_temp_files.clear()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
 
 # ============================================================================
 # Numeric Extraction Wrappers (M5)
