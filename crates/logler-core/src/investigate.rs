@@ -407,11 +407,7 @@ impl Investigator {
                     global_idx += file_len;
                     continue;
                 }
-                let start = if offset > global_idx {
-                    offset - global_idx
-                } else {
-                    0
-                };
+                let start = offset.saturating_sub(global_idx);
                 for entry in &entries[start..] {
                     if result.len() >= limit {
                         return EntriesPage {
