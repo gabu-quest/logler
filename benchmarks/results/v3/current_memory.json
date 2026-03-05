@@ -1,0 +1,83 @@
+{
+  "config": {
+    "scale": "memory_profile",
+    "warmup": 0,
+    "iterations": 1
+  },
+  "system": {},
+  "results": [
+    {
+      "scenario": "db_source_memory",
+      "suite": "db_source",
+      "parameter": "rows",
+      "value": 10000,
+      "timing": {
+        "median_ms": 1274.24,
+        "p95_ms": 1274.24,
+        "min_ms": 1274.24,
+        "max_ms": 1274.24,
+        "stddev_ms": 0,
+        "mean_ms": 1274.24,
+        "iterations": 1,
+        "p99_ms": 1274.24,
+        "total_ms": 1274.24
+      },
+      "rows": 10000,
+      "throughput": 0,
+      "metadata": {
+        "peak_memory_kb": 1030,
+        "current_memory_kb": 249
+      }
+    },
+    {
+      "scenario": "db_source_memory",
+      "suite": "db_source",
+      "parameter": "rows",
+      "value": 50000,
+      "timing": {
+        "median_ms": 5870.93,
+        "p95_ms": 5870.93,
+        "min_ms": 5870.93,
+        "max_ms": 5870.93,
+        "stddev_ms": 0,
+        "mean_ms": 5870.93,
+        "iterations": 1,
+        "p99_ms": 5870.93,
+        "total_ms": 5870.93
+      },
+      "rows": 50000,
+      "throughput": 0,
+      "metadata": {
+        "peak_memory_kb": 1026,
+        "current_memory_kb": 243
+      }
+    },
+    {
+      "scenario": "db_source_memory",
+      "suite": "db_source",
+      "parameter": "rows",
+      "value": 100000,
+      "timing": {
+        "median_ms": 11698.93,
+        "p95_ms": 11698.93,
+        "min_ms": 11698.93,
+        "max_ms": 11698.93,
+        "stddev_ms": 0,
+        "mean_ms": 11698.93,
+        "iterations": 1,
+        "p99_ms": 11698.93,
+        "total_ms": 11698.93
+      },
+      "rows": 100000,
+      "throughput": 0,
+      "metadata": {
+        "peak_memory_kb": 1030,
+        "current_memory_kb": 246
+      }
+    }
+  ],
+  "summary": {
+    "total_scenarios": 1,
+    "total_measurements": 3
+  }
+}

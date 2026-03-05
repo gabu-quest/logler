@@ -680,27 +680,54 @@ def _write_comparison_report(
         r
         for r in current.get("results", [])
         if r.get("scenario") in ("search_memory_profile", "db_source_memory")
-        and r.get("metadata", {}).get("allocated_rss_kb") is not None
+        and r.get("metadata", {}).get("peak_memory_kb") is not None
     ]
     if memory_results:
+        has_vmrss = any(r["metadata"].get("vmrss_delta_kb") is not None for r in memory_results)
         lines.extend(
             [
                 "## Memory Safety Profile",
                 "",
-                "RSS measurements via `resource.getrusage(RUSAGE_SELF)` — captures both Python and Rust heap.",
-                "",
-                "| Scenario | Scale | RSS Before (KB) | RSS After (KB) | Allocated (KB) |",
-                "|----------|-------|-----------------|----------------|----------------|",
+                "Python heap measurements via `tracemalloc` — tracks actual Python allocations during the measured call.",
             ]
         )
-        for r in sorted(memory_results, key=lambda x: (x["scenario"], x.get("value", 0))):
-            meta = r["metadata"]
+        if has_vmrss:
             lines.append(
-                f"| {r['scenario']} | {r.get('value', '?')} "
-                f"| {meta['rss_before_kb']:,} "
-                f"| {meta['peak_rss_kb']:,} "
-                f"| {meta['allocated_rss_kb']:,} |"
+                "VmRSS from `/proc/self/status` — tracks total process resident memory including Rust/C allocations."
             )
+        lines.append("")
+
+        if has_vmrss:
+            lines.extend(
+                [
+                    "| Scenario | Scale | Peak Alloc (KB) | Current (KB) | VmRSS Before (KB) | VmRSS After (KB) | VmRSS Delta (KB) |",
+                    "|----------|-------|-----------------|--------------|--------------------|--------------------|-------------------|",
+                ]
+            )
+            for r in sorted(memory_results, key=lambda x: (x["scenario"], x.get("value", 0))):
+                meta = r["metadata"]
+                lines.append(
+                    f"| {r['scenario']} | {r.get('value', '?')} "
+                    f"| {meta['peak_memory_kb']:,} "
+                    f"| {meta['current_memory_kb']:,} "
+                    f"| {meta.get('vmrss_before_kb', 0):,} "
+                    f"| {meta.get('vmrss_after_kb', 0):,} "
+                    f"| {meta.get('vmrss_delta_kb', 0):,} |"
+                )
+        else:
+            lines.extend(
+                [
+                    "| Scenario | Scale | Peak Alloc (KB) | Current (KB) |",
+                    "|----------|-------|-----------------|--------------|",
+                ]
+            )
+            for r in sorted(memory_results, key=lambda x: (x["scenario"], x.get("value", 0))):
+                meta = r["metadata"]
+                lines.append(
+                    f"| {r['scenario']} | {r.get('value', '?')} "
+                    f"| {meta['peak_memory_kb']:,} "
+                    f"| {meta['current_memory_kb']:,} |"
+                )
         lines.append("")
 
     # Statistical integrity notes

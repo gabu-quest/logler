@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .theme import (
+    ACCENT_COLORS,
     BG_DARK,
     BORDER_COLOR,
     TEXT_MUTED,
@@ -360,6 +361,88 @@ def plot_throughput_comparison(
     ax.spines["right"].set_visible(False)
 
     fig.tight_layout()
+    svg_path = output.with_suffix(".svg")
+    png_path = output.with_suffix(".png")
+    fig.savefig(svg_path, format="svg")
+    fig.savefig(png_path, format="png", dpi=200)
+    plt.close(fig)
+
+    return svg_path
+
+
+def plot_memory_scaling(
+    results: list[dict],
+    title: str,
+    system_info: str,
+    output: Path,
+    xlabel: str = "Entries",
+    before_results: list[dict] | None = None,
+) -> Path:
+    """Line chart showing peak memory (KB) vs scale, with optional before/after overlay.
+
+    Each result must have ``metadata.peak_memory_kb``.  When ``before_results``
+    is provided, the chart draws both series for a visual before/after comparison.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as ticker
+
+    _ensure_theme()
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    def _extract_series(data: list[dict]) -> tuple[list[int], list[int]]:
+        pairs = []
+        for r in data:
+            x = r.get("rows", r.get("value", 0))
+            y = r.get("metadata", {}).get("peak_memory_kb", 0)
+            pairs.append((x, y))
+        pairs.sort()
+        return [p[0] for p in pairs], [p[1] for p in pairs]
+
+    # "After" (current) series — always present
+    xs, ys = _extract_series(results)
+    c_after = color(2)  # Bluish green
+    ax.plot(xs, ys, "o-", color=c_after, label="After (current)", zorder=3, linewidth=3)
+    ax.fill_between(xs, 0, ys, alpha=0.15, color=c_after, zorder=2)
+
+    # "Before" series — optional overlay
+    if before_results:
+        bx, by = _extract_series(before_results)
+        c_before = ACCENT_COLORS["danger"]
+        ax.plot(bx, by, "s--", color=c_before, label="Before (baseline)", zorder=3, linewidth=2.5)
+        ax.fill_between(bx, 0, by, alpha=0.08, color=c_before, zorder=1)
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Peak Memory (KB)")
+    ax.set_title(title, pad=20)
+    _subtitle(ax, system_info)
+
+    if all(x > 0 for x in xs):
+        ax.set_xscale("log")
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
+
+    def _mem_fmt(y, _):
+        if y >= 1024:
+            return f"{y / 1024:.1f} MB"
+        return f"{int(y):,} KB"
+
+    ax.yaxis.set_major_formatter(ticker.FuncFormatter(_mem_fmt))
+    ax.set_ylim(bottom=0)
+
+    ax.legend(loc="upper left", framealpha=0.9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    fig.text(
+        0.99,
+        0.01,
+        "Memory via tracemalloc \u2014 actual Python heap allocations during the measured call",
+        ha="right",
+        va="bottom",
+        fontsize=7.5,
+        color=TEXT_MUTED,
+        style="italic",
+    )
+
     svg_path = output.with_suffix(".svg")
     png_path = output.with_suffix(".png")
     fig.savefig(svg_path, format="svg")

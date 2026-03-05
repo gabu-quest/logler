@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import resource
+import tracemalloc
 import tempfile
 from pathlib import Path
 
@@ -14,14 +14,26 @@ from benchmarks.generators.database import DatabaseGenerator
 
 SUITE_NAME = "db_source"
 
+
+def _get_vmrss_kb() -> int:
+    """Current VmRSS from /proc/self/status (Linux).
+
+    Unlike ru_maxrss (monotonic peak), VmRSS reflects current resident
+    memory including Rust/C allocations invisible to tracemalloc.
+    """
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except OSError:
+        pass
+    return 0
+
+
 # Fixed scales — ignores config.scale for cross-run comparability.
 DB_TIMING_SCALES = (1_000, 10_000, 50_000)
 DB_MEMORY_SCALES = (10_000, 50_000, 100_000)
-
-
-def _get_rss_kb() -> int:
-    """Current RSS in KB (Linux: ru_maxrss is already KB)."""
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
 class DbToJsonlScaling:
@@ -144,15 +156,17 @@ class DbSourceSearch:
 
 
 class DbSourceMemory:
-    """Scenario 19: RSS memory profile for db_to_jsonl streaming.
+    """Scenario 19: heap memory profile for db_to_jsonl streaming.
 
-    Proves streaming fetchmany keeps memory flat regardless of table size.
-    Uses timer.measure_once() — RSS is a high-water mark.
+    Proves streaming fetchmany+generator keeps memory proportional to batch
+    size (~1000 entries), not total table size. Uses tracemalloc to measure
+    actual Python heap allocations — not process-level RSS which is a
+    monotonic high-water mark and produces meaningless deltas.
     """
 
     name = "db_source_memory"
     suite = SUITE_NAME
-    description = "RSS memory profile for db_to_jsonl at 10K/50K/100K rows"
+    description = "Heap memory profile for db_to_jsonl at 10K/50K/100K rows"
 
     def setup(self, config: BenchmarkConfig) -> None:
         self.gen = DatabaseGenerator(seed=42)
@@ -173,8 +187,6 @@ class DbSourceMemory:
 
         for size in DB_MEMORY_SCALES:
             db_path = self.db_paths[size]
-            rss_before = _get_rss_kb()
-
             path_holder = [None]
 
             def do_convert(p=db_path):
@@ -182,8 +194,12 @@ class DbSourceMemory:
                 path_holder[0] = jsonl_path
                 return jsonl_path
 
+            vmrss_before = _get_vmrss_kb()
+            tracemalloc.start()
             stats = timer.measure_once(do_convert)
-            rss_after = _get_rss_kb()
+            current_bytes, peak_bytes = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            vmrss_after = _get_vmrss_kb()
 
             # Cleanup temp JSONL
             if path_holder[0] and os.path.exists(path_holder[0]):
@@ -198,9 +214,11 @@ class DbSourceMemory:
                     timing=stats,
                     rows=size,
                     metadata={
-                        "peak_rss_kb": rss_after,
-                        "allocated_rss_kb": rss_after - rss_before,
-                        "rss_before_kb": rss_before,
+                        "peak_memory_kb": round(peak_bytes / 1024),
+                        "current_memory_kb": round(current_bytes / 1024),
+                        "vmrss_before_kb": vmrss_before,
+                        "vmrss_after_kb": vmrss_after,
+                        "vmrss_delta_kb": vmrss_after - vmrss_before,
                     },
                 )
             )

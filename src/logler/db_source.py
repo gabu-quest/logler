@@ -4,6 +4,10 @@ Converts rows from sqler tables into JSONL that logler's Rust parser can
 ingest. Works with any sqler database; auto-detects qler tables (``qler_jobs``,
 ``qler_job_attempts``) and applies smart defaults.
 
+.. versionchanged:: 0.3
+   ``_read_sqler_table`` is now a generator, yielding entries one batch at a
+   time instead of accumulating a full list.
+
 Example::
 
     from logler.db_source import db_to_jsonl
@@ -27,6 +31,7 @@ import sqlite3
 import string
 import tempfile
 import urllib.parse
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -194,8 +199,12 @@ def db_to_jsonl(
 def _read_sqler_table(
     conn: sqlite3.Connection,
     mapping: DbTableMapping,
-) -> list[dict]:
-    """Read all rows from a sqler table and convert to log entries."""
+) -> Iterator[dict]:
+    """Read all rows from a sqler table and convert to log entries.
+
+    Yields entries one batch at a time so the caller can flush to disk
+    without holding the full table in memory.
+    """
     # Validate table exists (parameterized query — safe from injection)
     exists = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -209,14 +218,14 @@ def _read_sqler_table(
     columns = [row[1] for row in cursor.fetchall()]
 
     if not columns:
-        return []
+        return
 
     # Read rows ordered by _id (fall back to rowid for non-sqler tables)
     order_col = "_id" if "_id" in columns else "rowid"
     cursor = conn.execute(f"SELECT * FROM {_safe_identifier(mapping.table)} ORDER BY {order_col}")
 
-    # Stream in batches to avoid holding raw rows + converted entries simultaneously
-    entries = []
+    # Stream in batches — each entry is yielded immediately so the caller
+    # can write it to disk, keeping peak memory at ~1000 entries.
     idx = 0
     while True:
         batch = cursor.fetchmany(1000)
@@ -226,10 +235,8 @@ def _read_sqler_table(
             row_dict = dict(row)
             all_fields = _merge_sqler_row(row_dict, columns)
             entry = _build_entry(all_fields, mapping, idx)
-            entries.append(entry)
+            yield entry
             idx += 1
-
-    return entries
 
 
 def _merge_sqler_row(row_dict: dict, columns: list[str]) -> dict:

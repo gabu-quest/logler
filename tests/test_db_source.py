@@ -981,7 +981,7 @@ class TestNonSqlerTableHandling:
             service_name="test",
         )
 
-        rows = _read_sqler_table(conn, mapping)
+        rows = list(_read_sqler_table(conn, mapping))
         conn.close()
 
         assert len(rows) == 3
@@ -1382,7 +1382,7 @@ class TestFetchmanyStreaming:
         real_conn.row_factory = sqlite3.Row
         spy_conn = SpyConnection(real_conn)
         try:
-            rows = _read_sqler_table(spy_conn, qler_job_mapping())
+            rows = list(_read_sqler_table(spy_conn, qler_job_mapping()))
             assert len(rows) == self.TOTAL_JOBS
             # ceil(2500/1000) = 3 data batches + 1 empty sentinel = 4 calls
             assert len(fetchmany_calls) == 4

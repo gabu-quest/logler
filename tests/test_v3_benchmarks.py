@@ -142,14 +142,19 @@ class TestDatabaseGeneratorSchema:
             assert timestamps[i] > timestamps[i - 1]
 
     def test_data_json_valid(self, gen):
-        """Every data field is valid JSON with required keys."""
+        """Every data field is valid JSON with correct types and formats."""
         rows = gen.generate(50)
-        for row in rows:
+        # Verify first row has exact expected format
+        first = json.loads(rows[0]["data"])
+        assert first["correlation_id"] == "corr-000000"
+        assert isinstance(first["task"], str) and len(first["task"]) > 0
+        assert isinstance(first["attempts"], int) and first["attempts"] >= 0
+        assert isinstance(first["created_at"], float) and first["created_at"] > 1e9
+
+        # Verify all rows have sequential correlation IDs
+        for i, row in enumerate(rows):
             data = json.loads(row["data"])
-            assert "task" in data
-            assert "attempts" in data
-            assert "correlation_id" in data
-            assert "created_at" in data
+            assert data["correlation_id"] == f"corr-{i:06d}"
 
     def test_write_db_returns_count(self, gen, tmp_path):
         """write_db returns the number of rows written."""
@@ -254,6 +259,7 @@ class TestDbPipelineIntegration:
 
         results = search_db(small_db, level="ERROR")
         assert results["total_matches"] > 0
+        assert len(results["results"]) > 0
         for result in results["results"]:
             assert result["entry"]["level"] == "ERROR"
 
@@ -290,19 +296,12 @@ class TestMemorySuiteScenarios:
             scenario.teardown()
         return results
 
-    def test_search_broad_query_returns_results(self, fast_config):
+    def test_search_broad_query_returns_results(self, fast_config, monkeypatch):
         """Scenario 15: produces BenchmarkResults with correct structure."""
         from benchmarks.suites.suite_memory import SearchBroadQuery
 
-        # Patch MEMORY_SCALES to tiny for fast CI
-        import benchmarks.suites.suite_memory as mod
-
-        original = mod.MEMORY_SCALES
-        mod.MEMORY_SCALES = (100,)
-        try:
-            results = self._run_scenario(SearchBroadQuery, fast_config)
-        finally:
-            mod.MEMORY_SCALES = original
+        monkeypatch.setattr("benchmarks.suites.suite_memory.MEMORY_SCALES", (100,))
+        results = self._run_scenario(SearchBroadQuery, fast_config)
 
         assert len(results) == 1
         r = results[0]
@@ -310,33 +309,43 @@ class TestMemorySuiteScenarios:
         assert r.suite == "memory"
         assert r.parameter == "entries"
         assert r.value == 100
+        assert r.rows == 100
         assert r.throughput > 0
         assert r.timing.median_ms > 0
 
-    def test_search_memory_profile_has_rss_metadata(self, fast_config):
-        """Scenario 16: metadata contains peak_rss_kb, allocated_rss_kb, rss_before_kb."""
+    def test_search_memory_profile_has_rss_metadata(self, fast_config, monkeypatch):
+        """Scenario 16: RSS metadata has correct types and semantic invariant."""
         from benchmarks.suites.suite_memory import SearchMemoryProfile
 
-        import benchmarks.suites.suite_memory as mod
-
-        original = mod.MEMORY_SCALES
-        mod.MEMORY_SCALES = (100,)
-        try:
-            results = self._run_scenario(SearchMemoryProfile, fast_config)
-        finally:
-            mod.MEMORY_SCALES = original
+        monkeypatch.setattr("benchmarks.suites.suite_memory.MEMORY_SCALES", (100,))
+        results = self._run_scenario(SearchMemoryProfile, fast_config)
 
         assert len(results) == 1
         r = results[0]
         assert r.scenario == "search_memory_profile"
         assert r.suite == "memory"
+        assert r.rows == 100
         meta = r.metadata
-        assert "peak_rss_kb" in meta
-        assert "allocated_rss_kb" in meta
-        assert "rss_before_kb" in meta
-        assert isinstance(meta["peak_rss_kb"], int)
-        assert isinstance(meta["rss_before_kb"], int)
-        assert meta["peak_rss_kb"] > 0
+        assert isinstance(meta["peak_memory_kb"], int)
+        assert isinstance(meta["current_memory_kb"], int)
+        # tracemalloc must report non-zero peak for any real work
+        assert meta["peak_memory_kb"] > 0
+        # Semantic invariant: peak >= current (peak is the high-water mark)
+        assert meta["peak_memory_kb"] >= meta["current_memory_kb"]
+        # VmRSS metadata
+        assert isinstance(meta["vmrss_before_kb"], int)
+        assert isinstance(meta["vmrss_after_kb"], int)
+        assert isinstance(meta["vmrss_delta_kb"], int)
+        assert meta["vmrss_before_kb"] > 0
+        assert meta["vmrss_after_kb"] > 0
+        assert meta["vmrss_delta_kb"] == meta["vmrss_after_kb"] - meta["vmrss_before_kb"]
+
+    def test_teardown_without_setup(self):
+        """Teardown on a fresh instance does not raise."""
+        from benchmarks.suites.suite_memory import SearchBroadQuery, SearchMemoryProfile
+
+        SearchBroadQuery().teardown()
+        SearchMemoryProfile().teardown()
 
 
 class TestDbSourceSuiteScenarios:
@@ -351,18 +360,12 @@ class TestDbSourceSuiteScenarios:
             scenario.teardown()
         return results
 
-    def test_db_to_jsonl_scaling_returns_results(self, fast_config):
+    def test_db_to_jsonl_scaling_returns_results(self, fast_config, monkeypatch):
         """Scenario 17: produces results with throughput."""
         from benchmarks.suites.suite_db_source import DbToJsonlScaling
 
-        import benchmarks.suites.suite_db_source as mod
-
-        original = mod.DB_TIMING_SCALES
-        mod.DB_TIMING_SCALES = (100,)
-        try:
-            results = self._run_scenario(DbToJsonlScaling, fast_config)
-        finally:
-            mod.DB_TIMING_SCALES = original
+        monkeypatch.setattr("benchmarks.suites.suite_db_source.DB_TIMING_SCALES", (100,))
+        results = self._run_scenario(DbToJsonlScaling, fast_config)
 
         assert len(results) == 1
         r = results[0]
@@ -370,68 +373,76 @@ class TestDbSourceSuiteScenarios:
         assert r.suite == "db_source"
         assert r.parameter == "rows"
         assert r.value == 100
+        assert r.rows == 100
         assert r.throughput > 0
+        assert r.timing.median_ms > 0
 
-    def test_db_source_search_returns_results(self, fast_config):
-        """Scenario 18: end-to-end DB search produces results."""
+    def test_db_source_search_returns_results(self, fast_config, monkeypatch):
+        """Scenario 18: end-to-end DB search produces results with timing."""
         from benchmarks.suites.suite_db_source import DbSourceSearch
 
-        import benchmarks.suites.suite_db_source as mod
-
-        original = mod.DB_TIMING_SCALES
-        mod.DB_TIMING_SCALES = (100,)
-        try:
-            results = self._run_scenario(DbSourceSearch, fast_config)
-        finally:
-            mod.DB_TIMING_SCALES = original
+        monkeypatch.setattr("benchmarks.suites.suite_db_source.DB_TIMING_SCALES", (100,))
+        results = self._run_scenario(DbSourceSearch, fast_config)
 
         assert len(results) == 1
         r = results[0]
         assert r.scenario == "db_source_search"
         assert r.suite == "db_source"
+        assert r.rows == 100
         assert r.throughput > 0
+        assert r.timing.median_ms > 0
 
-    def test_db_source_memory_has_rss_metadata(self, fast_config):
-        """Scenario 19: metadata contains RSS fields."""
+    def test_db_source_memory_has_rss_metadata(self, fast_config, monkeypatch):
+        """Scenario 19: RSS metadata has correct types and semantic invariant."""
         from benchmarks.suites.suite_db_source import DbSourceMemory
 
-        import benchmarks.suites.suite_db_source as mod
-
-        original = mod.DB_MEMORY_SCALES
-        mod.DB_MEMORY_SCALES = (100,)
-        try:
-            results = self._run_scenario(DbSourceMemory, fast_config)
-        finally:
-            mod.DB_MEMORY_SCALES = original
+        monkeypatch.setattr("benchmarks.suites.suite_db_source.DB_MEMORY_SCALES", (100,))
+        results = self._run_scenario(DbSourceMemory, fast_config)
 
         assert len(results) == 1
         r = results[0]
         assert r.scenario == "db_source_memory"
         assert r.suite == "db_source"
+        assert r.rows == 100
         meta = r.metadata
-        assert "peak_rss_kb" in meta
-        assert "allocated_rss_kb" in meta
-        assert "rss_before_kb" in meta
-        assert meta["peak_rss_kb"] > 0
+        assert isinstance(meta["peak_memory_kb"], int)
+        assert isinstance(meta["current_memory_kb"], int)
+        # tracemalloc must report non-zero peak for any real work
+        assert meta["peak_memory_kb"] > 0
+        # Semantic invariant: peak >= current
+        assert meta["peak_memory_kb"] >= meta["current_memory_kb"]
+        # VmRSS metadata
+        assert isinstance(meta["vmrss_before_kb"], int)
+        assert isinstance(meta["vmrss_after_kb"], int)
+        assert isinstance(meta["vmrss_delta_kb"], int)
+        assert meta["vmrss_before_kb"] > 0
+        assert meta["vmrss_after_kb"] > 0
+        assert meta["vmrss_delta_kb"] == meta["vmrss_after_kb"] - meta["vmrss_before_kb"]
 
-    def test_teardown_cleans_tmpdir(self, fast_config):
+    def test_teardown_cleans_tmpdir(self, fast_config, monkeypatch):
         """Teardown removes the temporary directory."""
         from benchmarks.suites.suite_db_source import DbToJsonlScaling
 
-        import benchmarks.suites.suite_db_source as mod
+        monkeypatch.setattr("benchmarks.suites.suite_db_source.DB_TIMING_SCALES", (100,))
+        scenario = DbToJsonlScaling()
+        scenario.setup(fast_config)
+        tmpdir = scenario.tmpdir
+        assert os.path.isdir(tmpdir)
+        scenario.run(fast_config)
+        scenario.teardown()
+        assert not os.path.exists(tmpdir)
 
-        original = mod.DB_TIMING_SCALES
-        mod.DB_TIMING_SCALES = (100,)
-        try:
-            scenario = DbToJsonlScaling()
-            scenario.setup(fast_config)
-            tmpdir = scenario.tmpdir
-            assert os.path.isdir(tmpdir)
-            scenario.run(fast_config)
-            scenario.teardown()
-            assert not os.path.exists(tmpdir)
-        finally:
-            mod.DB_TIMING_SCALES = original
+    def test_teardown_without_setup(self):
+        """Teardown on fresh instances does not raise."""
+        from benchmarks.suites.suite_db_source import (
+            DbSourceMemory,
+            DbSourceSearch,
+            DbToJsonlScaling,
+        )
+
+        DbToJsonlScaling().teardown()
+        DbSourceSearch().teardown()
+        DbSourceMemory().teardown()
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +481,13 @@ class TestSuiteRegistration:
         assert "db_to_jsonl_scaling" in names
         assert "db_source_search" in names
         assert "db_source_memory" in names
+
+    def test_unknown_suite_raises(self):
+        """get_scenarios with unknown suite name raises ValueError."""
+        from benchmarks.suites import get_scenarios
+
+        with pytest.raises(ValueError, match="Unknown suite"):
+            get_scenarios(["nonexistent"])
 
 
 # ---------------------------------------------------------------------------
@@ -510,9 +528,11 @@ class TestComparisonMemoryNarrative:
                     "rows": 10000,
                     "throughput": 200000,
                     "metadata": {
-                        "peak_rss_kb": 500000,
-                        "allocated_rss_kb": 1024,
-                        "rss_before_kb": 498976,
+                        "peak_memory_kb": 51200,
+                        "current_memory_kb": 1024,
+                        "vmrss_before_kb": 120000,
+                        "vmrss_after_kb": 338000,
+                        "vmrss_delta_kb": 218000,
                     },
                 },
             ],
@@ -527,8 +547,69 @@ class TestComparisonMemoryNarrative:
         content = report_path.read_text()
         assert "## Memory Safety Profile" in content
         assert "search_memory_profile" in content
-        assert "500,000" in content  # peak_rss_kb formatted
-        assert "1,024" in content  # allocated_rss_kb formatted
+        assert "51,200" in content  # peak_memory_kb formatted
+        assert "1,024" in content  # current_memory_kb formatted
+        # VmRSS columns present
+        assert "VmRSS Before (KB)" in content
+        assert "VmRSS After (KB)" in content
+        assert "VmRSS Delta (KB)" in content
+        assert "120,000" in content  # vmrss_before_kb formatted
+        assert "338,000" in content  # vmrss_after_kb formatted
+        assert "218,000" in content  # vmrss_delta_kb formatted
+
+    def test_memory_narrative_renders_without_vmrss_keys(self, tmp_path):
+        """Old-format memory results (no VmRSS keys) render legacy 4-column table."""
+        from benchmarks.plotting.comparison import _write_comparison_report
+
+        baseline = {
+            "config": {"scale": "small", "warmup": 1, "iterations": 1},
+            "system": {},
+            "results": [],
+        }
+        current = {
+            "config": {"scale": "small", "warmup": 1, "iterations": 1},
+            "system": {},
+            "results": [
+                {
+                    "scenario": "search_memory_profile",
+                    "suite": "memory",
+                    "parameter": "entries",
+                    "value": 10000,
+                    "timing": {
+                        "median_ms": 50,
+                        "p95_ms": 55,
+                        "min_ms": 45,
+                        "max_ms": 60,
+                        "stddev_ms": 3,
+                        "mean_ms": 50,
+                        "iterations": 1,
+                        "p99_ms": 58,
+                        "total_ms": 50,
+                    },
+                    "rows": 10000,
+                    "throughput": 200000,
+                    "metadata": {
+                        "peak_memory_kb": 51200,
+                        "current_memory_kb": 1024,
+                    },
+                },
+            ],
+        }
+
+        report_path = tmp_path / "COMPARISON.md"
+        charts_dir = tmp_path / "charts"
+        charts_dir.mkdir()
+
+        _write_comparison_report(report_path, baseline, current, [], {}, charts_dir, None)
+
+        content = report_path.read_text()
+        assert "## Memory Safety Profile" in content
+        assert "51,200" in content
+        assert "1,024" in content
+        # Legacy table must NOT have VmRSS columns
+        assert "VmRSS Before (KB)" not in content
+        assert "VmRSS After (KB)" not in content
+        assert "VmRSS Delta (KB)" not in content
 
     def test_memory_narrative_absent_when_no_memory_scenarios(self, tmp_path):
         """Memory Safety Profile section is absent when no memory scenarios."""

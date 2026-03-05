@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import resource
+import tracemalloc
 import tempfile
 from pathlib import Path
 
@@ -13,13 +13,25 @@ from benchmarks.generators.logs import LogGenerator
 
 SUITE_NAME = "memory"
 
+
+def _get_vmrss_kb() -> int:
+    """Current VmRSS from /proc/self/status (Linux).
+
+    Unlike ru_maxrss (monotonic peak), VmRSS reflects current resident
+    memory including Rust/C allocations invisible to tracemalloc.
+    """
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except OSError:
+        pass
+    return 0
+
+
 # Fixed scales for cross-run comparability — ignores config.scale intentionally.
 MEMORY_SCALES = (10_000, 50_000, 100_000)
-
-
-def _get_rss_kb() -> int:
-    """Current RSS in KB (Linux: ru_maxrss is already KB)."""
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
 class SearchBroadQuery:
@@ -82,16 +94,18 @@ class SearchBroadQuery:
 
 
 class SearchMemoryProfile:
-    """Scenario 16: RSS memory profile for broad queries.
+    """Scenario 16: heap memory profile for broad queries.
 
-    Same broad query as scenario 15, but captures RSS before/after.
-    Uses timer.measure_once() — RSS is a high-water mark, repeated calls inflate it.
-    The money shot: allocated_rss_kb should grow sub-linearly across 10K->100K.
+    Same broad query as scenario 15, but captures Python heap allocations
+    via tracemalloc. Uses timer.measure_once() — tracemalloc tracks peak
+    allocation across the call, giving real numbers (not process-level RSS
+    which is a monotonic high-water mark and reports 0 when the process
+    peak was already set by earlier imports).
     """
 
     name = "search_memory_profile"
     suite = SUITE_NAME
-    description = "RSS memory profile for broad queries at 10K/50K/100K entries"
+    description = "Heap memory profile for broad queries at 10K/50K/100K entries"
 
     def setup(self, config: BenchmarkConfig) -> None:
         self.gen = LogGenerator(seed=42)
@@ -112,13 +126,16 @@ class SearchMemoryProfile:
 
         for size in MEMORY_SCALES:
             filepath = self.files[size]
-            rss_before = _get_rss_kb()
 
             def do_search(f=filepath):
                 return search(files=[f], level="INFO", limit=100)
 
+            vmrss_before = _get_vmrss_kb()
+            tracemalloc.start()
             stats = timer.measure_once(do_search)
-            rss_after = _get_rss_kb()
+            current_bytes, peak_bytes = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            vmrss_after = _get_vmrss_kb()
 
             results.append(
                 BenchmarkResult(
@@ -129,9 +146,11 @@ class SearchMemoryProfile:
                     timing=stats,
                     rows=size,
                     metadata={
-                        "peak_rss_kb": rss_after,
-                        "allocated_rss_kb": rss_after - rss_before,
-                        "rss_before_kb": rss_before,
+                        "peak_memory_kb": round(peak_bytes / 1024),
+                        "current_memory_kb": round(current_bytes / 1024),
+                        "vmrss_before_kb": vmrss_before,
+                        "vmrss_after_kb": vmrss_after,
+                        "vmrss_delta_kb": vmrss_after - vmrss_before,
                     },
                 )
             )

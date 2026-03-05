@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .charts import (
     plot_comparison_bars,
+    plot_memory_scaling,
     plot_scaling_lines,
 )
 from .theme import apply_dark_theme
@@ -153,6 +154,51 @@ def generate_report(input_path: str, output_dir: str) -> None:
             charts_dir / "14_sampling_scaling",
         )
 
+    # --- Memory Suite Charts ---
+    if "search_broad_query" in by_scenario:
+        chart_paths["search_broad_query"] = plot_scaling_lines(
+            by_scenario["search_broad_query"],
+            "Broad Query Search — level=INFO (~60% of corpus)",
+            system_info,
+            charts_dir / "15_search_broad_query",
+        )
+
+    if "search_memory_profile" in by_scenario:
+        chart_paths["search_memory_profile"] = plot_memory_scaling(
+            by_scenario["search_memory_profile"],
+            "Search Memory — Peak Python Heap Allocation",
+            system_info,
+            charts_dir / "16_search_memory_profile",
+        )
+
+    # --- DB Source Suite Charts ---
+    if "db_to_jsonl_scaling" in by_scenario:
+        chart_paths["db_to_jsonl_scaling"] = plot_scaling_lines(
+            by_scenario["db_to_jsonl_scaling"],
+            "DB to JSONL — Streaming Conversion Throughput",
+            system_info,
+            charts_dir / "17_db_to_jsonl_scaling",
+            xlabel="Rows",
+        )
+
+    if "db_source_search" in by_scenario:
+        chart_paths["db_source_search"] = plot_scaling_lines(
+            by_scenario["db_source_search"],
+            "DB Source Search — End-to-End Pipeline",
+            system_info,
+            charts_dir / "18_db_source_search",
+            xlabel="Rows",
+        )
+
+    if "db_source_memory" in by_scenario:
+        chart_paths["db_source_memory"] = plot_memory_scaling(
+            by_scenario["db_source_memory"],
+            "DB Source Memory — Peak Python Heap Allocation",
+            system_info,
+            charts_dir / "19_db_source_memory",
+            xlabel="Rows",
+        )
+
     # --- Generate Markdown Report ---
     _write_markdown_report(out / "REPORT.md", data, chart_paths, charts_dir)
 
@@ -256,6 +302,11 @@ def _write_markdown_report(
         "max_bytes_truncation": "Max-Bytes Budget",
         "sampling_strategies": "Sampling Strategies",
         "sampling_scaling": "Smart Sample Scaling",
+        "search_broad_query": "Broad Query Search",
+        "search_memory_profile": "Search Memory Profile",
+        "db_to_jsonl_scaling": "DB to JSONL Streaming",
+        "db_source_search": "DB Source Search",
+        "db_source_memory": "DB Source Memory Profile",
     }
 
     for key, chart_path in chart_paths.items():
@@ -302,9 +353,8 @@ def _write_markdown_report(
             "",
             "1. **Large file benchmarks** \u2014 1GB+ file indexing and search not yet benchmarked",
             "2. **Rust vs Python comparison** \u2014 direct comparison of Rust-backed vs pure-Python paths",
-            "3. **Memory profiling** \u2014 peak memory usage per operation not yet measured",
-            "4. **Concurrent access** \u2014 multi-threaded investigation session performance",
-            "5. **Real-world log formats** \u2014 syslog, logfmt, and mixed-format benchmarks",
+            "3. **Concurrent access** \u2014 multi-threaded investigation session performance",
+            "4. **Real-world log formats** \u2014 syslog, logfmt, and mixed-format benchmarks",
             "",
             "---",
             "",
