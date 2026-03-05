@@ -369,7 +369,7 @@ class TestSqlErrorHandling:
             loaded_engine.query("SELECT nonexistent_column FROM logs")
 
     def test_investigator_propagates_sql_errors(self, investigator):
-        with pytest.raises(Exception):
+        with pytest.raises(duckdb.CatalogException):
             investigator.sql_query("SELECT * FROM nonexistent_table")
 
 
@@ -424,3 +424,192 @@ class TestSqlEdgeCases:
         """get_tables should return exactly logs and metrics."""
         tables = sorted(loaded_engine.get_tables())
         assert tables == ["logs", "metrics"]
+
+
+# ---------------------------------------------------------------------------
+# Disk-backed DuckDB + engine caching
+# ---------------------------------------------------------------------------
+
+
+class TestSqlEngineDiskBacked:
+    """Verify SqlEngine works with a disk-backed DuckDB database."""
+
+    def test_disk_backed_query_matches_memory(self, sql_log_file, tmp_path):
+        """Disk-backed engine should produce identical results to in-memory."""
+        db_file = str(tmp_path / "test.duckdb")
+        index = _build_index(sql_log_file)
+
+        engine_disk = SqlEngine(db_path=db_file)
+        engine_disk.load_files(index)
+
+        engine_mem = SqlEngine()
+        engine_mem.load_files(index)
+
+        disk_result = json.loads(
+            engine_disk.query(
+                "SELECT level, COUNT(*) AS cnt FROM logs GROUP BY level ORDER BY level"
+            )
+        )
+        mem_result = json.loads(
+            engine_mem.query(
+                "SELECT level, COUNT(*) AS cnt FROM logs GROUP BY level ORDER BY level"
+            )
+        )
+        assert disk_result == mem_result
+        # Verify exact values, not just equality between two unknowns
+        level_counts = {row["level"]: row["cnt"] for row in disk_result}
+        assert len(level_counts) == 4
+        for level in LEVELS:
+            assert level_counts[level] == ENTRIES_PER_LEVEL
+
+        engine_disk.close()
+        engine_mem.close()
+
+    def test_disk_backed_creates_file(self, sql_log_file, tmp_path):
+        """Disk-backed mode should create a file on disk."""
+        db_file = tmp_path / "test.duckdb"
+        assert not db_file.exists()
+
+        engine = SqlEngine(db_path=str(db_file))
+        engine.load_files(_build_index(sql_log_file))
+        engine.close()
+
+        assert db_file.exists()
+
+    def test_disk_backed_persists_after_close(self, sql_log_file, tmp_path):
+        """Data written to disk survives close and re-open."""
+        db_file = str(tmp_path / "persist.duckdb")
+        engine = SqlEngine(db_path=db_file)
+        engine.load_files(_build_index(sql_log_file))
+        engine.close()
+
+        # Re-open the same file — data should still be there
+        engine2 = SqlEngine(db_path=db_file)
+        result = json.loads(engine2.query("SELECT COUNT(*) AS cnt FROM logs"))
+        assert result[0]["cnt"] == TOTAL_ENTRIES
+
+        metrics = json.loads(engine2.query("SELECT COUNT(*) AS cnt FROM metrics"))
+        assert metrics[0]["cnt"] == TOTAL_ENTRIES  # one duration_ms per entry
+        engine2.close()
+
+    def test_close_releases_file_lock(self, sql_log_file, tmp_path):
+        """After close(), another engine can open the same file."""
+        db_file = str(tmp_path / "lock.duckdb")
+        engine1 = SqlEngine(db_path=db_file)
+        engine1.load_files(_build_index(sql_log_file))
+        engine1.close()
+
+        # Should not raise — file lock must be released
+        engine2 = SqlEngine(db_path=db_file)
+        result = json.loads(engine2.query("SELECT COUNT(*) AS cnt FROM logs"))
+        assert result[0]["cnt"] == TOTAL_ENTRIES
+        engine2.close()
+
+    def test_close_idempotent(self, sql_log_file):
+        """Calling close() twice should not raise."""
+        engine = SqlEngine()
+        engine.load_files(_build_index(sql_log_file))
+        engine.close()
+        engine.close()  # should not raise
+
+
+class TestInvestigatorSqlEngineCaching:
+    """Verify the Investigator caches the SQL engine instead of rebuilding."""
+
+    def test_engine_cached_across_queries(self, investigator):
+        """Two sql_query() calls should reuse the same engine instance."""
+        investigator.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        engine_after_first = investigator._sql_engine
+        assert engine_after_first is not None
+
+        # Capture reference BEFORE second call — if caching is broken and a
+        # new engine is built, engine_after_first will differ from the attr
+        investigator.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+
+        # The attribute must still point to the SAME object
+        assert investigator._sql_engine is engine_after_first
+
+    def test_engine_invalidated_on_load(self, sql_log_file):
+        """load_files() should invalidate the cached engine."""
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+
+        inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        engine1 = inv._sql_engine
+        assert engine1 is not None
+
+        # Re-load the same file — engine should be invalidated
+        inv.load_files([sql_log_file])
+        assert inv._sql_engine is None
+
+        # Next query builds a fresh engine
+        inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        engine2 = inv._sql_engine
+        assert engine2 is not None
+        assert engine2 is not engine1
+
+    def test_engine_rebuild_count(self, sql_log_file):
+        """Cache warm: zero new constructions. After load_files: exactly one."""
+        from unittest.mock import patch
+
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+
+        # Warm the cache
+        inv.sql_query("SELECT 1")
+        assert inv._sql_engine is not None
+
+        # Patch SqlEngine at the import site used by _get_sql_engine().
+        # With cache warm, no construction should happen.
+        with patch("logler.sql.SqlEngine") as mock_cls:
+            inv.sql_query("SELECT 1")
+            inv.sql_query("SELECT 1")
+            assert mock_cls.call_count == 0, (
+                f"SqlEngine constructed {mock_cls.call_count} time(s) " "while cache was warm"
+            )
+
+        # load_files invalidates — next query must rebuild exactly once
+        inv.load_files([sql_log_file])
+        assert inv._sql_engine is None
+
+        with patch("logler.sql.SqlEngine", wraps=SqlEngine) as mock_cls:
+            inv.sql_query("SELECT 1")
+            assert (
+                mock_cls.call_count == 1
+            ), f"Expected exactly 1 rebuild after load_files, got {mock_cls.call_count}"
+
+    def test_load_files_closes_old_engine(self, sql_log_file, tmp_path):
+        """load_files() must call close() on the old cached engine."""
+        from unittest.mock import patch
+
+        db_file = str(tmp_path / "close_test.duckdb")
+        inv = Investigator(sql_db_path=db_file)
+        inv.load_files([sql_log_file])
+        inv.sql_query("SELECT 1")
+
+        old_engine = inv._sql_engine
+        assert old_engine is not None
+
+        with patch.object(old_engine, "close", wraps=old_engine.close) as mock_close:
+            inv.load_files([sql_log_file])
+            assert mock_close.call_count == 1
+
+    def test_disk_backed_investigator(self, sql_log_file, tmp_path):
+        """Investigator with sql_db_path should use disk-backed DuckDB."""
+        db_file = tmp_path / "inv.duckdb"
+        inv = Investigator(sql_db_path=str(db_file))
+        inv.load_files([sql_log_file])
+
+        result = inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        assert result[0]["cnt"] == TOTAL_ENTRIES
+        assert db_file.exists()
+
+        # Prove data actually went to disk: close investigator's engine,
+        # re-open the file independently, verify data survived
+        inv._sql_engine.close()
+        inv._sql_engine = None
+
+        verify_engine = SqlEngine(db_path=str(db_file))
+        verify_result = json.loads(verify_engine.query("SELECT COUNT(*) AS cnt FROM logs"))
+        assert verify_result[0]["cnt"] == TOTAL_ENTRIES
+        verify_engine.close()

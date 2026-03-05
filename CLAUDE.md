@@ -228,6 +228,7 @@ pattern-based level inference (auth failures -> ERROR, OOM -> FATAL, etc.).
 - BSD syslog entries without `<priority>` prefix have no parsed timestamps; time-based filtering is unavailable for these entries
 - `_search_core.py` has `except Exception: return None` patterns that silently swallow errors — ensure all imports are local inside these try blocks
 - Rust level enum expects title case (`Error`, `Warn`, `Info`) — `_parse_levels()` converts user input, `_normalize_entry()` uppercases for display
+- **Investigator index holds all entries in memory** — the Rust backend (`PyInvestigator`) parses entire files into an in-memory index. At 600K+ entries, `load_files()` alone uses ~800 MB. Mitigations: `Investigator(sql_db_path=...)` for disk-backed DuckDB, engine caching to avoid redundant rebuilds, and **two-phase search** (filter+score with lightweight ~40-byte candidates, materialize only the final N results) which prevents `search()` from amplifying the index cost. A `DEFAULT_MAX_RESULTS` (100K) safety cap prevents unbounded queries. Deferred: lazy/paginated Rust-side loading that indexes file offsets without holding all entries in memory (requires Rust refactor of `PyInvestigator`)
 
 ## Key Dependencies
 

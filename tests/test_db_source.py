@@ -476,15 +476,33 @@ class TestDbToJsonl:
         finally:
             os.unlink(path)
 
-    def test_db_to_jsonl_sorted(self, qler_test_db: str):
+    def test_db_to_jsonl_per_table_order(self, qler_test_db: str):
+        """Entries are ordered per-table by _id, each table contiguous."""
         path = db_to_jsonl(qler_test_db)
         try:
             with open(path) as f:
                 entries = [json.loads(line) for line in f]
 
             assert len(entries) == 22
-            timestamps = [e["timestamp"] for e in entries]
-            assert timestamps == sorted(timestamps)
+
+            # Verify both tables present
+            table_names = {e["thread_id"] for e in entries}
+            assert table_names == {"qler_jobs", "qler_job_attempts"}
+
+            # Verify each table appears as one contiguous block, internally sorted
+            from itertools import groupby
+
+            seen_tables: dict[str, list] = {}
+            for table_name, group in groupby(entries, key=lambda e: e["thread_id"]):
+                assert (
+                    table_name not in seen_tables
+                ), f"table '{table_name}' appears non-contiguously in output"
+                table_entries = list(group)
+                timestamps = [e["timestamp"] for e in table_entries]
+                assert timestamps == sorted(
+                    timestamps
+                ), f"entries within '{table_name}' must be in timestamp order"
+                seen_tables[table_name] = table_entries
         finally:
             os.unlink(path)
 
@@ -1141,6 +1159,259 @@ class TestNonSqlerTableHandling:
 
         with pytest.raises(ValueError, match="No tables found"):
             db_to_jsonl(db_path)
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: Streaming fetchmany in _read_sqler_table
+# ---------------------------------------------------------------------------
+
+
+class TestFetchmanyStreaming:
+    """Verify _read_sqler_table batched reading produces correct output.
+
+    The batch size is 1000, so we need >1000 rows to exercise multiple
+    batches. We use 3500 rows across 2 tables to verify:
+    - Exact row count survives batching
+    - Row order is preserved (ORDER BY _id)
+    - Per-table timestamps are ordered after db_to_jsonl
+    - Entry content is correct at batch boundaries
+    """
+
+    TOTAL_JOBS = 2500
+    TOTAL_ATTEMPTS = 1000
+    TOTAL_ENTRIES = TOTAL_JOBS + TOTAL_ATTEMPTS  # 3500
+
+    @pytest.fixture()
+    def large_db(self, tmp_path: Path) -> str:
+        """Create a DB with 2500 jobs + 1000 attempts (3500 total entries)."""
+        db_path = str(tmp_path / "large.db")
+        conn = sqlite3.connect(db_path)
+
+        conn.execute(
+            """
+            CREATE TABLE qler_jobs (
+                _id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data JSON NOT NULL,
+                _version INTEGER NOT NULL DEFAULT 1,
+                ulid TEXT UNIQUE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                queue_name TEXT NOT NULL DEFAULT 'default',
+                priority INTEGER NOT NULL DEFAULT 0,
+                eta INTEGER NOT NULL DEFAULT 0,
+                lease_expires_at INTEGER
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE qler_job_attempts (
+                _id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data JSON NOT NULL,
+                _version INTEGER NOT NULL DEFAULT 1,
+                ulid TEXT UNIQUE NOT NULL,
+                job_ulid TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running'
+            )
+            """
+        )
+
+        base_ts = 1705312800  # 2024-01-15T10:00:00Z
+        statuses = ["completed", "completed", "completed", "failed", "pending"]
+
+        # Insert 2500 jobs
+        job_rows = []
+        for i in range(self.TOTAL_JOBS):
+            data = json.dumps(
+                {
+                    "task": f"task_{i}",
+                    "attempts": 1,
+                    "correlation_id": f"corr-{i:04d}",
+                    "created_at": base_ts + i,
+                }
+            )
+            job_rows.append((data, f"J{i:05d}", statuses[i % 5]))
+
+        conn.executemany(
+            "INSERT INTO qler_jobs (data, ulid, status) VALUES (?, ?, ?)",
+            job_rows,
+        )
+
+        # Insert 1000 attempts
+        attempt_rows = []
+        for i in range(self.TOTAL_ATTEMPTS):
+            data = json.dumps(
+                {
+                    "attempt_number": 1,
+                    "worker_id": f"w-{i % 4}",
+                    "started_at": base_ts + i,
+                }
+            )
+            attempt_rows.append((data, f"A{i:05d}", f"J{i:05d}", "completed"))
+
+        conn.executemany(
+            "INSERT INTO qler_job_attempts (data, ulid, job_ulid, status) VALUES (?, ?, ?, ?)",
+            attempt_rows,
+        )
+
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_exact_entry_count(self, large_db: str):
+        """db_to_jsonl produces exactly TOTAL_JOBS + TOTAL_ATTEMPTS entries."""
+        path = db_to_jsonl(large_db)
+        try:
+            with open(path) as f:
+                lines = f.readlines()
+            assert len(lines) == self.TOTAL_ENTRIES
+        finally:
+            os.unlink(path)
+
+    def test_per_table_timestamps_sorted_with_bounds(self, large_db: str):
+        """Entries within each table are sorted by timestamp; bounds match expected values."""
+        path = db_to_jsonl(large_db)
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == self.TOTAL_ENTRIES
+
+            # Verify each table appears as one contiguous block
+            from itertools import groupby
+
+            tables = {}
+            for table_name, group in groupby(entries, key=lambda e: e["thread_id"]):
+                assert (
+                    table_name not in tables
+                ), f"table '{table_name}' appears non-contiguously in output"
+                tables[table_name] = list(group)
+
+            assert set(tables.keys()) == {"qler_jobs", "qler_job_attempts"}
+
+            # Jobs: 2500 entries, timestamps from base_ts+0 to base_ts+2499
+            job_ts = [e["timestamp"] for e in tables["qler_jobs"]]
+            assert len(job_ts) == self.TOTAL_JOBS
+            assert job_ts == sorted(job_ts)
+            assert job_ts[0] == "2024-01-15T10:00:00+00:00"
+            assert job_ts[-1] == "2024-01-15T10:41:39+00:00"
+
+            # Attempts: 1000 entries, timestamps from base_ts+0 to base_ts+999
+            attempt_ts = [e["timestamp"] for e in tables["qler_job_attempts"]]
+            assert len(attempt_ts) == self.TOTAL_ATTEMPTS
+            assert attempt_ts == sorted(attempt_ts)
+            assert attempt_ts[0] == "2024-01-15T10:00:00+00:00"
+            assert attempt_ts[-1] == "2024-01-15T10:16:39+00:00"
+        finally:
+            os.unlink(path)
+
+    def test_mapping_order_controls_output_order(self, large_db: str):
+        """Output table order follows the mappings list, not SQLite internal order."""
+        # Pass mappings in reversed order: attempts first, then jobs
+        reversed_mappings = [qler_attempt_mapping(), qler_job_mapping()]
+        path = db_to_jsonl(large_db, reversed_mappings)
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == self.TOTAL_ENTRIES
+
+            # First entry should be from attempts (reversed order)
+            assert entries[0]["thread_id"] == "qler_job_attempts"
+            # Last entry should be from jobs
+            assert entries[-1]["thread_id"] == "qler_jobs"
+
+            # Verify contiguous blocks in the reversed order
+            from itertools import groupby
+
+            block_order = []
+            for table_name, _ in groupby(entries, key=lambda e: e["thread_id"]):
+                block_order.append(table_name)
+            assert block_order == ["qler_job_attempts", "qler_jobs"]
+        finally:
+            os.unlink(path)
+
+    def test_no_gaps_or_duplicates_across_batches(self, large_db: str):
+        """Correlation IDs must be a contiguous sequence — catches off-by-one at any batch seam."""
+        path = db_to_jsonl(large_db, [qler_job_mapping()])
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == self.TOTAL_JOBS
+
+            # Exact sequence check: catches gaps, duplicates, and reordering
+            seen_ids = [e["correlation_id"] for e in entries]
+            expected_ids = [f"corr-{i:04d}" for i in range(self.TOTAL_JOBS)]
+            assert seen_ids == expected_ids
+        finally:
+            os.unlink(path)
+
+    def test_fetchmany_actually_called(self, large_db: str):
+        """Verify _read_sqler_table uses fetchmany in multiple batches, not fetchall."""
+        fetchmany_calls = []
+
+        class SpyCursor:
+            """Wraps a real cursor, tracking fetchmany calls."""
+
+            def __init__(self, real_cursor):
+                self._cursor = real_cursor
+
+            def fetchone(self):
+                return self._cursor.fetchone()
+
+            def fetchall(self):
+                return self._cursor.fetchall()
+
+            def fetchmany(self, size=1):
+                result = self._cursor.fetchmany(size)
+                fetchmany_calls.append((size, len(result)))
+                return result
+
+            def __iter__(self):
+                return iter(self._cursor)
+
+        class SpyConnection:
+            """Wraps a real connection, returning SpyCursors."""
+
+            def __init__(self, real_conn):
+                self._conn = real_conn
+
+            def execute(self, sql, *args, **kwargs):
+                cursor = self._conn.execute(sql, *args, **kwargs)
+                return SpyCursor(cursor)
+
+        real_conn = sqlite3.connect(large_db)
+        real_conn.row_factory = sqlite3.Row
+        spy_conn = SpyConnection(real_conn)
+        try:
+            rows = _read_sqler_table(spy_conn, qler_job_mapping())
+            assert len(rows) == self.TOTAL_JOBS
+            # ceil(2500/1000) = 3 data batches + 1 empty sentinel = 4 calls
+            assert len(fetchmany_calls) == 4
+            assert fetchmany_calls[0] == (1000, 1000)  # batch 1: full
+            assert fetchmany_calls[1] == (1000, 1000)  # batch 2: full
+            assert fetchmany_calls[2] == (1000, 500)  # batch 3: partial
+            assert fetchmany_calls[3] == (1000, 0)  # sentinel: empty
+        finally:
+            real_conn.close()
+
+    def test_level_distribution_large(self, large_db: str):
+        """Level distribution is correct across batched reads."""
+        path = db_to_jsonl(large_db, [qler_job_mapping()])
+        try:
+            with open(path) as f:
+                entries = [json.loads(line) for line in f]
+            assert len(entries) == self.TOTAL_JOBS
+
+            level_counts: dict[str, int] = {}
+            for e in entries:
+                level_counts[e["level"]] = level_counts.get(e["level"], 0) + 1
+
+            # statuses cycle: completed, completed, completed, failed, pending
+            # 3/5 completed=INFO, 1/5 failed=ERROR, 1/5 pending=INFO
+            # So INFO = 4/5 * 2500 = 2000, ERROR = 1/5 * 2500 = 500
+            assert level_counts["INFO"] == 2000
+            assert level_counts["ERROR"] == 500
+        finally:
+            os.unlink(path)
 
 
 class TestBuildEntryFallbacks:

@@ -7,6 +7,8 @@ from .suite_hierarchy import SUITE as HIERARCHY_SUITE
 from .suite_correlation import SUITE as CORRELATION_SUITE
 from .suite_output import SUITE as OUTPUT_SUITE
 from .suite_sampling import SUITE as SAMPLING_SUITE
+from .suite_memory import SUITE as MEMORY_SUITE
+from .suite_db_source import SUITE as DB_SOURCE_SUITE
 
 ALL_SUITES: dict[str, list] = {
     "search": SEARCH_SUITE,
@@ -14,6 +16,8 @@ ALL_SUITES: dict[str, list] = {
     "correlation": CORRELATION_SUITE,
     "output": OUTPUT_SUITE,
     "sampling": SAMPLING_SUITE,
+    "memory": MEMORY_SUITE,
+    "db_source": DB_SOURCE_SUITE,
 }
 
 

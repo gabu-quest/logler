@@ -131,6 +131,11 @@ class Investigator:
     Use this when you need to perform multiple operations on the same files
     for better performance.
 
+    Args:
+        sql_db_path: Optional path for a disk-backed DuckDB database.
+            Use this for large datasets (100K+ entries) to avoid OOM.
+            Defaults to in-memory.
+
     Example::
 
         investigator = Investigator()
@@ -139,9 +144,15 @@ class Investigator:
         results = investigator.search(query="error", limit=10)
         patterns = investigator.find_patterns(min_occurrences=5)
         metadata = investigator.get_metadata()
+
+    For large datasets::
+
+        investigator = Investigator(sql_db_path="/tmp/inv.duckdb")
+        investigator.load_files(["huge.log"])
+        results = investigator.sql_query("SELECT level, COUNT(*) FROM logs GROUP BY level")
     """
 
-    def __init__(self):
+    def __init__(self, sql_db_path: Optional[str] = None):
         if not RUST_AVAILABLE:
             raise RuntimeError("Rust backend not available")
         import logler_rs
@@ -150,6 +161,8 @@ class Investigator:
         self._files: List[str] = []
         self._custom_regex: Optional[str] = None
         self._db_temp_files: List[str] = []
+        self._sql_engine = None
+        self._sql_db_path = sql_db_path
 
     def load_files(
         self,
@@ -161,6 +174,10 @@ class Investigator:
         _load_files_with_config(self._investigator, files, parser_format, custom_regex)
         self._files = files
         self._custom_regex = custom_regex
+        # Invalidate cached SQL engine so next query rebuilds with new data
+        if self._sql_engine is not None:
+            self._sql_engine.close()
+            self._sql_engine = None
 
     def get_metadata(self) -> List[Dict[str, Any]]:  # noqa: F811
         """Get metadata about loaded log files."""
@@ -301,7 +318,14 @@ class Investigator:
         return json.loads(result_json)
 
     def _get_sql_engine(self):
-        """Get a SQL engine loaded with current log data."""
+        """Get a SQL engine loaded with current log data.
+
+        The engine is built once and cached for the lifetime of this
+        Investigator (or until :meth:`load_files` is called again).
+        """
+        if self._sql_engine is not None:
+            return self._sql_engine
+
         from logler.parser import LogParser
         from logler.sql import SqlEngine
 
@@ -327,8 +351,9 @@ class Investigator:
             indices[file_path] = idx
 
         # Create and load SQL engine
-        engine = SqlEngine()
+        engine = SqlEngine(db_path=self._sql_db_path)
         engine.load_files(indices)
+        self._sql_engine = engine
         return engine
 
     def build_hierarchy(

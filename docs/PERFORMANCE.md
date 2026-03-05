@@ -130,10 +130,10 @@ patterns = investigate.find_patterns(
 
 ### 5. SQL Queries
 
-**In-memory database**:
+**In-memory database** (default):
 ```python
 investigator = Investigator()
-investigator.load_files(["app.log"])  # Loads into DuckDB
+investigator.load_files(["app.log"])  # Loads into DuckDB in-memory
 
 # Complex aggregations
 results = investigator.sql_query("""
@@ -148,7 +148,22 @@ results = investigator.sql_query("""
 # Typical: 300-800ms for 1M rows
 ```
 
-**Memory usage**: ~2-3x the size of log data when loaded
+**Disk-backed database** (for large datasets):
+```python
+investigator = Investigator(sql_db_path="/tmp/investigation.duckdb")
+investigator.load_files(["app.log"])  # DuckDB spills to disk
+
+# Same API — queries work identically
+results = investigator.sql_query("SELECT level, COUNT(*) FROM logs GROUP BY level")
+```
+
+Use `sql_db_path` when datasets exceed available RAM. DuckDB's disk-backed mode
+uses memory-mapped I/O for speed but spills to disk instead of holding everything
+in memory. The SQL engine is built once and cached across queries (invalidated on
+`load_files()`).
+
+**Memory usage**: ~2-3x the size of log data when in-memory; disk-backed reduces
+this to working set size
 
 ## Optimization Strategies for LLM Agents
 
@@ -262,10 +277,17 @@ investigator = Investigator()
 investigator.load_files(files)  # ~200MB for 1GB file
 ```
 
-3. **SQL loaded** (~200-300% of file size):
+3. **SQL loaded in-memory** (~200-300% of file size):
 ```python
-investigator.load_files(files)  # Parsed into DuckDB
+investigator.load_files(files)  # Parsed into DuckDB in-memory
 # ~2-3GB for 1GB file (structured representation)
+```
+
+4. **SQL loaded disk-backed** (bounded by working set):
+```python
+investigator = Investigator(sql_db_path="/tmp/inv.duckdb")
+investigator.load_files(files)  # DuckDB spills to disk
+# RSS stays bounded; disk usage ~2-3x file size
 ```
 
 ### Memory Optimization
