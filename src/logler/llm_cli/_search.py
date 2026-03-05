@@ -168,7 +168,8 @@ def schema(files: tuple, sample_size: int, full: bool, pretty: bool):
 
 
 @llm.command()
-@click.argument("files", nargs=-1, required=True)
+@click.argument("files", nargs=-1, required=False)
+@click.option("--db", "db_path", type=click.Path(exists=True), help="sqler database file to search")
 @click.option("--level", help="Filter by log level (comma-separated: ERROR,WARN)")
 @click.option("--exclude-level", help="Exclude log levels (comma-separated)")
 @click.option("--query", help="Regex pattern to match in message")
@@ -195,6 +196,7 @@ def schema(files: tuple, sample_size: int, full: bool, pretty: bool):
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def search(
     files: tuple,
+    db_path: Optional[str],
     level: Optional[str],
     exclude_level: Optional[str],
     query: Optional[str],
@@ -230,11 +232,25 @@ def search(
         logler llm search app.log --level ERROR,WARN --query "timeout"
         logler llm search app.log --exclude-level DEBUG --tail 20
         logler llm search app.log --service api --last 1h
+        logler llm search --db qler.db --level ERROR
     """
     from .. import investigate
 
+    db_jsonl_path = None
     try:
-        file_list = _expand_globs(list(files))
+        # Validate: at least one of files or --db is required
+        if not files and not db_path:
+            _error_json("Either FILES or --db is required", EXIT_USER_ERROR)
+
+        file_list = _expand_globs(list(files)) if files else []
+
+        # When --db is provided, convert DB to JSONL and prepend to file list
+        if db_path:
+            from ..db_source import db_to_jsonl
+
+            db_jsonl_path = db_to_jsonl(db_path)
+            file_list.insert(0, db_jsonl_path)
+
         if not file_list:
             _error_json(f"No files found matching: {files}")
 
@@ -444,6 +460,14 @@ def search(
         raise
     except Exception as e:
         _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
+    finally:
+        if db_jsonl_path:
+            import os
+
+            try:
+                os.unlink(db_jsonl_path)
+            except OSError:
+                pass
 
 
 @llm.command()
