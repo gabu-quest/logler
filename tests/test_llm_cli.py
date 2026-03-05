@@ -871,3 +871,115 @@ class TestRelativeTime:
 
         result = _parse_time_arg("2024-01-15T10:00:00Z", "--after")
         assert "2024-01-15" in result
+
+
+# ---------------------------------------------------------------------------
+# Security: SQL command blocks filesystem access
+# ---------------------------------------------------------------------------
+
+
+class TestSqlCommandSecurity:
+    """Verify the logler llm sql command blocks DuckDB filesystem functions."""
+
+    def test_sql_blocks_read_csv_auto(self, sample_log_file):
+        """read_csv_auto must be blocked — prevents host file reads."""
+        result = run_llm_command(
+            [
+                "sql",
+                "SELECT * FROM read_csv_auto('/etc/passwd')",
+                "-f",
+                sample_log_file,
+            ]
+        )
+        assert result.returncode == EXIT_USER_ERROR
+        data = json.loads(result.stdout)
+        assert "error" in data
+        assert "file system operations are disabled" in data["error"].lower()
+
+    def test_sql_blocks_copy_to(self, sample_log_file):
+        """COPY ... TO must be blocked — prevents data exfiltration."""
+        result = run_llm_command(
+            [
+                "sql",
+                "COPY logs TO '/tmp/exfil.csv'",
+                "-f",
+                sample_log_file,
+            ]
+        )
+        assert result.returncode == EXIT_USER_ERROR
+        data = json.loads(result.stdout)
+        assert "error" in data
+        assert "file system operations are disabled" in data["error"].lower()
+
+
+class TestSqlCommandBatching:
+    """Verify the sql command handles large files via batched inserts."""
+
+    def test_sql_large_file_batched(self):
+        """Generate >5000 entries, run sql, verify correct total_entries count."""
+        import tempfile
+        import os
+
+        n_entries = 6_000
+        lines = []
+        for i in range(n_entries):
+            ts = f"2024-01-15T10:00:{i % 60:02d}.{i:03d}Z"
+            level = "INFO" if i % 5 != 0 else "ERROR"
+            lines.append(f"{ts} {level} [worker-{i % 4}] Message number {i}")
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
+            f.write("\n".join(lines) + "\n")
+            f.flush()
+            log_path = f.name
+
+        try:
+            result = run_llm_command(
+                [
+                    "sql",
+                    "SELECT COUNT(*) as cnt FROM logs",
+                    "-f",
+                    log_path,
+                ]
+            )
+            assert result.returncode == EXIT_SUCCESS, result.stderr
+            data = json.loads(result.stdout)
+            assert data["total_entries"] == n_entries
+            assert data["row_count"] == 1
+            assert data["results"][0]["cnt"] == n_entries
+        finally:
+            os.unlink(log_path)
+
+    def test_sql_count_by_level(self):
+        """Batched insert preserves all fields correctly (level grouping)."""
+        import tempfile
+        import os
+
+        # 100 INFO + 50 ERROR = 150 entries
+        lines = []
+        for i in range(100):
+            lines.append(f"2024-01-15T10:00:00.{i:03d}Z INFO [w-1] info msg {i}")
+        for i in range(50):
+            lines.append(f"2024-01-15T10:00:01.{i:03d}Z ERROR [w-2] error msg {i}")
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
+            f.write("\n".join(lines) + "\n")
+            f.flush()
+            log_path = f.name
+
+        try:
+            result = run_llm_command(
+                [
+                    "sql",
+                    "SELECT level, COUNT(*) as cnt FROM logs GROUP BY level ORDER BY level",
+                    "-f",
+                    log_path,
+                ]
+            )
+            assert result.returncode == EXIT_SUCCESS, result.stderr
+            data = json.loads(result.stdout)
+            assert data["total_entries"] == 150
+            rows = {r["level"]: r["cnt"] for r in data["results"]}
+            assert rows["ERROR"] == 50
+            assert rows["INFO"] == 100
+        finally:
+            os.unlink(log_path)

@@ -307,6 +307,8 @@ def search(
     fields: Optional[List[str]] = None,
     parser_format: Optional[str] = None,
     custom_regex: Optional[str] = None,
+    count_only: bool = False,
+    offset: int = 0,
 ) -> Dict[str, Any]:
     """Search log entries across one or more files.
 
@@ -325,6 +327,8 @@ def search(
         trace_id: Filter by trace ID (comma-separated for multi).
         service_name: Filter by service name (comma-separated for multi).
         limit: Maximum number of results (first *N* by relevance).
+            ``0`` means no cap (bypasses ``DEFAULT_MAX_RESULTS``).
+            ``None`` applies the safety cap (10K).
         tail: Return last *N* matches by timestamp.
         time_start: Start of time range (ISO 8601).
         time_end: End of time range (ISO 8601).
@@ -333,6 +337,12 @@ def search(
         fields: List of fields to include in output (projection).
         parser_format: Optional log format hint.
         custom_regex: Optional custom parsing regex.
+        count_only: If True, skip materialization and return only
+            ``total_matches`` with an empty ``results`` list.
+            Handled Rust-side — zero JSON serialization overhead.
+        offset: Number of sorted results to skip before taking ``limit``.
+            Enables server-side pagination (e.g. ``offset=100, limit=100``
+            for page 2).  Applied Rust-side before materialization.
 
     Returns:
         SearchResult dict with shape::
@@ -413,6 +423,10 @@ def search(
     }
     if tail is not None:
         query_dict["tail"] = tail
+    if count_only:
+        query_dict["count_only"] = True
+    if offset > 0:
+        query_dict["offset"] = offset
 
     # Call Rust engine
     result_json = investigator.search(json.dumps(query_dict))

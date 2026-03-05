@@ -4,10 +4,6 @@ Converts rows from sqler tables into JSONL that logler's Rust parser can
 ingest. Works with any sqler database; auto-detects qler tables (``qler_jobs``,
 ``qler_job_attempts``) and applies smart defaults.
 
-.. versionchanged:: 0.3
-   ``_read_sqler_table`` is now a generator, yielding entries one batch at a
-   time instead of accumulating a full list.
-
 Example::
 
     from logler.db_source import db_to_jsonl
@@ -31,8 +27,8 @@ import sqlite3
 import string
 import tempfile
 import urllib.parse
-from collections.abc import Iterator
 from datetime import datetime, timezone
+from collections.abc import Iterator
 from typing import Optional
 
 
@@ -200,10 +196,10 @@ def _read_sqler_table(
     conn: sqlite3.Connection,
     mapping: DbTableMapping,
 ) -> Iterator[dict]:
-    """Read all rows from a sqler table and convert to log entries.
+    """Read rows from a sqler table, yielding log entries.
 
-    Yields entries one batch at a time so the caller can flush to disk
-    without holding the full table in memory.
+    Yields entries one at a time (fetched in batches of 1000) to avoid
+    holding all raw rows + converted entries in memory simultaneously.
     """
     # Validate table exists (parameterized query — safe from injection)
     exists = conn.execute(
@@ -224,19 +220,23 @@ def _read_sqler_table(
     order_col = "_id" if "_id" in columns else "rowid"
     cursor = conn.execute(f"SELECT * FROM {_safe_identifier(mapping.table)} ORDER BY {order_col}")
 
-    # Stream in batches — each entry is yielded immediately so the caller
-    # can write it to disk, keeping peak memory at ~1000 entries.
-    idx = 0
-    while True:
-        batch = cursor.fetchmany(1000)
-        if not batch:
-            break
-        for row in batch:
-            row_dict = dict(row)
-            all_fields = _merge_sqler_row(row_dict, columns)
-            entry = _build_entry(all_fields, mapping, idx)
-            yield entry
-            idx += 1
+    # Stream in batches, yield entries one at a time.
+    # try/finally ensures cursor is closed even if the caller abandons
+    # the generator mid-stream (Python sends GeneratorExit).
+    try:
+        idx = 0
+        while True:
+            batch = cursor.fetchmany(1000)
+            if not batch:
+                break
+            for row in batch:
+                row_dict = dict(row)
+                all_fields = _merge_sqler_row(row_dict, columns)
+                entry = _build_entry(all_fields, mapping, idx)
+                yield entry
+                idx += 1
+    finally:
+        cursor.close()
 
 
 def _merge_sqler_row(row_dict: dict, columns: list[str]) -> dict:

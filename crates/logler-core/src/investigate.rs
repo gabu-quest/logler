@@ -10,7 +10,14 @@ use std::time::Instant;
 
 /// Safety cap: maximum results returned when no limit/tail is specified.
 /// Prevents a single unbounded query from allocating gigabytes of memory.
-const DEFAULT_MAX_RESULTS: usize = 100_000;
+/// At ~80 bytes per materialized result + JSON serialization overhead,
+/// 10K results ≈ 80 MB total (Rust + Python).
+///
+/// Callers can override:
+///   - `limit: Some(N)` for N > 0 → return at most N results
+///   - `limit: Some(0)` → no cap (like MongoDB `cursor.limit(0)`)
+///   - `limit: None` → apply this safety cap
+const DEFAULT_MAX_RESULTS: usize = 10_000;
 
 /// Lightweight match candidate produced in the filter phase.
 /// ~40 bytes per candidate vs ~2-4 KB per full SearchResult with cloned entry.
@@ -59,6 +66,12 @@ impl Investigator {
     /// Uses a two-phase approach to minimize memory:
     /// - Phase 1: Filter + score → lightweight `MatchCandidate` (~40 bytes each)
     /// - Phase 2: Materialize full `SearchResult` only for the final N results
+    ///
+    /// When `count_only` is set, Phase 2 is skipped entirely — returns
+    /// `total_matches` with an empty `results` vec (zero serialization cost).
+    ///
+    /// `offset` is applied after sorting and before `take(limit)`, enabling
+    /// server-side pagination without re-materializing skipped entries.
     pub fn search(&self, query: &SearchQuery) -> anyhow::Result<SearchResults> {
         let start = Instant::now();
 
@@ -98,9 +111,19 @@ impl Investigator {
 
         let total_matches = all_candidates.len();
 
+        // count_only: skip Phase 2 entirely — no sorting, no materialization
+        if query.count_only.unwrap_or(false) {
+            return Ok(SearchResults {
+                results: Vec::new(),
+                total_matches,
+                search_time_ms: start.elapsed().as_millis() as u64,
+            });
+        }
+
         // Sort and truncate candidates before materializing
+        let skip_n = query.offset.unwrap_or(0);
         let selected: Vec<MatchCandidate> = if let Some(tail_n) = query.tail {
-            // Sort by timestamp ASC and take last N
+            // Sort by timestamp ASC and take last N (offset not applied to tail)
             all_candidates.sort_by(|a, b| match (&a.timestamp, &b.timestamp) {
                 (Some(t1), Some(t2)) => t1.cmp(t2),
                 (Some(_), None) => std::cmp::Ordering::Less,
@@ -121,8 +144,12 @@ impl Investigator {
                         (None, None) => std::cmp::Ordering::Equal,
                     })
             });
-            let cap = query.limit.unwrap_or(DEFAULT_MAX_RESULTS);
-            all_candidates.into_iter().take(cap).collect()
+            let cap = match query.limit {
+                Some(0) => usize::MAX, // 0 = no limit (like MongoDB cursor.limit(0))
+                Some(n) => n,
+                None => DEFAULT_MAX_RESULTS,
+            };
+            all_candidates.into_iter().skip(skip_n).take(cap).collect()
         };
 
         // Phase 2: Materialize only the selected candidates (clone entry + fetch context)
@@ -352,6 +379,57 @@ impl Investigator {
         } else {
             // No query string, matches filters
             1.0
+        }
+    }
+
+    /// Return a page of raw entries by slicing the in-memory index directly.
+    ///
+    /// O(page_size) per call — no filtering, scoring, or sorting.
+    /// File keys are sorted for deterministic pagination across calls.
+    pub fn get_entries_page(&self, offset: usize, limit: usize) -> EntriesPage {
+        let mut file_keys: Vec<&String> = self.indices.keys().collect();
+        file_keys.sort();
+
+        let mut total_entries = 0;
+        for key in &file_keys {
+            if let Some(entries) = &self.indices[*key].entries {
+                total_entries += entries.len();
+            }
+        }
+
+        let mut result = Vec::with_capacity(limit.min(total_entries.saturating_sub(offset)));
+        let mut global_idx = 0;
+
+        for key in &file_keys {
+            if let Some(entries) = &self.indices[*key].entries {
+                let file_len = entries.len();
+                if global_idx + file_len <= offset {
+                    global_idx += file_len;
+                    continue;
+                }
+                let start = if offset > global_idx {
+                    offset - global_idx
+                } else {
+                    0
+                };
+                for entry in &entries[start..] {
+                    if result.len() >= limit {
+                        return EntriesPage {
+                            entries: result,
+                            total_entries,
+                            has_more: true,
+                        };
+                    }
+                    result.push(entry.clone());
+                }
+                global_idx += file_len;
+            }
+        }
+
+        EntriesPage {
+            entries: result,
+            total_entries,
+            has_more: false,
         }
     }
 
@@ -831,6 +909,8 @@ mod tests {
             limit: None,
             tail: None,
             context_lines: None,
+            count_only: None,
+            offset: None,
         }
     }
 
@@ -931,6 +1011,8 @@ mod tests {
             limit: None,
             tail: Some(10),
             context_lines: None,
+            count_only: None,
+            offset: None,
         };
         let results = inv.search(&q).unwrap();
         assert_eq!(results.total_matches, 100);
@@ -1140,6 +1222,8 @@ mod tests {
             limit: Some(5),
             tail: None,
             context_lines: None,
+            count_only: None,
+            offset: None,
         };
         let results = inv.search(&q).unwrap();
         assert_eq!(
@@ -1177,6 +1261,8 @@ mod tests {
             limit: None,
             tail: None,
             context_lines: None,
+            count_only: None,
+            offset: None,
         };
         let results = inv.search(&q).unwrap();
         assert_eq!(results.results.len(), 50);
@@ -1217,6 +1303,8 @@ mod tests {
             limit: Some(10),
             tail: None,
             context_lines: None,
+            count_only: None,
+            offset: None,
         };
         let results = inv.search(&q).unwrap();
         assert_eq!(results.results.len(), 10);
@@ -1268,5 +1356,185 @@ mod tests {
         assert_eq!(patterns.patterns.len(), 1);
         assert_eq!(patterns.patterns[0].occurrences, 3);
         assert!(patterns.patterns[0].pattern.contains("disk full"));
+    }
+
+    #[test]
+    fn test_search_count_only() {
+        let mut entries = Vec::new();
+        for i in 0..50 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: None,
+            tail: None,
+            context_lines: None,
+            count_only: Some(true),
+            offset: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(
+            results.total_matches, 50,
+            "count_only should report all matches"
+        );
+        assert_eq!(
+            results.results.len(),
+            0,
+            "count_only should return empty results vec"
+        );
+    }
+
+    #[test]
+    fn test_search_offset() {
+        let mut entries = Vec::new();
+        for i in 0..20 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: Some(5),
+            tail: None,
+            context_lines: None,
+            count_only: None,
+            offset: Some(10),
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(
+            results.total_matches, 20,
+            "total_matches unaffected by offset"
+        );
+        assert_eq!(results.results.len(), 5, "limit respected after offset");
+        // Verify correct entries returned (no query → all score 1.0, sorted by timestamp)
+        assert_eq!(results.results[0].entry.message, "event 10");
+        assert_eq!(results.results[4].entry.message, "event 14");
+    }
+
+    #[test]
+    fn test_search_offset_beyond_total() {
+        let mut entries = Vec::new();
+        for i in 0..20 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: Some(10),
+            tail: None,
+            context_lines: None,
+            count_only: None,
+            offset: Some(25),
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(results.total_matches, 20, "total_matches still reported");
+        assert_eq!(results.results.len(), 0, "offset past end returns empty");
+    }
+
+    #[test]
+    fn test_search_count_only_with_filter() {
+        let mut entries = Vec::new();
+        for i in 0..50 {
+            let level = if i % 2 == 0 { "ERROR" } else { "INFO" };
+            entries.push(json_entry(
+                &format!("2024-01-15T10:00:{:02}Z", i % 60),
+                level,
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters {
+                levels: vec![LogLevel::Error],
+                ..Default::default()
+            },
+            limit: None,
+            tail: None,
+            context_lines: None,
+            count_only: Some(true),
+            offset: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(
+            results.total_matches, 25,
+            "count_only with filter counts correctly"
+        );
+        assert_eq!(results.results.len(), 0, "count_only returns no entries");
+    }
+
+    #[test]
+    fn test_search_limit_zero_returns_all() {
+        // limit=0 means "no cap" — return all matches (like MongoDB cursor.limit(0))
+        let mut entries = Vec::new();
+        for i in 0..200 {
+            entries.push(json_entry(
+                &format!("2024-01-15T10:{:02}:{:02}Z", i / 60, i % 60),
+                "INFO",
+                &format!("event {}", i),
+                "w-0",
+                "svc",
+            ));
+        }
+        let refs: Vec<&str> = entries.iter().map(|s| s.as_str()).collect();
+        let file = make_test_file(&refs);
+        let inv = build_investigator(&file);
+
+        let q = SearchQuery {
+            files: vec![file.path().to_path_buf()],
+            query: None,
+            filters: SearchFilters::default(),
+            limit: Some(0),
+            tail: None,
+            context_lines: None,
+            count_only: None,
+            offset: None,
+        };
+        let results = inv.search(&q).unwrap();
+        assert_eq!(
+            results.results.len(),
+            200,
+            "limit=0 should return all results"
+        );
+        assert_eq!(results.total_matches, 200);
     }
 }

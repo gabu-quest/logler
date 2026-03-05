@@ -23,6 +23,8 @@
 //!         ..Default::default()
 //!     },
 //!     limit: Some(10),
+//!     count_only: None,
+//!     offset: None,
 //!     tail: None,
 //!     context_lines: Some(3),
 //! };
@@ -84,6 +86,8 @@ mod tests {
                 ..Default::default()
             },
             limit: Some(10),
+            count_only: None,
+            offset: None,
             tail: None,
             context_lines: Some(1),
         };

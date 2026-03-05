@@ -11,6 +11,7 @@ from collections import defaultdict
 
 from ._search_core import search, follow_thread
 
+_DEFAULT_TIMELINE_LIMIT = 10_000
 
 # ---------------------------------------------------------------------------
 # Cross-service timeline
@@ -78,48 +79,64 @@ def cross_service_timeline(
             result = follow_thread(service_files, trace_id=trace_id)
             entries = result.get("entries", [])
         else:
-            # Get all entries
+            # Cap the fallback to prevent unbounded materialisation
             result = search(
-                service_files, limit=None, parser_format=parser_format, custom_regex=custom_regex
+                service_files,
+                limit=_DEFAULT_TIMELINE_LIMIT,
+                parser_format=parser_format,
+                custom_regex=custom_regex,
             )
             entries = [r["entry"] for r in result.get("results", [])]
 
-        # Add service label to each entry
+        # Accumulate entries with raw timestamp strings (defer parsing)
         for entry in entries:
-            # Parse timestamp if present
-            timestamp_str = entry.get("timestamp")
-            if timestamp_str:
-                try:
-                    timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-                except (ValueError, TypeError):
-                    timestamp = None
-            else:
-                timestamp = None
-
             all_entries.append(
                 {
                     "service": service_name_key,
-                    "timestamp": timestamp,
-                    "timestamp_str": timestamp_str,
+                    "timestamp_str": entry.get("timestamp"),
                     "entry": entry,
                 }
             )
             service_counts[service_name_key] += 1
 
-    # Filter by time window if specified
+    # Filter by time window if specified (parse timestamps only for filtering)
     if time_window:
         start_time, end_time = time_window
         try:
             start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
             end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
-            all_entries = [
-                e for e in all_entries if e["timestamp"] and start_dt <= e["timestamp"] <= end_dt
-            ]
+            filtered = []
+            for e in all_entries:
+                ts_str = e["timestamp_str"]
+                if not ts_str:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    continue
+                if start_dt <= ts <= end_dt:
+                    filtered.append(e)
+            all_entries = filtered
         except Exception as e:
             warnings.warn(f"Could not parse time window: {e}", stacklevel=2)
 
-    # Sort by timestamp
-    all_entries.sort(key=lambda e: e["timestamp"] if e["timestamp"] else datetime.min)
+    # Parse timestamps and sort by actual datetime (lexicographic sort
+    # fails when timestamps have mixed timezone offsets)
+    for e in all_entries:
+        ts_str = e["timestamp_str"]
+        if ts_str:
+            try:
+                e["timestamp"] = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                e["timestamp"] = None
+        else:
+            e["timestamp"] = None
+
+    all_entries.sort(key=lambda e: e["timestamp"] if e["timestamp"] else datetime.max)
+
+    # Apply limit after sorting — limit=0 and limit=None both skip (falsy)
+    if limit:
+        all_entries = all_entries[:limit]
 
     # Calculate relative times
     if all_entries and all_entries[0]["timestamp"]:
@@ -133,10 +150,6 @@ def cross_service_timeline(
     else:
         for entry in all_entries:
             entry["relative_time_ms"] = None
-
-    # Apply limit if specified
-    if limit:
-        all_entries = all_entries[:limit]
 
     # Calculate duration
     duration_ms = None
@@ -284,29 +297,16 @@ def compare_time_periods(
         >>> print(diff["summary"])
     """
     from ._search_core import RUST_AVAILABLE
-    from .investigate import Investigator
 
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Search each period
-    inv = Investigator()
-    inv.load_files(files)
+    # Push time filters to Rust — only materialise entries within each window
+    results_a = search(files, time_start=period_a_start, time_end=period_a_end, limit=0)
+    entries_a = [r["entry"] for r in results_a.get("results", [])]
 
-    results_a = search(files, limit=None)
-    results_b = search(files, limit=None)
-
-    # Filter by time
-    entries_a = [
-        r["entry"]
-        for r in results_a.get("results", [])
-        if _in_time_range(r["entry"], period_a_start, period_a_end)
-    ]
-    entries_b = [
-        r["entry"]
-        for r in results_b.get("results", [])
-        if _in_time_range(r["entry"], period_b_start, period_b_end)
-    ]
+    results_b = search(files, time_start=period_b_start, time_end=period_b_end, limit=0)
+    entries_b = [r["entry"] for r in results_b.get("results", [])]
 
     # Analyse periods
     analysis_a = _analyze_period(entries_a, period_a_start, period_a_end)
@@ -332,6 +332,7 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
         return {
             "id": thread_id,
             "entries": [],
+            "entry_count": 0,
             "duration_ms": 0,
             "error_count": 0,
             "log_levels": {},
@@ -359,13 +360,17 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
         if service:
             services.add(service)
 
-    # Calculate duration
+    # Calculate duration from min/max timestamps (robust to unsorted input)
     duration_ms = 0
     if len(entries) >= 2:
         try:
-            start = datetime.fromisoformat(entries[0].get("timestamp", "").replace("Z", "+00:00"))
-            end = datetime.fromisoformat(entries[-1].get("timestamp", "").replace("Z", "+00:00"))
-            duration_ms = int((end - start).total_seconds() * 1000)
+            timestamps = []
+            for e in entries:
+                ts_str = e.get("timestamp", "")
+                if ts_str:
+                    timestamps.append(datetime.fromisoformat(ts_str.replace("Z", "+00:00")))
+            if len(timestamps) >= 2:
+                duration_ms = int((max(timestamps) - min(timestamps)).total_seconds() * 1000)
         except (ValueError, TypeError, AttributeError):
             pass  # Skip if timestamps are missing or invalid
 
@@ -475,7 +480,7 @@ def _analyze_period(entries: List[Dict], start: str, end: str) -> Dict[str, Any]
         "error_count": error_count,
         "error_rate": error_rate,
         "log_levels": dict(level_counts),
-        "top_errors": list(set(error_messages))[:10],
+        "top_errors": list(dict.fromkeys(error_messages))[:10],
         "unique_threads": len(threads),
     }
 

@@ -184,12 +184,14 @@ Only `context` (needs file+line) and session commands lack `--db`.
 ### Search CLI Flags
 
 Key flags for `logler llm search`:
-- `--count-only` — Return only match count (no results array)
-- `--offset N` — Skip first N results (pagination)
+- `--count-only` — Rust-side: skips materialization entirely, returns `{"total_matches": N}` with zero memory overhead
+- `--offset N` — Rust-side pagination: candidates are sorted once, then `skip(N).take(limit)` before materialization
 - `--compact` — Short field names (ln/ts/lv/msg/src/th/cid/trc/sid/svc)
-- `--metadata-only` — Aggregations only, no results
+- `--metadata-only` — Aggregations only, no results array
 - `--max-bytes N` — Truncate output to fit byte budget
-- `--after/-before` — Supports relative time: `--after=-1h --before=-30m`
+- `--after/--before` — Supports relative time: `--after=-1h --before=-30m`
+
+Pagination example: `--offset 100 --limit 100` fetches page 2. `has_more` in the response indicates more pages exist.
 
 `--max-bytes` also available on: correlate, hierarchy, bottleneck, summarize.
 
@@ -228,7 +230,10 @@ pattern-based level inference (auth failures -> ERROR, OOM -> FATAL, etc.).
 - BSD syslog entries without `<priority>` prefix have no parsed timestamps; time-based filtering is unavailable for these entries
 - `_search_core.py` has `except Exception: return None` patterns that silently swallow errors — ensure all imports are local inside these try blocks
 - Rust level enum expects title case (`Error`, `Warn`, `Info`) — `_parse_levels()` converts user input, `_normalize_entry()` uppercases for display
-- **Investigator index holds all entries in memory** — the Rust backend (`PyInvestigator`) parses entire files into an in-memory index. At 600K+ entries, `load_files()` alone uses ~800 MB. Mitigations: `Investigator(sql_db_path=...)` for disk-backed DuckDB, engine caching to avoid redundant rebuilds, and **two-phase search** (filter+score with lightweight ~40-byte candidates, materialize only the final N results) which prevents `search()` from amplifying the index cost. A `DEFAULT_MAX_RESULTS` (100K) safety cap prevents unbounded queries. Deferred: lazy/paginated Rust-side loading that indexes file offsets without holding all entries in memory (requires Rust refactor of `PyInvestigator`)
+- **Investigator index holds all entries in memory** — the Rust backend (`PyInvestigator`) parses entire files into an in-memory index. At 600K+ entries, `load_files()` alone uses ~800 MB. Mitigations: `Investigator(sql_db_path=...)` for disk-backed DuckDB, engine caching to avoid redundant rebuilds, and **two-phase search** (filter+score with lightweight ~40-byte candidates, materialize only the final N results) which prevents `search()` from amplifying the index cost. A `DEFAULT_MAX_RESULTS` (10K) safety cap prevents unbounded queries; callers needing more can pass an explicit `limit`. `count_only=True` skips materialization entirely, and `offset` enables pagination without re-materializing skipped entries. Deferred: lazy/paginated Rust-side loading that indexes file offsets without holding all entries in memory (requires Rust refactor of `PyInvestigator`)
+- **comparison.py OOM mitigations** — `compare_time_periods()` pushes time windows to Rust via `time_start`/`time_end` instead of materialising all entries. `cross_service_timeline()` fallback (no correlation/trace ID) is capped at `_DEFAULT_TIMELINE_LIMIT` (10K). `_analyze_thread()` computes duration from `min()`/`max()` timestamps instead of positional first/last (robust to unsorted input).
+- **CLI `sql` command streams into DuckDB** — log entries are parsed and inserted in batches of 5,000 via `executemany()` instead of accumulating all entries in a list then building all tuples. Eliminates ~300 MB peak at 600K entries.
+- **`_get_sql_engine()` direct index iteration** — uses Rust `get_entries_page(offset, limit)` to iterate the in-memory index directly — O(page_size) per call, O(N) total. No search/filter/sort overhead. Each page is converted to SimpleNamespace, inserted into DuckDB, then discarded. Memory stays bounded to ~one page (~50 MB) regardless of total entry count. Previous approach used `search(limit=N, offset=M)` which was O(N²) due to re-scanning all entries per page.
 
 ## Key Dependencies
 
@@ -238,7 +243,7 @@ Python: click, rich, duckdb, pydantic, watchdog
 ## Benchmarks
 
 ```bash
-uv run python -m benchmarks run --scale small       # Run all 14 scenarios
+uv run python -m benchmarks run --scale small       # Run all 19 scenarios
 uv run python -m benchmarks list                      # List available scenarios
 uv run python -m benchmarks plot -i results/latest.json  # Generate charts
 uv run python -m benchmarks compare -b v1.json -c v2.json -o results/v2  # Before/after comparison

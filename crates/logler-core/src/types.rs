@@ -72,6 +72,13 @@ pub struct SearchQuery {
     #[serde(default)]
     pub tail: Option<usize>,
     pub context_lines: Option<usize>,
+    /// When true, skip Phase 2 (materialization) and return only the count.
+    #[serde(default)]
+    pub count_only: Option<bool>,
+    /// Number of sorted candidates to skip before taking `limit`.
+    /// Enables pagination: page 2 with 100/page → offset=100, limit=100.
+    #[serde(default)]
+    pub offset: Option<usize>,
 }
 
 /// Filters for searching logs
@@ -142,6 +149,14 @@ pub struct SearchResults {
     pub results: Vec<SearchResult>,
     pub total_matches: usize,
     pub search_time_ms: u64,
+}
+
+/// Page of raw entries for bulk export (no search/filter/sort overhead).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntriesPage {
+    pub entries: Vec<LogEntry>,
+    pub total_entries: usize,
+    pub has_more: bool,
 }
 
 /// Thread timeline containing all entries for a thread

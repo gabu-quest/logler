@@ -7,6 +7,7 @@ create virtual trace IDs that link related entries across different log files.
 
 from __future__ import annotations
 
+import bisect
 import fnmatch
 import hashlib
 import re
@@ -227,15 +228,17 @@ def _apply_temporal_rule(
     # Sort by timestamp for efficient scanning
     timed_entries.sort(key=lambda x: x[1])
 
-    # For each anchor, collect entries within the window
+    # Extract sorted timestamps for binary search
+    timestamps = [ts for _, ts in timed_entries]
+
+    # For each anchor, collect entries within the window using bisect
     for anchor_entry, anchor_ts in anchors:
         window_start = anchor_ts - window
         window_end = anchor_ts + window
 
-        cluster_entries = []
-        for entry, ts in timed_entries:
-            if window_start <= ts <= window_end:
-                cluster_entries.append(entry)
+        lo = bisect.bisect_left(timestamps, window_start)
+        hi = bisect.bisect_right(timestamps, window_end)
+        cluster_entries = [timed_entries[i][0] for i in range(lo, hi)]
 
         if len(cluster_entries) <= 1:
             # Only the anchor itself - no interesting correlation

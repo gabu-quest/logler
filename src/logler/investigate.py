@@ -227,8 +227,17 @@ class Investigator:
         time_start: Optional[str] = None,
         time_end: Optional[str] = None,
         context_lines: int = 3,
+        count_only: bool = False,
+        offset: int = 0,
     ) -> Dict[str, Any]:
-        """Search loaded files."""
+        """Search loaded files.
+
+        Args:
+            count_only: If True, return only ``total_matches`` (no results).
+                Skips Rust Phase 2 materialization — zero memory overhead.
+            offset: Skip first *N* sorted results before taking ``limit``.
+                Server-side pagination: ``offset=100, limit=100`` → page 2.
+        """
         filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
         if level:
             filters["levels"] = _parse_levels(level)
@@ -277,6 +286,10 @@ class Investigator:
         }
         if tail is not None:
             query_dict["tail"] = tail
+        if count_only:
+            query_dict["count_only"] = True
+        if offset > 0:
+            query_dict["offset"] = offset
 
         result_json = self._investigator.search(json.dumps(query_dict))
         result = json.loads(result_json)
@@ -317,42 +330,58 @@ class Investigator:
         result_json = engine.get_schema(table)
         return json.loads(result_json)
 
+    _SQL_ENGINE_PAGE_SIZE = 10_000
+
+    def _get_entries_page(self, offset: int, limit: int) -> str:
+        """Fetch a page of raw entries from the Rust index (JSON string)."""
+        return self._investigator.get_entries_page(offset, limit)
+
     def _get_sql_engine(self):
         """Get a SQL engine loaded with current log data.
 
         The engine is built once and cached for the lifetime of this
         Investigator (or until :meth:`load_files` is called again).
+
+        Uses ``get_entries_page()`` to iterate the Rust index directly —
+        O(page_size) per call, O(N) total. No search/filter/sort overhead.
         """
         if self._sql_engine is not None:
             return self._sql_engine
 
-        from logler.parser import LogParser
+        from types import SimpleNamespace
+
         from logler.sql import SqlEngine
 
-        # Parse files and build index
-        parser = LogParser()
-        indices: Dict[str, Any] = {}
-
-        for file_path in self._files:
-            entries = []
-            with open(file_path, encoding="utf-8", errors="replace") as f:
-                for line_number, line in enumerate(f, start=1):
-                    line = line.rstrip("\n\r")
-                    if line:
-                        entry = parser.parse_line(line_number, line)
-                        entries.append(entry)
-
-            # Create a simple object with entries attribute
-            class LogIndex:
-                pass
-
-            idx = LogIndex()
-            idx.entries = entries
-            indices[file_path] = idx
-
-        # Create and load SQL engine
         engine = SqlEngine(db_path=self._sql_db_path)
-        engine.load_files(indices)
+        offset = 0
+
+        while True:
+            page_json = self._get_entries_page(offset, self._SQL_ENGINE_PAGE_SIZE)
+            page = json.loads(page_json)
+            items = page.get("entries", [])
+            if not items:
+                break
+
+            indices: Dict[str, Any] = {}
+            for entry in items:
+                fp = entry.get("file", "unknown")
+                if fp not in indices:
+                    indices[fp] = SimpleNamespace(entries=[])
+                ns = SimpleNamespace()
+                for k, v in entry.items():
+                    # Rust serializes LogLevel as title-case ("Info");
+                    # normalize to uppercase for consistency with search().
+                    if k == "level" and isinstance(v, str):
+                        v = v.upper()
+                    setattr(ns, k, v)
+                indices[fp].entries.append(ns)
+
+            engine.load_files(indices)
+            offset += self._SQL_ENGINE_PAGE_SIZE
+
+            if not page.get("has_more", False):
+                break
+
         self._sql_engine = engine
         return engine
 
@@ -494,11 +523,12 @@ def extract_metrics(
     """
     from .metrics import extract_metrics as _extract
 
-    # Load entries via search (no limit — we want all entries for metrics)
+    # Load all entries for metrics (limit=0 bypasses DEFAULT_MAX_RESULTS)
     result = search(
         files=files,
         query=query,
         level=level,
+        limit=0,
         time_start=time_start,
         time_end=time_end,
         parser_format=parser_format,
@@ -612,9 +642,10 @@ def mine_log_templates(
     """
     from .format_detector import mine_templates as _mine
 
-    # Load entries and extract messages
+    # Load all entries for template mining (limit=0 bypasses DEFAULT_MAX_RESULTS)
     result = search(
         files=files,
+        limit=0,
         parser_format=parser_format,
         custom_regex=custom_regex,
     )

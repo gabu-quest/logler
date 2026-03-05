@@ -178,8 +178,12 @@ def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, p
 @click.option("--trace", help="Filter by trace ID (comma-separated)")
 @click.option("--service", help="Filter by service name (comma-separated)")
 @time_filter_options
-@click.option("--limit", type=int, help="Limit number of results (first N)")
-@click.option("--head", "head_n", type=int, help="Alias for --limit")
+@click.option(
+    "--limit", type=click.IntRange(min=1), default=None, help="Limit number of results (first N)"
+)
+@click.option(
+    "--head", "head_n", type=click.IntRange(min=1), default=None, help="Alias for --limit"
+)
 @click.option("--tail", "tail_n", type=int, help="Return last N matches by timestamp")
 @click.option("--context", type=int, default=0, help="Include N context lines")
 @click.option("--fields", help="Comma-separated fields to include in output")
@@ -243,12 +247,6 @@ def search(
             # --head is alias for --limit
             effective_limit = limit or head_n
 
-            # When using offset, we need to fetch offset + limit from Rust
-            # so we have enough results to skip the first `offset` entries
-            backend_limit = effective_limit
-            if offset > 0 and effective_limit:
-                backend_limit = effective_limit + offset
-
             # Parse fields list
             field_list = [f.strip() for f in fields.split(",")] if fields else None
 
@@ -263,13 +261,15 @@ def search(
                 correlation_id=correlation,
                 trace_id=trace,
                 service_name=service,
-                limit=backend_limit,
+                limit=effective_limit,
                 tail=tail_n,
                 time_start=time_start,
                 time_end=time_end,
                 context_lines=context,
                 output_format="full",
                 fields=field_list,
+                count_only=count_only,
+                offset=offset,
             )
 
             # Build LLM-optimized output
@@ -345,14 +345,6 @@ def search(
                     out_entry = {k: v for k, v in out_entry.items() if k in field_list}
 
                 output_results.append(out_entry)
-
-            # Apply offset for pagination
-            if offset > 0:
-                output_results = output_results[offset:]
-
-            # Trim back to effective_limit after offset
-            if effective_limit and len(output_results) > effective_limit:
-                output_results = output_results[:effective_limit]
 
             has_more = (offset + len(output_results)) < total_matches
 
@@ -943,118 +935,129 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
                 import sys as _sys
 
                 query = _sys.stdin.read().strip()
-            elif not query:
+            if not query:
                 _error_json("SQL query required. Provide as argument or use --stdin.")
 
-            # Parse log files
-            from ..parser import LogParser
-
-            parser = LogParser()
-            entries = []
-
-            for file_path in file_list:
-                try:
-                    with open(file_path, "r", errors="replace") as f:
-                        for i, line in enumerate(f):
-                            line = line.rstrip()
-                            if not line:
-                                continue
-
-                            entry = parser.parse_line(i + 1, line)
-                            entries.append(
-                                {
-                                    "line_number": i + 1,
-                                    "timestamp": str(entry.timestamp) if entry.timestamp else None,
-                                    "level": str(entry.level).upper() if entry.level else None,
-                                    "message": entry.message,
-                                    "thread_id": entry.thread_id,
-                                    "correlation_id": entry.correlation_id,
-                                    "trace_id": getattr(entry, "trace_id", None),
-                                    "span_id": getattr(entry, "span_id", None),
-                                    "file": file_path,
-                                    "raw": line,
-                                }
-                            )
-                except (FileNotFoundError, PermissionError) as e:
-                    _error_json(f"Cannot read file {file_path}: {e}")
-
-            if not entries:
-                _output_json(
-                    {
-                        "query": query,
-                        "files": file_list,
-                        "total_entries": 0,
-                        "results": [],
-                        "error": "No log entries found",
-                    },
-                    pretty,
-                )
-                sys.exit(EXIT_NO_RESULTS)
-
             # Create DuckDB connection and load data
+            # External access stays enabled during CSV bulk load, then locked
+            # before executing the user's SQL query.
+            import csv
+            import os
+            import tempfile
+
             conn = duckdb.connect(":memory:")
-
-            # Create table from entries
-            conn.execute(
-                """
-                CREATE TABLE logs (
-                    line_number INTEGER,
-                    timestamp VARCHAR,
-                    level VARCHAR,
-                    message VARCHAR,
-                    thread_id VARCHAR,
-                    correlation_id VARCHAR,
-                    trace_id VARCHAR,
-                    span_id VARCHAR,
-                    file VARCHAR,
-                    raw VARCHAR
-                )
-            """
-            )
-
-            # Insert entries
-            conn.executemany(
-                """
-                INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        e["line_number"],
-                        e["timestamp"],
-                        e["level"],
-                        e["message"],
-                        e["thread_id"],
-                        e["correlation_id"],
-                        e["trace_id"],
-                        e["span_id"],
-                        e["file"],
-                        e["raw"],
-                    )
-                    for e in entries
-                ],
-            )
-
-            # Execute the user's query
             try:
-                result = conn.execute(query).fetchall()
-                columns = [desc[0] for desc in conn.description]
-            except duckdb.Error as e:
-                _error_json(f"SQL error: {e}", EXIT_USER_ERROR)
+                conn.execute(
+                    """
+                    CREATE TABLE logs (
+                        line_number INTEGER,
+                        timestamp VARCHAR,
+                        level VARCHAR,
+                        message VARCHAR,
+                        thread_id VARCHAR,
+                        correlation_id VARCHAR,
+                        trace_id VARCHAR,
+                        span_id VARCHAR,
+                        file VARCHAR,
+                        raw VARCHAR
+                    )
+                """
+                )
 
-            # Convert results to list of dicts
-            rows = [dict(zip(columns, row)) for row in result]
+                # Stream-parse log files into a temp CSV, then bulk-load via
+                # read_csv() (230x faster than executemany at scale).
+                from ..parser import LogParser
 
-            output = {
-                "query": query,
-                "files": file_list,
-                "total_entries": len(entries),
-                "columns": columns,
-                "row_count": len(rows),
-                "results": rows,
-            }
+                parser = LogParser()
+                total_entries = 0
 
-            _output_json(output, pretty)
-            sys.exit(EXIT_SUCCESS if rows else EXIT_NO_RESULTS)
+                tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
+                try:
+                    writer = csv.writer(tmp, lineterminator="\n")
+
+                    for file_path in file_list:
+                        try:
+                            with open(file_path, "r", errors="replace") as f:
+                                for i, line in enumerate(f):
+                                    line = line.rstrip()
+                                    if not line:
+                                        continue
+
+                                    entry = parser.parse_line(i + 1, line)
+                                    writer.writerow(
+                                        [
+                                            i + 1,
+                                            str(entry.timestamp) if entry.timestamp else None,
+                                            str(entry.level).upper() if entry.level else None,
+                                            entry.message,
+                                            entry.thread_id,
+                                            entry.correlation_id,
+                                            getattr(entry, "trace_id", None),
+                                            getattr(entry, "span_id", None),
+                                            file_path,
+                                            line,
+                                        ]
+                                    )
+                                    total_entries += 1
+                        except (FileNotFoundError, PermissionError) as e:
+                            _error_json(f"Cannot read file {file_path}: {e}")
+
+                finally:
+                    tmp.close()
+
+                try:
+                    if total_entries > 0:
+                        conn.execute(
+                            f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
+                            "header=false, nullstr='', columns={"
+                            "'line_number': 'INTEGER', 'timestamp': 'VARCHAR', "
+                            "'level': 'VARCHAR', 'message': 'VARCHAR', "
+                            "'thread_id': 'VARCHAR', 'correlation_id': 'VARCHAR', "
+                            "'trace_id': 'VARCHAR', 'span_id': 'VARCHAR', "
+                            "'file': 'VARCHAR', 'raw': 'VARCHAR'})"
+                        )
+                finally:
+                    os.unlink(tmp.name)
+
+                # Lock filesystem access before running user SQL
+                conn.execute("SET enable_external_access = false")
+
+                if total_entries == 0:
+                    _output_json(
+                        {
+                            "query": query,
+                            "files": file_list,
+                            "total_entries": 0,
+                            "results": [],
+                            "error": "No log entries found",
+                        },
+                        pretty,
+                    )
+                    sys.exit(EXIT_NO_RESULTS)
+
+                # Execute the user's query
+                try:
+                    result = conn.execute(query).fetchall()
+                    columns = [desc[0] for desc in conn.description]
+                except duckdb.Error as e:
+                    _error_json(f"SQL error: {e}", EXIT_USER_ERROR)
+
+                # Convert results to list of dicts
+                rows = [dict(zip(columns, row)) for row in result]
+
+                output = {
+                    "query": query,
+                    "files": file_list,
+                    "total_entries": total_entries,
+                    "columns": columns,
+                    "row_count": len(rows),
+                    "results": rows,
+                }
+
+                _output_json(output, pretty)
+                sys.exit(EXIT_SUCCESS if rows else EXIT_NO_RESULTS)
+            finally:
+                conn.close()
 
         except Exception as e:
             _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)

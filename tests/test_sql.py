@@ -613,3 +613,133 @@ class TestInvestigatorSqlEngineCaching:
         verify_result = json.loads(verify_engine.query("SELECT COUNT(*) AS cnt FROM logs"))
         assert verify_result[0]["cnt"] == TOTAL_ENTRIES
         verify_engine.close()
+
+
+# ---------------------------------------------------------------------------
+# Security: external access disabled
+# ---------------------------------------------------------------------------
+
+
+class TestSqlEngineExternalAccessDisabled:
+    """Verify DuckDB connections block filesystem operations."""
+
+    def test_read_csv_auto_blocked(self, loaded_engine):
+        """read_csv_auto must be blocked by enable_external_access=false."""
+        with pytest.raises(duckdb.PermissionException, match="file system operations are disabled"):
+            loaded_engine.query("SELECT * FROM read_csv_auto('/etc/passwd')")
+
+    def test_read_json_auto_blocked(self, loaded_engine):
+        """read_json_auto must be blocked."""
+        with pytest.raises(duckdb.PermissionException, match="file system operations are disabled"):
+            loaded_engine.query("SELECT * FROM read_json_auto('/etc/passwd')")
+
+    def test_copy_to_blocked(self, loaded_engine):
+        """COPY ... TO must be blocked — prevents data exfiltration."""
+        with pytest.raises(duckdb.PermissionException, match="file system operations are disabled"):
+            loaded_engine.query("COPY logs TO '/tmp/exfil.csv'")
+
+    def test_normal_queries_still_work(self, loaded_engine):
+        """SELECT, aggregate, JOIN on logs/metrics still function."""
+        # Basic SELECT
+        result = json.loads(loaded_engine.query("SELECT COUNT(*) AS cnt FROM logs"))
+        assert result[0]["cnt"] == TOTAL_ENTRIES
+
+        # Aggregate
+        result = json.loads(
+            loaded_engine.query(
+                "SELECT level, COUNT(*) AS cnt FROM logs GROUP BY level ORDER BY level"
+            )
+        )
+        assert len(result) == 4
+
+        # JOIN
+        result = json.loads(
+            loaded_engine.query(
+                "SELECT l.line_number, m.value FROM logs l "
+                "JOIN metrics m ON l.file = m.file AND l.line_number = m.line_number "
+                "ORDER BY l.line_number LIMIT 1"
+            )
+        )
+        assert len(result) == 1
+        assert result[0]["line_number"] == 1
+        assert result[0]["value"] == 100.0
+
+
+class TestSqlEngineGeneratorEntries:
+    """Verify load_files works when index.entries is a one-shot generator."""
+
+    def test_generator_entries_populate_both_tables(self, sql_log_file):
+        """If entries is a generator, both logs and metrics should be populated."""
+        parser = LogParser()
+        raw_entries = []
+        with open(sql_log_file, encoding="utf-8", errors="replace") as f:
+            for line_number, line in enumerate(f, start=1):
+                line = line.rstrip("\n\r")
+                if line:
+                    raw_entries.append(parser.parse_line(line_number, line))
+
+        class OneShotIndex:
+            """Index whose .entries is a stored generator (exhausted after one pass)."""
+
+            def __init__(self, items):
+                self.entries = (e for e in items)
+
+        engine = SqlEngine()
+        engine.load_files({sql_log_file: OneShotIndex(raw_entries)})
+
+        logs_count = json.loads(engine.query("SELECT COUNT(*) AS cnt FROM logs"))
+        assert logs_count[0]["cnt"] == TOTAL_ENTRIES
+
+        metrics_count = json.loads(engine.query("SELECT COUNT(*) AS cnt FROM metrics"))
+        assert metrics_count[0]["cnt"] == TOTAL_ENTRIES
+
+
+class TestSqlEnginePagination:
+    """Verify _get_sql_engine() paginates instead of materialising all at once."""
+
+    def test_paginated_load_all_entries_present(self, sql_log_file):
+        """With a small page size, all 40 entries must still reach DuckDB."""
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+
+        # Shrink page size so 40 entries span multiple pages
+        inv._SQL_ENGINE_PAGE_SIZE = 7
+        result = inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+        assert result[0]["cnt"] == TOTAL_ENTRIES
+
+    def test_paginated_load_correct_data(self, sql_log_file):
+        """Paginated load must preserve level distribution across pages."""
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+
+        inv._SQL_ENGINE_PAGE_SIZE = 7
+        result = inv.sql_query(
+            "SELECT level, COUNT(*) AS cnt FROM logs GROUP BY level ORDER BY level"
+        )
+        by_level = {r["level"]: r["cnt"] for r in result}
+        # Fixture: 10 each of DEBUG, ERROR, INFO, WARN
+        assert by_level == {"DEBUG": 10, "ERROR": 10, "INFO": 10, "WARN": 10}
+
+    def test_paginated_get_entries_page_call_count(self, sql_log_file):
+        """With page size 15 and 40 entries: 3 _get_entries_page() calls."""
+        from unittest.mock import patch
+
+        inv = Investigator()
+        inv.load_files([sql_log_file])
+        inv._SQL_ENGINE_PAGE_SIZE = 15
+
+        original = inv._get_entries_page
+        call_count = 0
+
+        def counting_get_page(offset, limit):
+            nonlocal call_count
+            call_count += 1
+            return original(offset, limit)
+
+        with patch.object(inv, "_get_entries_page", side_effect=counting_get_page):
+            inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")
+
+        # 40 entries / 15 per page = 3 pages (15+15+10)
+        # Last page has_more=false → loop breaks without an extra call
+        assert call_count == 3
+        assert inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")[0]["cnt"] == TOTAL_ENTRIES
