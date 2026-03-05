@@ -6,16 +6,13 @@
 
 <p align="center">
   <a href="https://pypi.org/project/logler/"><img src="https://img.shields.io/pypi/v/logler.svg?logo=pypi&logoColor=white" alt="PyPI"></a>
-  <a href="https://pypi.org/project/logler/"><img src="https://img.shields.io/pypi/dm/logler.svg?logo=pypi&logoColor=white" alt="Downloads"></a>
   <a href="https://pypi.org/project/logler/"><img src="https://img.shields.io/pypi/pyversions/logler.svg?logo=python&logoColor=white" alt="Python 3.9+"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT"></a>
-  <a href="https://github.com/gabu-quest/logler/actions"><img src="https://img.shields.io/github/actions/workflow/status/gabu-quest/logler/pypi.yml?logo=github&label=build" alt="Build"></a>
+  <a href="https://github.com/gabu-quest/logler/actions"><img src="https://img.shields.io/github/actions/workflow/status/gabu-quest/logler/ci.yml?logo=github&label=CI" alt="CI"></a>
 </p>
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-%23000000.svg?logo=rust&logoColor=white" alt="Rust"></a>
-  <a href="https://github.com/psf/black"><img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="black"></a>
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Ruff"></a>
-  <a href="https://pypi.org/project/logler/"><img src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey" alt="Platform"></a>
   <a href="https://github.com/gabu-quest/logler"><img src="https://img.shields.io/github/stars/gabu-quest/logler?style=social" alt="Stars"></a>
 </p>
 
@@ -25,50 +22,206 @@
 
 ---
 
+**Point at log files. Get structured answers.**
+
+Logler sits between `grep` (finds strings, no structure) and ELK/Datadog (requires infrastructure). It's a local-first investigation engine that understands threads, correlations, traces, and hierarchies -- no servers, no setup, no infrastructure.
+
+Built for AI agents: 25 JSON CLI commands purpose-built for LLM consumption. Also works great for humans.
+
 ## Install
 
 ```bash
 pip install logler
 ```
 
-Python 3.9+. Rust backend included for investigation features.
+Python 3.9+. Pre-built wheels include the Rust backend -- no compiler needed.
 
 ## Quick Start
 
 **Python API:**
 
 ```python
-import logler.investigate as investigate
+from logler.investigate import search, follow_thread_hierarchy
 
-results = investigate.search(files=["app.log"], level="ERROR", limit=5)
+# Find errors
+results = search(files=["app.log"], level="ERROR", limit=5)
 for entry in results["results"]:
     print(f"[{entry['entry']['level']}] {entry['entry']['message']}")
+
+# Trace a request through services
+hierarchy = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
 ```
 
-**CLI:**
+**CLI (JSON output for agents):**
 
 ```bash
 logler llm search app.log --level ERROR --tail 5
+logler llm hierarchy app.log --root req-123
+logler llm triage app.log            # quick incident assessment
 ```
 
-## See It in Action
-
-<!--
-![logler demo](docs/demo.gif)
-Generate with: vhs demo.tape
--->
+**CLI (human-readable):**
 
 ```bash
-git clone https://github.com/gabu-quest/logler.git && cd logler
-uv run python demo.py
+logler view app.log --level ERROR    # rich terminal output
+logler stats app.log                 # log file summary
 ```
+
+## What It Does
+
+```
+                    app.log ─────┐
+                    api.log ─────┤
+                    db.log  ─────┤
+                    cache.log ───┘
+                         │
+                    ┌────▼────┐
+                    │  logler │  Rust parser + Python investigation
+                    └────┬────┘
+                         │
+         ┌───────────────┼───────────────┐
+         ▼               ▼               ▼
+   Thread Hierarchy   Error Flow    Cross-Service
+   req-001 (520ms)    Root Cause:   Timeline
+   ├─ auth (45ms)     Redis conn    [api] req start
+   ├─ product (450ms) refused       [db]  query
+   │  └─ db (300ms)   Path: api →   [cache] miss
+   └─ response (10ms) product →     [api] respond
+                       cache
+```
+
+### Investigation Capabilities
+
+| Capability | What It Does |
+|-----------|-------------|
+| **Search** | Filter by level, time, thread, pattern. Pagination, count-only mode. |
+| **Thread Hierarchy** | Build request trees from span/parent_span fields. Bottleneck detection. |
+| **Error Flow** | Trace error propagation: root cause, impact path, affected nodes. |
+| **Cross-Service Timeline** | Reconstruct a request's journey across microservices. |
+| **Comparison** | Diff two threads or time periods side-by-side. |
+| **Smart Sampling** | Representative samples from large files (stratified, time-weighted). |
+| **Metrics** | Extract numeric values, compute stats (min/max/p95/p99), z-score anomalies. |
+| **Format Detection** | Auto-detect log formats. Drain algorithm template mining. |
+| **Correlation** | Match events across files by field values or time windows. |
+| **Sessions** | Stateful investigations with undo/redo and report generation. |
+
+### Supported Formats
+
+JSON (recommended), syslog (RFC 3164/5424, BSD), logfmt, Apache CLF, plain text. Auto-detected -- no configuration needed.
+
+## Performance
+
+Real numbers from the [benchmark suite](benchmarks/results/v3/REPORT.md)
+(19 scenarios, deterministic data, Python 3.12, Rust backend):
+
+| Operation | Speed | Context |
+|-----------|-------|---------|
+| Search throughput | **1.27M entries/sec** | Level filter, 50K entries |
+| Hierarchy building | **349ms** | 50K entries (was 86s before optimization) |
+| Follow thread | **0.36ms** | Correlation lookup, 1K entries |
+| Cross-service timeline | **10.6ms** | 5 services, shared correlation |
+| Error flow analysis | **0.14ms** | Small hierarchy |
+| Token savings | **2540x** | count vs full output format |
+
+Three optimization rounds drove hierarchy building from 86 seconds to 349ms (246x speedup) and reduced memory usage for database operations from 85 MB to 1 MB (83x reduction).
+
+Full report with 19 charts: [benchmarks/results/v3/REPORT.md](benchmarks/results/v3/REPORT.md)
+
+## Showcase
+
+### Thread Hierarchy
+
+```python
+from logler.investigate import follow_thread_hierarchy
+
+hierarchy = follow_thread_hierarchy(
+    files=["app.log"],
+    root_identifier="req-123",
+    min_confidence=0.8,
+)
+```
+
+```
+api-gateway (req-001, 520ms)
+├─ auth-service (45ms)
+│  ├─ jwt-validate (5ms)
+│  └─ user-lookup (25ms)
+├─ product-service (450ms) SLOW
+│  ├─ inventory-check (340ms)
+│  │  └─ db-query (300ms)
+│  └─ cache-update (45ms) ERROR
+└─ response-assembly (10ms)
+```
+
+### Error Flow Analysis
+
+```python
+from logler.investigate import analyze_error_flow
+
+error_flow = analyze_error_flow(files=["app.log"], root_identifier="req-123")
+```
+
+```
+Root Cause:
+  cache-update failed at 10:00:00.450Z
+  Error: Redis connection refused
+  Path: api-gateway -> product-service -> cache-update
+
+Impact: 3 nodes affected, request degraded
+Recommendation: Check Redis connectivity
+```
+
+### Cross-Service Timeline
+
+```python
+from logler.investigate import cross_service_timeline
+
+timeline = cross_service_timeline(
+    files={"api": ["api.log"], "db": ["db.log"], "cache": ["cache.log"]},
+    correlation_id="req-12345",
+)
+for event in timeline["timeline"]:
+    print(f"[{event['service']}] {event['entry']['message']}")
+```
+
+### Visualization Modes
+
+**Tree** -- parent-child relationships | **Waterfall** -- temporal overlap | **Flamegraph** -- time distribution
+
+```
+Waterfall: req-001 (520ms)
+api-gateway          ████████████████████████████████████████  520ms
+  ├─ auth-service    ████                                      45ms
+  ├─ product-service      ████████████████████████████████    450ms
+  │  ├─ inventory              ██████████████████████         340ms
+  │  └─ cache-update                              ████ ERR     45ms
+  └─ response                                          ██      10ms
+```
+
+## LLM CLI
+
+25 commands organized by workflow. All output structured JSON.
+
+| Category | Commands |
+|----------|----------|
+| **Triage** | `triage`, `summarize`, `schema` |
+| **Search** | `search`, `ids`, `sample`, `sql` |
+| **Tracing** | `correlate`, `hierarchy`, `bottleneck`, `context`, `export` |
+| **Comparison** | `compare`, `diff` |
+| **Sessions** | `session create/list/query/note/conclude` |
+| **Formats** | `format list/test/validate` |
+| **Correlation** | `correlation list/run`, `correlate-events` |
+| **Metrics** | `metrics`, `detect`, `templates`, `verify-pattern`, `emit` |
+
+All file-based commands accept `--db path/to/sqler.db` to search [sqler](https://github.com/gabu-quest/sqler) databases directly.
+
+Full reference: [docs/LLM_CLI_REFERENCE.md](docs/LLM_CLI_REFERENCE.md)
 
 ## Interactive Tours
 
-Learn logler hands-on with [marimo](https://marimo.io) notebooks. Each tour is
-self-contained with sample data -- no external files needed.
+17 hands-on [marimo](https://marimo.io) notebooks. Each is self-contained with sample data.
 
-**[Launch Interactive Tour (browser)](https://gabu-quest.github.io/logler/)**
+**[Launch in browser](https://gabu-quest.github.io/logler/)** (no install needed)
 
 | Tour | Topics |
 |------|--------|
@@ -101,224 +254,42 @@ self-contained with sample data -- no external files needed.
 
 </details>
 
-**Run locally:**
-
-```bash
-uv run marimo edit examples/tours/tour_01_fundamentals.py
-```
-
-## Why Logler?
-
-Log files are the black box of production. `grep` finds strings but not stories.
-Logler is a Rust-powered investigation engine that understands structure: threads,
-correlations, traces, hierarchies. Use it from Python, the CLI, or as an AI agent's
-investigation toolkit.
-
-## Performance
-
-Real numbers from the [benchmark suite](benchmarks/results/REPORT.md)
-(14 scenarios, Python 3.12, Rust backend):
-
-| Operation | Result | Context |
-|-----------|--------|---------|
-| Search throughput | **257K entries/sec** | Level filter, 10K entries |
-| Follow thread | **2.6ms** | Correlation lookup, 1K entries |
-| Cross-service timeline | **13ms** | 5 services, shared correlation |
-| Error flow analysis | **1.7ms** | 10K entry hierarchy |
-| Token savings | **2540x** | count vs full, 100 ERRORs |
-
-![Search scaling](benchmarks/results/charts/01_search_scaling.svg)
-
-Full report with 14 charts: [benchmarks/results/REPORT.md](benchmarks/results/REPORT.md)
-
-**Honest limitations:**
-- BSD syslog without `<priority>` prefix has no parsed timestamps
-- Time-based filtering unavailable for entries without timestamps
-
-## Features
-
-**Core**
-- Multi-format parser: JSON, syslog (RFC 3164/5424, BSD), logfmt, Apache CLF, plain text
-- Thread tracking with correlation IDs and distributed traces
-- Real-time file watching and tailing
-- Rich terminal output with thread visualization
-
-**Investigation** (Rust-powered)
-- Hierarchy detection with tree, waterfall, flamegraph views
-- Bottleneck analysis and error flow tracing
-- Cross-service timeline reconstruction
-- Pattern detection and smart sampling
-
-**LLM-Optimized**
-- 25 CLI commands with structured JSON output
-- Token-efficient modes: summary, count, compact
-- Investigation sessions with undo/redo and report generation
-- Metrics extraction with z-score anomaly detection
-- Format auto-detection with Drain template mining
-- Custom formats and correlation rules via `.logler.toml`
+Run locally: `uv run marimo edit examples/tours/tour_01_fundamentals.py`
 
 ## When to Use Logler
 
 **Good fit:**
-- Debugging production incidents (threads, correlations, traces)
+- Debugging production incidents from log files
 - AI agent log investigation (LLM-first JSON CLI)
-- Cross-service distributed tracing
-- Quick triage of large log files
+- Cross-service distributed tracing (local files)
+- Quick triage of large log files without infrastructure
 
 **Consider alternatives:**
 - Need log aggregation/storage: ELK, Loki, Datadog
 - Need real-time alerting: Prometheus + Alertmanager
-- Only need grep-like search: ripgrep
-
-## Showcase
-
-### Thread Hierarchy
-
-Build a request hierarchy from span/parent_span fields, with automatic bottleneck
-detection:
-
-```python
-import logler.investigate as investigate
-
-hierarchy = investigate.follow_thread_hierarchy(
-    files=["app.log"],
-    root_identifier="req-123",
-    min_confidence=0.8,
-)
-if hierarchy.get("bottleneck"):
-    bn = hierarchy["bottleneck"]
-    print(f"Bottleneck: {bn['node_id']} ({bn['duration_ms']}ms)")
-```
-
-```
-api-gateway (req-001, 520ms)
-├─ auth-service (45ms)
-│  ├─ jwt-validate (5ms)
-│  └─ user-lookup (25ms)
-├─ product-service (450ms) SLOW
-│  ├─ inventory-check (340ms)
-│  │  └─ db-query (300ms)
-│  └─ cache-update (45ms) ERROR
-└─ response-assembly (10ms)
-```
-
-[Full tour](https://gabu-quest.github.io/logler/tour_03_hierarchy.html) | [API reference](docs/API.md#c08)
-
-### Cross-Service Timeline
-
-Reconstruct a request's journey across microservices:
-
-```python
-timeline = investigate.cross_service_timeline(
-    files={"api": ["api.log"], "db": ["db.log"], "cache": ["cache.log"]},
-    correlation_id="req-12345",
-)
-for event in timeline["timeline"]:
-    print(f"[{event['service']}] {event['entry']['message']}")
-```
-
-[Full tour](https://gabu-quest.github.io/logler/tour_12_multi_file_interleaving.html) | [API reference](docs/API.md#c04)
-
-### Error Flow Analysis
-
-Trace error propagation through the request hierarchy:
-
-```python
-error_flow = investigate.analyze_error_flow(
-    files=["app.log"],
-    root_identifier="req-123",
-)
-```
-
-```
-Error Flow Analysis
-
-Root Cause:
-  cache-update failed at 10:00:00.450Z
-  Error: Redis connection refused
-  Path: api-gateway -> product-service -> cache-update
-
-Impact: 3 nodes affected, request degraded
-Recommendation: Check Redis connectivity
-```
-
-[Full tour](https://gabu-quest.github.io/logler/tour_07_error_flow.html) | [API reference](docs/API.md)
-
-## Visualization Modes
-
-**Tree View** -- parent-child relationships:
-```
-api-gateway (req-001, 520ms)
-├─ auth-service (45ms)
-│  ├─ jwt-validate (5ms)
-│  └─ user-lookup (25ms)
-├─ product-service (450ms) SLOW
-│  ├─ inventory-check (340ms)
-│  │  └─ db-query (300ms)
-│  └─ cache-update (45ms) ERROR
-└─ response-assembly (10ms)
-```
-
-**Waterfall View** -- temporal overlap:
-```
-Timeline: req-001 (520ms)
-api-gateway          ████████████████████████████████████████  520ms
-  ├─ auth-service    ████                                      45ms
-  ├─ product-service      ████████████████████████████████    450ms
-  │  ├─ inventory              ██████████████████████         340ms
-  │  └─ cache-update                              ████ ERR     45ms
-  └─ response                                          ██      10ms
-```
-
-**Flamegraph View** -- time distribution:
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ api-gateway (520ms)                                                │
-├───────────┬────────────────────────────────────────────────────────┤
-│ auth (45) │ product-service (450ms)                                │
-│           ├─────────────────────────────┬──────────────────────────┤
-│           │ inventory-check (340ms)     │ cache-update (45ms) ERR  │
-└───────────┴─────────────────────────────┴──────────────────────────┘
-```
-
-**Error Flow** -- propagation tracing:
-```
-Root Cause:
-  cache-update failed at 10:00:00.450Z
-  Error: Redis connection refused
-  Path: api-gateway -> product-service -> cache-update
-
-Impact: 3 nodes affected, request degraded
-```
+- Only need text search: ripgrep
 
 ## Documentation
 
 | Resource | Description |
 |----------|-------------|
-| [API Reference](docs/API.md) | Tested contracts (C02--C10) |
+| [API Reference](docs/API.md) | Contract-tested API (C02--C10) |
 | [LLM CLI Reference](docs/LLM_CLI_REFERENCE.md) | 25 commands with flags |
-| [Python API Guide](docs/LLM_README.md) | Library API and examples |
+| [Python API Guide](docs/LLM_README.md) | Library usage and examples |
 | [Investigation API](docs/LLM_INVESTIGATION_API.md) | All investigation functions |
 | [Interactive Tours](https://gabu-quest.github.io/logler/) | 17 marimo notebooks |
-| [Performance](docs/PERFORMANCE.md) | Benchmarks and optimization |
-| [日本語ガイド](README.ja.md) | Japanese documentation |
+| [Benchmarks](benchmarks/results/v3/REPORT.md) | 19 scenarios with charts |
 | [Web UI](https://github.com/gabu-quest/logler-web) | Vue3 + Naive-UI interface |
 
-## Testing
+## Development
 
 ```bash
-uv run pytest              # 1000+ Python tests
-cargo test --workspace     # Rust tests
+cargo build --release --all    # Build Rust backend
+uv sync --all-groups           # Install Python deps
+uv run pytest                  # 1250+ Python tests
+cargo test --workspace         # 42 Rust tests
 ```
-
-## Contributing
-
-```bash
-uv run ruff format . && uv run ruff check .
-```
-
-Contributions welcome. Please submit a Pull Request.
 
 ## License
 
-MIT License -- see [LICENSE](LICENSE) for details.
+MIT -- see [LICENSE](LICENSE) for details.
