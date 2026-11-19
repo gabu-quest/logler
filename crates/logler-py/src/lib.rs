@@ -1,11 +1,21 @@
 #![allow(non_local_definitions)]
 
 use logler_core::index::LoadError;
+use logler_core::investigate::NoEntryAtLine;
 use logler_core::*;
+use pyo3::create_exception;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use regex::Regex;
 use std::path::PathBuf;
 use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+create_exception!(
+    logler_rs,
+    LineNotFoundError,
+    PyValueError,
+    "A line number that has no entry in the file: the caller's error."
+);
 
 /// Python wrapper for Investigator
 #[pyclass]
@@ -92,15 +102,22 @@ impl PyInvestigator {
         &self,
         py: Python<'_>,
         file: String,
-        line_number: usize,
+        line_number: i64,
         lines_before: usize,
         lines_after: usize,
         include_related_threads: bool,
     ) -> PyResult<String> {
+        // A negative line has no entry: the same error as a line past the end.
+        let Ok(line) = usize::try_from(line_number) else {
+            return Err(engine_err(anyhow::Error::new(NoEntryAtLine {
+                file,
+                line: line_number,
+            })));
+        };
         py.detach(|| {
             to_json(self.read().get_context(
                 &file,
-                line_number,
+                line,
                 lines_before,
                 lines_after,
                 include_related_threads,
@@ -194,8 +211,12 @@ fn to_json<T: serde::Serialize>(result: anyhow::Result<T>) -> anyhow::Result<Str
 /// The one mapping of an engine error to a Python exception. A log file that cannot be
 /// opened or read becomes `OSError(errno, strerror, filename)`, which Python turns into
 /// `FileNotFoundError`, `PermissionError`, `IsADirectoryError` and the like; every other
-/// engine error is a `RuntimeError`.
+/// engine error is a `RuntimeError`, except a line number with no entry, which is
+/// `LineNotFoundError` (a `ValueError`).
 fn engine_err(e: anyhow::Error) -> PyErr {
+    if let Some(none) = e.downcast_ref::<NoEntryAtLine>() {
+        return LineNotFoundError::new_err(none.to_string());
+    }
     if let Some(load) = e.downcast_ref::<LoadError>() {
         if let Some(code) = load.source.raw_os_error() {
             let text = std::io::Error::from_raw_os_error(code).to_string();
@@ -257,6 +278,7 @@ fn level_name(word: &str) -> Option<String> {
 fn logler_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyInvestigator>()?;
     m.add_class::<PyLineParser>()?;
+    m.add("LineNotFoundError", m.py().get_type::<LineNotFoundError>())?;
     m.add_function(wrap_pyfunction!(level_name, m)?)?;
     Ok(())
 }

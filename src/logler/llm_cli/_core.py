@@ -17,7 +17,7 @@ from typing import Any, NoReturn
 
 import click
 
-from .._search_core import _parse_levels, level_text, parse_duration
+from .._search_core import LineNotFoundError, _parse_levels, level_text, parse_duration
 from ..config import FormatFileError
 from ..parser import format_time, to_utc
 
@@ -72,8 +72,9 @@ def command(
     ``--pretty`` option (passed to it as ``pretty``) and turns an exception it does not
     handle into the JSON internal error with exit code 3, except a formats.yaml that cannot
     be used (``FormatFileError``) and a file that cannot be opened, read or written (an
-    ``OSError`` that names a file), which are the user's to put right (exit code 2, the message
-    is the file and the reason).
+    ``OSError`` that names a file) and a line number the file has no entry for
+    (``LineNotFoundError``), which are the user's to put right (exit code 2, the message is the file
+    and the reason).
     ``sys.exit`` passes through.
     ``stream=True`` is for a command whose stdout is a stream of one JSON object per line:
     it has no ``--pretty``, and that error goes to stderr.
@@ -86,6 +87,8 @@ def command(
                 return fn(*args, **kwargs)
             except FormatFileError as e:
                 _error_json(f"Unusable format file: {e}", err=stream)
+            except LineNotFoundError as e:
+                _error_json(str(e), err=stream)
             except OSError as e:
                 if e.filename and e.strerror:
                     _error_json(f"{e.filename}: {e.strerror}", err=stream)

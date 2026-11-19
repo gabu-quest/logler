@@ -4,6 +4,9 @@ Every method that returns JSON returns the text: callers decode it with `json.lo
 `tests/test_rs_stub.py` compares this file with the built module.
 """
 
+class LineNotFoundError(ValueError):
+    """A line number that has no entry in the file; the text is `<file>: no entry at line <n>`."""
+
 class PyInvestigator:
     def __init__(self) -> None: ...
     def load_files(self, files: list[str]) -> None: ...

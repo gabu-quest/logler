@@ -16,7 +16,7 @@ from click.testing import CliRunner
 import logler_rs
 from logler.cache import clear_cache
 from logler.cli import main
-from logler.investigate import get_metadata, search
+from logler.investigate import get_context, get_metadata, search
 
 LINE = "2024-01-15T10:00:00.000Z INFO [worker-1] hello world\n"
 
@@ -164,6 +164,46 @@ class TestLlmSearchExitCodes:
         assert json.loads(result.output)["code"] == 3
 
 
+LINES_41 = LINE * 41
+
+
+class TestLineWithNoEntryIsTheCallersError:
+    @pytest.fixture
+    def app_log(self, tmp_path):
+        path = tmp_path / "app.log"
+        path.write_text(LINES_41)
+        return str(path)
+
+    @pytest.mark.parametrize("line", ["9999", "0", "42", "-1"])
+    def test_llm_context_is_exit_2_and_names_file_and_line(self, app_log, line):
+        result = CliRunner().invoke(main, ["llm", "context", app_log, "--", line])
+        assert result.exit_code == 2, result.output
+        assert json.loads(result.output) == {
+            "error": f"{app_log}: no entry at line {line}",
+            "code": 2,
+        }
+
+    def test_llm_context_on_an_empty_file_is_exit_2(self, tmp_path):
+        path = tmp_path / "empty.log"
+        path.write_text("")
+        result = CliRunner().invoke(main, ["llm", "context", str(path), "1"])
+        assert result.exit_code == 2, result.output
+        assert json.loads(result.output) == {
+            "error": f"{path}: no entry at line 1",
+            "code": 2,
+        }
+
+    @pytest.mark.parametrize("line", [9999, 0, -1])
+    def test_get_context_raises_value_error_with_the_same_text(self, app_log, line):
+        with pytest.raises(ValueError) as info:
+            get_context(app_log, line)
+        assert str(info.value) == f"{app_log}: no entry at line {line}"
+        assert not isinstance(info.value, RuntimeError)
+
+    def test_a_line_with_an_entry_is_unchanged(self, app_log):
+        assert get_context(app_log, 41, 1, 0)["target"]["line_number"] == 41
+
+
 class TestHumanCliMessage:
     """The human commands print any error and exit 1; now the text of the error names the file."""
 
@@ -184,6 +224,7 @@ def test_module_level_functions_nothing_calls_are_gone():
     ):
         assert not hasattr(logler_rs, name), name
     assert sorted(n for n in dir(logler_rs) if not n.startswith("_") and n != "logler_rs") == [
+        "LineNotFoundError",
         "PyInvestigator",
         "PyLineParser",
         "level_name",

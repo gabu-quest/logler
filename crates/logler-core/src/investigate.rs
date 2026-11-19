@@ -8,6 +8,17 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
+/// A line number that has no entry in a file: the caller named a line the file does not
+/// have (past the end, 0, negative, or a file with no lines). `line` is signed so a
+/// negative request reports as asked. A caller that wants the kind downcasts the
+/// `anyhow::Error` to this type.
+#[derive(Debug, thiserror::Error)]
+#[error("{file}: no entry at line {line}")]
+pub struct NoEntryAtLine {
+    pub file: String,
+    pub line: i64,
+}
+
 /// Safety cap: maximum results returned when no limit/tail is specified.
 /// Prevents a single unbounded query from allocating gigabytes of memory.
 /// At ~80 bytes per materialized result + JSON serialization overhead,
@@ -518,7 +529,10 @@ impl Investigator {
 
         let target = index
             .get_entry(line_number)
-            .ok_or_else(|| anyhow::anyhow!("Line not found: {}", line_number))?
+            .ok_or_else(|| NoEntryAtLine {
+                file: file.to_string(),
+                line: i64::try_from(line_number).unwrap_or(i64::MAX),
+            })?
             .clone();
 
         let (context_before, context_after) =

@@ -28,10 +28,15 @@ BUILD_HINT = "maturin develop --release -m crates/logler-py/Cargo.toml"
 
 try:
     import logler_rs
+    from logler_rs import LineNotFoundError
 
     RUST_AVAILABLE = True
 except ImportError as _exc:
     RUST_AVAILABLE = False
+
+    class LineNotFoundError(ValueError):  # type: ignore[no-redef]
+        """Stands in for the extension's error of that name, which cannot be raised here."""
+
     warnings.warn(
         f"logler's compiled extension (logler_rs) could not be imported: {_exc}. "
         "Search, hierarchy, comparison and sampling need it and will raise "

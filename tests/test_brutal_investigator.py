@@ -335,17 +335,17 @@ class TestGetContext:
 
     def test_context_line_zero(self, temp_log_file):
         """Get context at line 0 - should raise ValueError (lines are 1-indexed)"""
-        with pytest.raises((ValueError, IndexError, RuntimeError)):
+        with pytest.raises(ValueError):
             get_context(file=temp_log_file, line_number=0, lines_before=5, lines_after=5)
 
     def test_context_negative_line(self, temp_log_file):
         """Get context at negative line - should raise ValueError"""
-        with pytest.raises((ValueError, IndexError, RuntimeError, OverflowError)):
+        with pytest.raises(ValueError):
             get_context(file=temp_log_file, line_number=-1, lines_before=5, lines_after=5)
 
     def test_context_past_end_of_file(self, temp_log_file):
-        """Get context past end of file - should raise IndexError"""
-        with pytest.raises((RuntimeError, IndexError)):
+        """Get context past end of file - should raise ValueError"""
+        with pytest.raises(ValueError):
             get_context(file=temp_log_file, line_number=99999, lines_before=5, lines_after=5)
 
 
