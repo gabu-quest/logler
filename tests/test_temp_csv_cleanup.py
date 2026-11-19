@@ -15,32 +15,24 @@ from logler.sql import SqlEngine
 ROOT = Path(__file__).resolve().parent.parent
 
 
-class _Entry:
-    def __init__(self, n: int):
-        self.line_number = n
-        self.timestamp = None
-        self.level = "INFO"
-        self.message = f"m{n}"
-        self.thread_id = None
-        self.correlation_id = None
-        self.trace_id = None
-        self.span_id = None
-        self.raw = f"raw{n}"
+def _entry(n: int) -> dict:
+    return {
+        "file": "a.log",
+        "line_number": n,
+        "timestamp": None,
+        "level": "Info",
+        "message": f"m{n}",
+        "raw": f"raw{n}",
+    }
 
 
-class _BadEntry(_Entry):
-    @property
-    def message(self):
-        raise ValueError("boom")
+class _BoomEntry(dict):
+    """An entry whose message cannot be read."""
 
-    @message.setter
-    def message(self, value):
-        pass
-
-
-class _Index:
-    def __init__(self, entries):
-        self.entries = entries
+    def get(self, key, default=None):
+        if key == "message":
+            raise ValueError("boom")
+        return super().get(key, default)
 
 
 @pytest.fixture
@@ -53,7 +45,7 @@ def scratch(tmp_path, monkeypatch):
 
 def test_sql_engine_success_leaves_nothing(scratch):
     engine = SqlEngine()
-    engine.load_files({"a.log": _Index([_Entry(1), _Entry(2)])})
+    engine.load_entries([_entry(1), _entry(2)])
     assert engine.conn.execute("SELECT COUNT(*) FROM logs").fetchone() == (2,)
     engine.close()
     assert list(scratch.iterdir()) == []
@@ -62,7 +54,7 @@ def test_sql_engine_success_leaves_nothing(scratch):
 def test_sql_engine_write_failure_leaves_nothing(scratch):
     engine = SqlEngine()
     with pytest.raises(ValueError, match="boom"):
-        engine.load_files({"a.log": _Index([_Entry(1), _BadEntry(2)])})
+        engine.load_entries([_entry(1), _BoomEntry(_entry(2))])
     engine.close()
     assert list(scratch.iterdir()) == []
 

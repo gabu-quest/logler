@@ -24,6 +24,7 @@ Entry i:
 
 import json
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import duckdb
@@ -106,29 +107,23 @@ def sql_log_file():
     Path(temp_path).unlink()
 
 
-def _build_index(file_path):
-    """Parse a log file into a {path: LogIndex} mapping for SqlEngine."""
+def _build_entries(file_path):
+    """A log file's lines as the entry dicts SqlEngine.load_entries reads."""
     parser = LogParser()
     entries = []
     with open(file_path, encoding="utf-8", errors="replace") as f:
         for line_number, line in enumerate(f, start=1):
             line = line.rstrip("\n\r")
             if line:
-                entries.append(parser.parse_line(line_number, line))
-
-    class LogIndex:
-        pass
-
-    idx = LogIndex()
-    idx.entries = entries
-    return {file_path: idx}
+                entries.append(parser.parse_entry(line_number, line, file_path))
+    return entries
 
 
 @pytest.fixture
 def loaded_engine(sql_log_file):
     """SqlEngine loaded with the sql_log_file."""
     engine = SqlEngine()
-    engine.load_files(_build_index(sql_log_file))
+    engine.load_entries(_build_entries(sql_log_file))
     return engine
 
 
@@ -145,8 +140,8 @@ def investigator(sql_log_file):
 # ---------------------------------------------------------------------------
 
 
-class TestSqlEngineLoadFiles:
-    """Verify SqlEngine.load_files populates the logs table correctly."""
+class TestSqlEngineLoadEntries:
+    """Verify SqlEngine.load_entries populates the logs table correctly."""
 
     def test_logs_table_row_count(self, loaded_engine):
         result = json.loads(loaded_engine.query("SELECT COUNT(*) AS cnt FROM logs"))
@@ -389,13 +384,8 @@ class TestSqlEdgeCases:
 
         try:
 
-            class LogIndex:
-                pass
-
-            idx = LogIndex()
-            idx.entries = []
             engine = SqlEngine()
-            engine.load_files({temp_path: idx})
+            assert engine.load_entries([]) == 0
 
             result = json.loads(engine.query("SELECT COUNT(*) AS cnt FROM logs"))
             assert result[0]["cnt"] == 0
@@ -437,13 +427,13 @@ class TestSqlEngineDiskBacked:
     def test_disk_backed_query_matches_memory(self, sql_log_file, tmp_path):
         """Disk-backed engine should produce identical results to in-memory."""
         db_file = str(tmp_path / "test.duckdb")
-        index = _build_index(sql_log_file)
+        entries = _build_entries(sql_log_file)
 
         engine_disk = SqlEngine(db_path=db_file)
-        engine_disk.load_files(index)
+        engine_disk.load_entries(entries)
 
         engine_mem = SqlEngine()
-        engine_mem.load_files(index)
+        engine_mem.load_entries(entries)
 
         disk_result = json.loads(
             engine_disk.query(
@@ -471,7 +461,7 @@ class TestSqlEngineDiskBacked:
         assert not db_file.exists()
 
         engine = SqlEngine(db_path=str(db_file))
-        engine.load_files(_build_index(sql_log_file))
+        engine.load_entries(_build_entries(sql_log_file))
         engine.close()
 
         assert db_file.exists()
@@ -480,7 +470,7 @@ class TestSqlEngineDiskBacked:
         """Data written to disk survives close and re-open."""
         db_file = str(tmp_path / "persist.duckdb")
         engine = SqlEngine(db_path=db_file)
-        engine.load_files(_build_index(sql_log_file))
+        engine.load_entries(_build_entries(sql_log_file))
         engine.close()
 
         # Re-open the same file — data should still be there
@@ -496,7 +486,7 @@ class TestSqlEngineDiskBacked:
         """After close(), another engine can open the same file."""
         db_file = str(tmp_path / "lock.duckdb")
         engine1 = SqlEngine(db_path=db_file)
-        engine1.load_files(_build_index(sql_log_file))
+        engine1.load_entries(_build_entries(sql_log_file))
         engine1.close()
 
         # Should not raise — file lock must be released
@@ -508,7 +498,7 @@ class TestSqlEngineDiskBacked:
     def test_close_idempotent(self, sql_log_file):
         """Calling close() twice should not raise."""
         engine = SqlEngine()
-        engine.load_files(_build_index(sql_log_file))
+        engine.load_entries(_build_entries(sql_log_file))
         engine.close()
         engine.close()  # should not raise
 
@@ -666,26 +656,13 @@ class TestSqlEngineExternalAccessDisabled:
 
 
 class TestSqlEngineGeneratorEntries:
-    """Verify load_files works when index.entries is a one-shot generator."""
+    """Verify load_entries reads its input once: a one-shot generator loads every row."""
 
     def test_generator_entries_populate_both_tables(self, sql_log_file):
         """If entries is a generator, both logs and metrics should be populated."""
-        parser = LogParser()
-        raw_entries = []
-        with open(sql_log_file, encoding="utf-8", errors="replace") as f:
-            for line_number, line in enumerate(f, start=1):
-                line = line.rstrip("\n\r")
-                if line:
-                    raw_entries.append(parser.parse_line(line_number, line))
-
-        class OneShotIndex:
-            """Index whose .entries is a stored generator (exhausted after one pass)."""
-
-            def __init__(self, items):
-                self.entries = (e for e in items)
-
         engine = SqlEngine()
-        engine.load_files({sql_log_file: OneShotIndex(raw_entries)})
+        loaded = engine.load_entries(e for e in _build_entries(sql_log_file))
+        assert loaded == TOTAL_ENTRIES
 
         logs_count = json.loads(engine.query("SELECT COUNT(*) AS cnt FROM logs"))
         assert logs_count[0]["cnt"] == TOTAL_ENTRIES
@@ -743,3 +720,153 @@ class TestSqlEnginePagination:
         # Last page has_more=false → loop breaks without an extra call
         assert call_count == 3
         assert inv.sql_query("SELECT COUNT(*) AS cnt FROM logs")[0]["cnt"] == TOTAL_ENTRIES
+
+
+class TestSqlEngineMetricsOnlyWhenRead:
+    """A caller that loads for one query leaves the metrics table out when the query reads
+    only `logs`."""
+
+    @pytest.mark.parametrize(
+        ("query", "only_logs"),
+        [
+            ("SELECT count(*) FROM logs", True),
+            ("select * from LOGS l where l.level = 'ERROR'", True),
+            ("SELECT * FROM main.logs", True),
+            ("SELECT * FROM logs WHERE message LIKE '%metrics%'", True),
+            ("WITH metrics AS (SELECT level FROM logs) SELECT * FROM metrics", True),
+            ("SELECT field_name FROM metrics", False),
+            ("SELECT * FROM logs l JOIN Metrics m ON l.line_number = m.line_number", False),
+            ("SELECT (SELECT max(value) FROM metrics) FROM logs", False),
+            ("SELECT * FROM query_table('metrics')", False),
+            ("SHOW TABLES", False),
+            ("PRAGMA table_info('metrics')", False),
+            ("SELECT * FROM information_schema.tables", False),
+            ("SELECT 1", False),
+            ("SELEC nonsense", False),
+        ],
+    )
+    def test_reads_only_logs(self, query, only_logs):
+        engine = SqlEngine()
+        try:
+            assert engine.reads_only_logs(query) is only_logs
+        finally:
+            engine.close()
+
+    def test_load_without_metrics_makes_the_logs_table_alone(self, sql_log_file):
+        engine = SqlEngine()
+        try:
+            assert engine.load_entries(_build_entries(sql_log_file), metrics=False) == 40
+            assert engine.get_tables() == ["logs"]
+            assert json.loads(engine.query("SELECT count(*) AS n FROM logs")) == [{"n": 40}]
+        finally:
+            engine.close()
+
+    def test_a_file_the_query_names_is_not_opened_to_find_its_tables(self, tmp_path):
+        """The tables are found before the load, so before file access is locked: DuckDB
+        must refuse the file there too, and the refusal is doubt."""
+        data = tmp_path / "data.csv"
+        data.write_text("a,b\n1,2\n")
+        engine = SqlEngine()
+        try:
+            assert engine.reads_only_logs(f"SELECT * FROM logs, read_csv('{data}')") is False
+        finally:
+            engine.close()
+
+
+def _entry(line_number, **fields):
+    return {
+        "file": "app.log",
+        "line_number": line_number,
+        "timestamp": "2024-01-15T10:00:00Z",
+        "level": "INFO",
+        "message": "m",
+        "raw": "m",
+        **fields,
+    }
+
+
+class TestSqlEngineLoadsAnyLine:
+    """No line a log file can hold stops the load."""
+
+    @pytest.mark.parametrize(
+        ("char", "count"),
+        [("x", 3_000_000), ("\U0001f600", 600_000)],
+        ids=["3 MB of ASCII", "2.4 MB of four-byte characters"],
+    )
+    def test_a_line_longer_than_duckdbs_two_megabyte_default_loads(self, char, count):
+        text = char * count
+        engine = SqlEngine()
+        try:
+            assert engine.load_entries([_entry(1), _entry(2, message=text, raw=text)]) == 2
+            assert json.loads(
+                engine.query(
+                    "SELECT line_number, length(raw) AS raw, length(message) AS message "
+                    "FROM logs ORDER BY line_number"
+                )
+            ) == [
+                {"line_number": 1, "raw": 1, "message": 1},
+                {"line_number": 2, "raw": count, "message": count},
+            ]
+        finally:
+            engine.close()
+
+    def test_rows_go_in_by_chunks_so_the_temp_file_stays_small(self, monkeypatch):
+        """45 lines, each with one number, in chunks of 500 characters. A `logs` row is 52
+        characters for lines 1 to 9 and 54 after, so a chunk fills at 10 rows; a `metrics`
+        row is at most 46. No CSV handed to DuckDB is more than one row over the chunk
+        size, and every row arrives once."""
+        import logler.sql
+
+        monkeypatch.setattr(logler.sql, "_CHUNK_CHARS", 500, raising=False)
+        real = logler.sql._bulk_insert
+        loads = []
+        sizes = []
+
+        def counting(conn, name, columns, path, *rest):
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            loads.append((name, text.count("\n")))
+            sizes.append(len(text))
+            return real(conn, name, columns, path, *rest)
+
+        monkeypatch.setattr(logler.sql, "_bulk_insert", counting)
+        engine = SqlEngine()
+        try:
+            count = engine.load_entries(_entry(n, message=f"took_ms={n}") for n in range(1, 46))
+
+            assert count == 45
+            assert [rows for name, rows in loads if name == "logs"] == [10, 10, 10, 10, 5]
+            assert sum(rows for name, rows in loads if name == "metrics") == 45
+            assert max(sizes) < 500 + 54
+            assert json.loads(
+                engine.query("SELECT list(line_number ORDER BY line_number) AS n FROM logs")
+            ) == [{"n": list(range(1, 46))}]
+            assert json.loads(
+                engine.query("SELECT list(value ORDER BY line_number) AS v FROM metrics")
+            ) == [{"v": [float(n) for n in range(1, 46)]}]
+        finally:
+            engine.close()
+
+
+class TestSqlResultTimes:
+    """Every time in a result row is written the way an entry's time is."""
+
+    def test_times_inside_a_list_or_a_struct(self, loaded_engine):
+        _, rows = loaded_engine.execute(
+            "SELECT list_slice(list(timestamp ORDER BY line_number), 1, 2) AS times, "
+            "{'first': min(timestamp)} AS span FROM logs"
+        )
+
+        assert rows == [
+            {
+                "times": ["2024-01-15T10:00:00Z", "2024-01-15T10:00:01Z"],
+                "span": {"first": "2024-01-15T10:00:00Z"},
+            }
+        ]
+
+    def test_a_time_that_carries_its_zone_keeps_its_instant(self):
+        from logler.sql import _json_value
+
+        tokyo = timezone(timedelta(hours=9))
+
+        assert _json_value(datetime(2024, 1, 15, 19, 0, tzinfo=tokyo)) == "2024-01-15T10:00:00Z"

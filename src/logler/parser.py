@@ -8,7 +8,7 @@ over it, so a line reads the same here as it does in search and the index.
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 from ._search_core import level_text
 
@@ -37,6 +37,26 @@ class LogEntry:
     fields: Dict[str, Any] = field(default_factory=dict)
 
 
+def read_lines(path: str) -> Iterator[Tuple[int, str]]:
+    """A log file's lines, numbered from 1, cut the way the Rust index cuts them: a line ends
+    at "\\n" or "\\r\\n", nothing else is trimmed and no line is skipped. So a reader that
+    parses line by line gives the line numbers and the text that search gives.
+
+    Bytes that are not UTF-8 are replaced.
+    """
+    with open(path, encoding="utf-8", errors="replace", newline="\n") as f:
+        for number, line in enumerate(f, start=1):
+            if line.endswith("\n"):
+                line = line[:-2] if line.endswith("\r\n") else line[:-1]
+            yield number, line
+
+
+def without_leap_second(ts: str) -> str:
+    """Rust's RFC 3339 timestamp with a leap second (":60") read as the last second of its
+    minute: neither ``datetime`` nor a SQL ``TIMESTAMP`` can hold second 60."""
+    return ts.replace(":60", ":59", 1) if ":60" in ts else ts
+
+
 def _to_utc(ts: Optional[str]) -> Optional[datetime]:
     """Rust's RFC 3339 timestamp as an aware UTC datetime.
 
@@ -44,13 +64,10 @@ def _to_utc(ts: Optional[str]) -> Optional[datetime]:
     """
     if not ts:
         return None
-    # A leap second (":60") has no datetime; read it as the last second of the minute.
-    for text in (ts, ts.replace(":60", ":59", 1)):
-        try:
-            return datetime.fromisoformat(text).astimezone(timezone.utc)
-        except (ValueError, OverflowError):
-            continue
-    return None
+    try:
+        return datetime.fromisoformat(without_leap_second(ts)).astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
 
 
 def format_time(ts: datetime) -> str:
@@ -86,10 +103,18 @@ class LogParser:
         fmt = format_for_file(path)
         return cls(custom_regex=fmt.regex) if fmt is not None else cls()
 
-    def parse_line(self, line_number: int, raw: str) -> LogEntry:
-        """Parse a single log line."""
+    def parse_entry(self, line_number: int, raw: str, file: str = "") -> Dict[str, Any]:
+        """One line as the dict the Rust index gives for an entry (``timestamp`` as RFC 3339
+        text, ``level`` as the engine gives it, ``fields``), with the caller's file, line
+        number and raw text. The one reading of a line: ``parse_line`` builds from it."""
         # Rust counts lines as unsigned; the entry keeps the number the caller gave.
         data = json.loads(self._parser.parse_line(max(line_number, 0), raw))
+        data.update(file=file, line_number=line_number, raw=raw)
+        return data
+
+    def parse_line(self, line_number: int, raw: str) -> LogEntry:
+        """Parse a single log line."""
+        data = self.parse_entry(line_number, raw)
         ts = data.get("timestamp")
         return LogEntry(
             line_number=line_number,

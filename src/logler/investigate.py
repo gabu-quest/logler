@@ -281,9 +281,7 @@ class Investigator:
                 ORDER BY count DESC
             ''')
         """
-        engine = self._get_sql_engine()
-        result_json = engine.query(query)
-        return json.loads(result_json)
+        return self._get_sql_engine().execute(query)[1]
 
     def sql_tables(self) -> List[str]:
         """Get list of available SQL tables."""
@@ -314,40 +312,20 @@ class Investigator:
         if self._sql_engine is not None:
             return self._sql_engine
 
-        from types import SimpleNamespace
-
         from logler.sql import SqlEngine
 
+        def entries():
+            offset = 0
+            while True:
+                page = json.loads(self._get_entries_page(offset, self._SQL_ENGINE_PAGE_SIZE))
+                items = page.get("entries", [])
+                yield from items
+                if not items or not page.get("has_more", False):
+                    return
+                offset += self._SQL_ENGINE_PAGE_SIZE
+
         engine = SqlEngine(db_path=self._sql_db_path)
-        offset = 0
-
-        while True:
-            page_json = self._get_entries_page(offset, self._SQL_ENGINE_PAGE_SIZE)
-            page = json.loads(page_json)
-            items = page.get("entries", [])
-            if not items:
-                break
-
-            indices: Dict[str, Any] = {}
-            for entry in items:
-                fp = entry.get("file", "unknown")
-                if fp not in indices:
-                    indices[fp] = SimpleNamespace(entries=[])
-                ns = SimpleNamespace()
-                for k, v in entry.items():
-                    # Rust serializes LogLevel as title-case ("Info");
-                    # normalize to uppercase for consistency with search().
-                    if k == "level" and isinstance(v, str):
-                        v = v.upper()
-                    setattr(ns, k, v)
-                indices[fp].entries.append(ns)
-
-            engine.load_files(indices)
-            offset += self._SQL_ENGINE_PAGE_SIZE
-
-            if not page.get("has_more", False):
-                break
-
+        engine.load_entries(entries())
         self._sql_engine = engine
         return engine
 

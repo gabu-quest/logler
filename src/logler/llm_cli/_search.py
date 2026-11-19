@@ -896,8 +896,12 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
     Execute SQL queries on log files using DuckDB.
 
     Loads log files into a 'logs' table with columns:
-    - line_number, timestamp, level, message, thread_id,
-    - correlation_id, trace_id, span_id, file, raw
+    - file, line_number, timestamp (a TIMESTAMP), level (upper case, UNKNOWN when
+      the line has none), message, thread_id, correlation_id, trace_id, span_id, raw
+
+    and a 'metrics' table of the numeric values found in the lines (built only for a
+    query that reads it):
+    - file, line_number, timestamp, field_name, value, unit
 
     Supports all DuckDB SQL including:
     - Aggregations (COUNT, GROUP BY, HAVING)
@@ -918,6 +922,19 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
     """
     import duckdb
 
+    from ..parser import LogParser, read_lines
+    from ..sql import SqlEngine
+
+    def entries(file_list):
+        """The files' lines as engine entry dicts, one at a time."""
+        for file_path in file_list:
+            try:
+                parser = LogParser.for_file(file_path)
+                for number, line in read_lines(file_path):
+                    yield parser.parse_entry(number, line, file_path)
+            except (FileNotFoundError, PermissionError) as e:
+                _error_json(f"Cannot read file {file_path}: {e}")
+
     with _db_file_source(files, db_path, default_glob="*.log") as file_list:
         # Get query from argument or stdin
         if stdin:
@@ -927,84 +944,11 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
         if not query:
             _error_json("SQL query required. Provide as argument or use --stdin.")
 
-        # Create DuckDB connection and load data
-        # External access stays enabled during CSV bulk load, then locked
-        # before executing the user's SQL query.
-        import csv
-        import os
-        import tempfile
-
-        conn = duckdb.connect(":memory:")
+        engine = SqlEngine()
         try:
-            conn.execute(
-                """
-                    CREATE TABLE logs (
-                        line_number INTEGER,
-                        timestamp VARCHAR,
-                        level VARCHAR,
-                        message VARCHAR,
-                        thread_id VARCHAR,
-                        correlation_id VARCHAR,
-                        trace_id VARCHAR,
-                        span_id VARCHAR,
-                        file VARCHAR,
-                        raw VARCHAR
-                    )
-                """
+            total_entries = engine.load_entries(
+                entries(file_list), metrics=not engine.reads_only_logs(query)
             )
-
-            # Stream-parse log files into a temp CSV, then bulk-load via
-            # read_csv() (230x faster than executemany at scale).
-            from ..parser import LogParser
-
-            total_entries = 0
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                csv_path = os.path.join(tmpdir, "logs.csv")
-                with open(csv_path, "w", newline="") as tmp:
-                    writer = csv.writer(tmp, lineterminator="\n")
-
-                    for file_path in file_list:
-                        try:
-                            parser = LogParser.for_file(file_path)
-                            with open(file_path, "r", errors="replace") as f:
-                                for i, line in enumerate(f):
-                                    line = line.rstrip()
-                                    if not line:
-                                        continue
-
-                                    entry = parser.parse_line(i + 1, line)
-                                    writer.writerow(
-                                        [
-                                            i + 1,
-                                            str(entry.timestamp) if entry.timestamp else None,
-                                            str(entry.level).upper() if entry.level else None,
-                                            entry.message,
-                                            entry.thread_id,
-                                            entry.correlation_id,
-                                            getattr(entry, "trace_id", None),
-                                            getattr(entry, "span_id", None),
-                                            file_path,
-                                            line,
-                                        ]
-                                    )
-                                    total_entries += 1
-                        except (FileNotFoundError, PermissionError) as e:
-                            _error_json(f"Cannot read file {file_path}: {e}")
-
-                if total_entries > 0:
-                    conn.execute(
-                        f"INSERT INTO logs SELECT * FROM read_csv('{csv_path}', "
-                        "header=false, nullstr='', columns={"
-                        "'line_number': 'INTEGER', 'timestamp': 'VARCHAR', "
-                        "'level': 'VARCHAR', 'message': 'VARCHAR', "
-                        "'thread_id': 'VARCHAR', 'correlation_id': 'VARCHAR', "
-                        "'trace_id': 'VARCHAR', 'span_id': 'VARCHAR', "
-                        "'file': 'VARCHAR', 'raw': 'VARCHAR'})"
-                    )
-
-            # Lock filesystem access before running user SQL
-            conn.execute("SET enable_external_access = false")
 
             if total_entries == 0:
                 _output_json(
@@ -1019,15 +963,10 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
                 )
                 sys.exit(EXIT_NO_RESULTS)
 
-            # Execute the user's query
             try:
-                result = conn.execute(query).fetchall()
-                columns = [desc[0] for desc in conn.description]
+                columns, rows = engine.execute(query)
             except duckdb.Error as e:
                 _error_json(f"SQL error: {e}", EXIT_USER_ERROR)
-
-            # Convert results to list of dicts
-            rows = [dict(zip(columns, row)) for row in result]
 
             output = {
                 "query": query,
@@ -1041,4 +980,4 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
             _output_json(output, pretty)
             sys.exit(EXIT_SUCCESS if rows else EXIT_NO_RESULTS)
         finally:
-            conn.close()
+            engine.close()
