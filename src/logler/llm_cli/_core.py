@@ -54,9 +54,29 @@ def _output_json(data: dict[str, Any], pretty: bool = False, err: bool = False) 
         click.echo(json.dumps(data, default=str), err=err)
 
 
-def _error_json(message: str, code: int = EXIT_USER_ERROR, err: bool = False) -> NoReturn:
-    """Output error as JSON and exit."""
-    _output_json({"error": message, "code": code}, err=err)
+def file_error_message(e: BaseException) -> str | None:
+    """The one sentence for a file a command cannot open, read or write: ``<file>: <reason>``.
+
+    ``None`` when ``e`` is not an ``OSError`` that names a file and a reason; the caller then
+    treats it as any other failure. Both the ``llm`` commands and the plain ones take the
+    sentence from here.
+    """
+    if isinstance(e, OSError) and e.filename and e.strerror:
+        return f"{e.filename}: {e.strerror}"
+    return None
+
+
+def _error_json(
+    message: str,
+    code: int = EXIT_USER_ERROR,
+    err: bool = False,
+    file: str | None = None,
+) -> NoReturn:
+    """Output error as JSON and exit; ``file`` adds the key that names the file."""
+    data: dict[str, Any] = {"error": message, "code": code}
+    if file is not None:
+        data["file"] = file
+    _output_json(data, err=err)
     sys.exit(code)
 
 
@@ -90,8 +110,9 @@ def command(
             except LineNotFoundError as e:
                 _error_json(str(e), err=stream)
             except OSError as e:
-                if e.filename and e.strerror:
-                    _error_json(f"{e.filename}: {e.strerror}", err=stream)
+                message = file_error_message(e)
+                if message is not None:
+                    _error_json(message, err=stream, file=str(e.filename))
                 _error_json(f"Internal error: {e}", EXIT_INTERNAL_ERROR, err=stream)
             except Exception as e:
                 _error_json(f"Internal error: {e}", EXIT_INTERNAL_ERROR, err=stream)

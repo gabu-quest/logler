@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from unittest import mock
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -17,6 +18,7 @@ import logler_rs
 from logler.cache import clear_cache
 from logler.cli import main
 from logler.investigate import get_context, get_metadata, search
+from logler.llm_cli._core import command
 
 LINE = "2024-01-15T10:00:00.000Z INFO [worker-1] hello world\n"
 
@@ -126,14 +128,22 @@ class TestLlmSearchExitCodes:
         result = CliRunner().invoke(main, ["llm", "search", unreadable])
         assert result.exit_code == 2, result.output
         data = json.loads(result.output)
-        assert data == {"error": f"{unreadable}: Permission denied", "code": 2}
+        assert data == {
+            "error": f"{unreadable}: Permission denied",
+            "code": 2,
+            "file": unreadable,
+        }
 
     def test_file_deleted_after_the_glob_is_exit_2_and_names_the_file(self, missing):
         with mock.patch("logler.llm_cli._core._expand_globs", return_value=[missing]):
             result = CliRunner().invoke(main, ["llm", "search", "whatever.log"])
         assert result.exit_code == 2, result.output
         data = json.loads(result.output)
-        assert data == {"error": f"{missing}: No such file or directory", "code": 2}
+        assert data == {
+            "error": f"{missing}: No such file or directory",
+            "code": 2,
+            "file": missing,
+        }
 
     @needs_non_root
     def test_a_file_that_cannot_be_written_is_named_without_calling_it_a_read(
@@ -153,6 +163,7 @@ class TestLlmSearchExitCodes:
         assert json.loads(result.output) == {
             "error": f"{home}/.logler/sessions: Permission denied",
             "code": 2,
+            "file": f"{home}/.logler/sessions",
         }
 
     def test_non_io_engine_error_stays_exit_3(self, tmp_path):
@@ -162,6 +173,21 @@ class TestLlmSearchExitCodes:
         # a bad regex is the engine's non-I/O error: still an internal error, never exit 2
         assert result.exit_code == 3, result.output
         assert json.loads(result.output)["code"] == 3
+        assert "file" not in json.loads(result.output)
+
+    def test_an_os_error_with_no_file_name_is_exit_3_and_has_no_file_key(self):
+        group = click.Group()
+
+        @command("oserr_nofile", group=group)
+        def _boom(pretty):
+            raise OSError("no name here")
+
+        result = CliRunner().invoke(group, ["oserr_nofile"])
+        assert result.exit_code == 3, result.output
+        assert json.loads(result.output) == {
+            "error": "Internal error: no name here",
+            "code": 3,
+        }
 
 
 LINES_41 = LINE * 41

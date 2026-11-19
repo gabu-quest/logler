@@ -10,7 +10,19 @@ import click
 
 from .config import FormatFileError
 from .llm_cli import llm as llm_group
+from .llm_cli._core import file_error_message
 from .terminal import TerminalViewer
+
+
+def _exit_on_file_error(e: BaseException) -> None:
+    """A file a command cannot open, read or write is the user's to fix: name it, exit 2.
+
+    Returns when ``e`` names no file, so the caller handles it as any other failure.
+    """
+    message = file_error_message(e)
+    if message is not None:
+        click.echo(f"❌ Error: {message}", err=True)
+        sys.exit(2)
 
 
 class _LoglerGroup(click.Group):
@@ -22,6 +34,9 @@ class _LoglerGroup(click.Group):
         except FormatFileError as e:
             click.echo(f"Error: unusable format file: {e}", err=True)
             sys.exit(2)
+        except OSError as e:
+            _exit_on_file_error(e)
+            raise
 
 
 @click.group(cls=_LoglerGroup, invoke_without_command=True)
@@ -85,6 +100,7 @@ def view(
         except FormatFileError:
             raise
         except Exception as e:
+            _exit_on_file_error(e)
             click.echo(f"❌ Error: {e}", err=True)
             sys.exit(1)
 
@@ -330,6 +346,7 @@ def investigate(
                 except FormatFileError:
                     raise
                 except Exception as e:
+                    _exit_on_file_error(e)
                     console.print(f"[red]❌ Error building hierarchy: {escape(str(e))}[/red]")
                     console.print("[yellow]Falling back to regular thread following...[/yellow]\n")
                     hierarchy = False  # Fall through to regular mode
@@ -453,6 +470,7 @@ def investigate(
     except FormatFileError:
         raise
     except Exception as e:
+        _exit_on_file_error(e)
         Console(stderr=True).print(f"[red]❌ Error:[/red] {escape(str(e))}")
         if "--debug" in sys.argv:
             import traceback
@@ -463,7 +481,13 @@ def investigate(
 
 @main.command()
 @click.argument("pattern", required=True)
-@click.option("--directory", "-d", default=".", help="Directory to watch")
+@click.option(
+    "--directory",
+    "-d",
+    default=".",
+    type=click.Path(exists=True, file_okay=False),
+    help="Directory to watch",
+)
 @click.option("--recursive", "-r", is_flag=True, help="Watch recursively")
 def watch(pattern: str, directory: str, recursive: bool):
     """

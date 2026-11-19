@@ -42,6 +42,14 @@ All commands use consistent exit codes for automation:
 | 2 | User error (invalid arguments, a file that is missing or cannot be read, a line number the file has no entry for, a formats file that cannot be used) |
 | 3 | Internal error |
 
+An error is a JSON object `{"error": "<text>", "code": <exit code>}`. When the error is a file the command could not open, read or write, the object also has a `file` key with that file's name, and `error` is `<file>: <reason>`:
+
+```json
+{"error": "/var/log/app.log: Permission denied", "code": 2, "file": "/var/log/app.log"}
+```
+
+An error that names no file has no `file` key.
+
 ---
 
 ## Command Reference

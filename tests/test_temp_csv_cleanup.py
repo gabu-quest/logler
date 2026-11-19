@@ -100,5 +100,9 @@ def test_cli_sql_unreadable_second_file_leaves_nothing(tmp_path):
     unreadable.chmod(0)
     result, scratch = _run_sql_cli(tmp_path, [log, unreadable])
     assert result.returncode == 2
-    assert json.loads(result.stdout) == {"error": f"{unreadable}: Permission denied", "code": 2}
+    assert json.loads(result.stdout) == {
+        "error": f"{unreadable}: Permission denied",
+        "code": 2,
+        "file": str(unreadable),
+    }
     assert list(scratch.iterdir()) == []
