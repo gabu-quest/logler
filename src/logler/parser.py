@@ -1,27 +1,21 @@
 """
-Log parsing module with support for multiple formats.
+Line parsing for the commands that read files themselves.
+
+There is one parser: the Rust one in ``logler_core``. ``LogParser`` here is a thin adapter
+over it, so a line reads the same here as it does in search and the index.
 """
 
-import re
 import json
-from datetime import datetime
-from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
-from enum import Enum
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
+from ._search_core import _level_name
 
-class LogLevel(str, Enum):
-    """Log levels."""
-
-    TRACE = "TRACE"
-    DEBUG = "DEBUG"
-    INFO = "INFO"
-    WARN = "WARN"
-    WARNING = "WARNING"
-    ERROR = "ERROR"
-    CRITICAL = "CRITICAL"
-    FATAL = "FATAL"
-    UNKNOWN = "UNKNOWN"
+try:
+    import logler_rs
+except ImportError:  # the extension is not installed
+    logler_rs = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -37,174 +31,66 @@ class LogEntry:
     correlation_id: Optional[str] = None
     trace_id: Optional[str] = None
     span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
     service_name: Optional[str] = None
     format: Optional[str] = None
     fields: Dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
-        """Ensure message is set."""
-        if not self.message and self.raw:
-            self.message = self.raw
+
+def _to_utc(ts: Optional[str]) -> Optional[datetime]:
+    """Rust's RFC 3339 timestamp as an aware UTC datetime.
+
+    ``None`` for a time ``datetime`` cannot hold: a year before 1 or after 9999.
+    """
+    if not ts:
+        return None
+    # A leap second (":60") has no datetime; read it as the last second of the minute.
+    for text in (ts, ts.replace(":60", ":59", 1)):
+        try:
+            return datetime.fromisoformat(text).astimezone(timezone.utc)
+        except (ValueError, OverflowError):
+            continue
+    return None
 
 
 class LogParser:
-    """Parse log entries from various formats."""
+    """Parse single log lines with the Rust parser."""
 
-    # Regex patterns
-    PATTERNS = {
-        "timestamp": re.compile(
-            r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
-        ),
-        "log_level": re.compile(
-            r"\b(TRACE|DEBUG|INFO|INFORMATION|WARN|WARNING|ERROR|ERR|FATAL|CRITICAL|CRIT)\b",
-            re.IGNORECASE,
-        ),
-        "thread_id": re.compile(r"(?:thread[=:\s]+|tid[=:\s]+|\[)([a-zA-Z0-9_-]+)(?:\])?"),
-        "correlation_id": re.compile(
-            r"(?:correlation[_-]?id|request[_-]?id|req[_-]?id)[=:\s]+([a-zA-Z0-9_-]+)"
-        ),
-        "trace_id": re.compile(r"(?:trace[_-]?id|traceId)[=:\s]+([a-fA-F0-9]{16,32})"),
-        "span_id": re.compile(r"(?:span[_-]?id|spanId)[=:\s]+([a-fA-F0-9]{8,16})"),
-    }
+    def __init__(
+        self,
+        force_format: Optional[str] = None,
+        custom_regex: Optional[str] = None,
+    ):
+        if logler_rs is None:
+            raise RuntimeError("Rust backend not available")
+        self._parser = logler_rs.PyLineParser(force_format=force_format, custom_regex=custom_regex)
 
     def parse_line(self, line_number: int, raw: str) -> LogEntry:
         """Parse a single log line."""
-        # Try JSON first
-        if raw.strip().startswith("{"):
-            try:
-                data = json.loads(raw.strip())
-                return self._parse_json(line_number, raw, data)
-            except (json.JSONDecodeError, ValueError):
-                pass
+        # Rust counts lines as unsigned; the entry keeps the number the caller gave.
+        data = json.loads(self._parser.parse_line(max(line_number, 0), raw))
+        ts = data.get("timestamp")
+        level = data.get("level")
+        return LogEntry(
+            line_number=line_number,
+            raw=raw,
+            timestamp=_to_utc(ts),
+            level=level.upper() if level else "UNKNOWN",
+            message=data["message"],
+            thread_id=data.get("thread_id"),
+            correlation_id=data.get("correlation_id"),
+            trace_id=data.get("trace_id"),
+            span_id=data.get("span_id"),
+            parent_span_id=data.get("parent_span_id"),
+            service_name=data.get("service_name"),
+            format=data["format"],
+            fields=data.get("fields") or {},
+        )
 
-        # Parse as plain text
-        return self._parse_plain(line_number, raw)
 
-    def _parse_json(self, line_number: int, raw: str, data: dict) -> LogEntry:
-        """Parse JSON log entry."""
-        entry = LogEntry(line_number=line_number, raw=raw)
-        entry.format = "Json"
+def normalize_level_name(name: str) -> str:
+    """Spell a user-given level the way entries report it (warning -> WARN, err -> ERROR).
 
-        # Extract timestamp
-        for ts_field in ["timestamp", "time", "ts", "@timestamp", "datetime"]:
-            if ts_field in data:
-                try:
-                    ts_str = str(data[ts_field])
-                    entry.timestamp = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    pass
-                break
-
-        # Extract level
-        for level_field in ["level", "severity", "loglevel", "lvl"]:
-            if level_field in data:
-                entry.level = str(data[level_field]).upper()
-                break
-
-        # Extract message
-        for msg_field in ["message", "msg", "text", "content"]:
-            if msg_field in data:
-                entry.message = str(data[msg_field])
-                break
-
-        # Extract thread ID
-        for thread_field in ["thread", "thread_id", "threadId", "tid"]:
-            if thread_field in data:
-                entry.thread_id = str(data[thread_field])
-                break
-
-        # Extract correlation ID
-        for corr_field in ["correlation_id", "correlationId", "request_id", "requestId"]:
-            if corr_field in data:
-                entry.correlation_id = str(data[corr_field])
-                break
-
-        # Extract trace/span IDs
-        if "trace_id" in data or "traceId" in data:
-            entry.trace_id = str(data.get("trace_id") or data.get("traceId"))
-        if "span_id" in data or "spanId" in data:
-            entry.span_id = str(data.get("span_id") or data.get("spanId"))
-
-        # Extract service name
-        for service_field in ["service", "service_name", "serviceName"]:
-            if service_field in data:
-                entry.service_name = str(data[service_field])
-                break
-
-        # Store other fields
-        skip_fields = {
-            "timestamp",
-            "time",
-            "ts",
-            "@timestamp",
-            "datetime",
-            "level",
-            "severity",
-            "loglevel",
-            "lvl",
-            "message",
-            "msg",
-            "text",
-            "content",
-            "thread",
-            "thread_id",
-            "threadId",
-            "tid",
-            "correlation_id",
-            "correlationId",
-            "request_id",
-            "requestId",
-            "trace_id",
-            "traceId",
-            "span_id",
-            "spanId",
-            "service",
-            "service_name",
-            "serviceName",
-        }
-        entry.fields = {k: v for k, v in data.items() if k not in skip_fields}
-
-        return entry
-
-    def _parse_plain(self, line_number: int, raw: str) -> LogEntry:
-        """Parse plain text log entry."""
-        entry = LogEntry(line_number=line_number, raw=raw, message=raw)
-        entry.format = "PlainText"
-
-        # Extract timestamp
-        ts_match = self.PATTERNS["timestamp"].search(raw)
-        if ts_match:
-            try:
-                ts_str = ts_match.group(0)
-                entry.timestamp = datetime.fromisoformat(
-                    ts_str.replace(" ", "T").replace("Z", "+00:00")
-                )
-            except ValueError:
-                pass
-
-        # Extract log level
-        level_match = self.PATTERNS["log_level"].search(raw)
-        if level_match:
-            entry.level = level_match.group(1).upper()
-
-        # Extract thread ID
-        thread_match = self.PATTERNS["thread_id"].search(raw)
-        if thread_match:
-            entry.thread_id = thread_match.group(1)
-
-        # Extract correlation ID
-        corr_match = self.PATTERNS["correlation_id"].search(raw)
-        if corr_match:
-            entry.correlation_id = corr_match.group(1)
-
-        # Extract trace ID
-        trace_match = self.PATTERNS["trace_id"].search(raw)
-        if trace_match:
-            entry.trace_id = trace_match.group(1)
-
-        # Extract span ID
-        span_match = self.PATTERNS["span_id"].search(raw)
-        if span_match:
-            entry.span_id = span_match.group(1)
-
-        return entry
+    Raises ``ValueError`` for a word that names no level.
+    """
+    return _level_name(name).upper()

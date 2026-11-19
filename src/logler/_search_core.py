@@ -44,8 +44,7 @@ except ImportError as _exc:
 def _normalize_entry(entry: Dict[str, Any]) -> None:
     """Normalize a single log entry in-place (uppercase level, detect format)."""
     if "level" in entry:
-        raw_level = str(entry["level"]).upper().strip()
-        entry["level"] = _LEVEL_MAP.get(raw_level, raw_level)
+        entry["level"] = str(entry["level"]).upper().strip()
 
     # Infer syslog level if missing
     if not entry.get("level") and entry.get("fields", {}).get("priority"):
@@ -245,17 +244,19 @@ def _build_time_range(
     return result
 
 
-# Level normalisation map — values must be Rust enum variant names (title case).
-_LEVEL_MAP = {
-    "trace": "Trace",
-    "debug": "Debug",
-    "info": "Info",
-    "warn": "Warn",
-    "warning": "Warn",
-    "error": "Error",
-    "fatal": "Fatal",
-    "critical": "Fatal",
-}
+def _level_name(word: str) -> str:
+    """The Rust name (``Warn``) of the level a user-given word names (``warning``, ``ERR``).
+
+    The words are the Rust parser's own table, read through the extension, so a level the
+    parser reads can be asked for by the same word. Raises ``ValueError`` for a word that
+    names no level.
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+    name = logler_rs.level_name(word)
+    if name is None:
+        raise ValueError(f"Unknown log level: {word.strip().lower()}")
+    return name
 
 
 def _parse_levels(level_str: str) -> List[str]:
@@ -263,19 +264,10 @@ def _parse_levels(level_str: str) -> List[str]:
 
     Example::
 
-        >>> _parse_levels("ERROR,warn,info")
-        ["Error", "Warn", "Info"]
+        >>> _parse_levels("ERROR,warn,crit")
+        ["Error", "Warn", "Fatal"]
     """
-    result = []
-    for part in level_str.split(","):
-        part = part.strip().lower()
-        if not part:
-            continue
-        mapped = _LEVEL_MAP.get(part)
-        if not mapped:
-            raise ValueError(f"Unknown log level: {part}")
-        result.append(mapped)
-    return result
+    return [_level_name(part) for part in level_str.split(",") if part.strip()]
 
 
 # ---------------------------------------------------------------------------

@@ -37,18 +37,7 @@ impl PyInvestigator {
     ) -> PyResult<()> {
         let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
 
-        let mut config = logler_core::ParserConfig::new();
-
-        if let Some(format_str) = force_format.as_ref() {
-            let fmt = parse_format_string(format_str)?;
-            config = config.with_force_format(fmt);
-        }
-
-        if let Some(re) = custom_regex.as_ref() {
-            let regex = Regex::new(re)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
-            config = config.with_custom_regex(regex);
-        }
+        let config = build_parser_config(force_format.as_deref(), custom_regex.as_deref())?;
 
         self.investigator
             .load_files_with_config(&paths, &config)
@@ -346,10 +335,58 @@ fn extract_ids(files: Vec<String>, filters_json: Option<String>) -> PyResult<Str
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
 }
 
+/// Parses single log lines with the same parser the index uses.
+#[pyclass]
+struct PyLineParser {
+    parser: logler_core::parser::LogParser,
+}
+
+#[pymethods]
+impl PyLineParser {
+    #[new]
+    #[pyo3(signature = (file_name=None, force_format=None, custom_regex=None))]
+    fn new(
+        file_name: Option<String>,
+        force_format: Option<String>,
+        custom_regex: Option<String>,
+    ) -> PyResult<Self> {
+        let config = build_parser_config(force_format.as_deref(), custom_regex.as_deref())?;
+        Ok(Self {
+            parser: config.build_for_file(file_name.unwrap_or_default()),
+        })
+    }
+
+    /// Parse one line; returns the entry as JSON (same shape as `get_entries_page`).
+    fn parse_line(&self, line_number: usize, raw: &str) -> PyResult<String> {
+        let entry = self
+            .parser
+            .parse_line(line_number, raw)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        serde_json::to_string(&entry)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+}
+
+/// The level a word names (`warning`, `ERR`, `Crit`), spelled as entries and filters spell
+/// it (`Warn`, `Error`, `Fatal`); `None` for a word that names no level. The words are the
+/// parser's own table, so a level the parser reads can always be asked for by the same word.
+/// `unknown` names the level of a line whose level word is not in that table.
+#[pyfunction]
+fn level_name(word: &str) -> Option<String> {
+    let word = word.trim();
+    let level = LogLevel::from_word(word).or_else(|| {
+        word.eq_ignore_ascii_case("unknown")
+            .then_some(LogLevel::Unknown)
+    })?;
+    serde_json::to_value(level).ok()?.as_str().map(String::from)
+}
+
 /// Python module
 #[pymodule]
 fn logler_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyInvestigator>()?;
+    m.add_class::<PyLineParser>()?;
+    m.add_function(wrap_pyfunction!(level_name, m)?)?;
     m.add_function(wrap_pyfunction!(search, m)?)?;
     m.add_function(wrap_pyfunction!(follow_thread, m)?)?;
     m.add_function(wrap_pyfunction!(find_patterns, m)?)?;
@@ -357,6 +394,26 @@ fn logler_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_hierarchy, m)?)?;
     m.add_function(wrap_pyfunction!(extract_ids, m)?)?;
     Ok(())
+}
+
+/// The one place a format name and a regex string become a `ParserConfig`.
+fn build_parser_config(
+    force_format: Option<&str>,
+    custom_regex: Option<&str>,
+) -> PyResult<logler_core::ParserConfig> {
+    let mut config = logler_core::ParserConfig::new();
+
+    if let Some(format_str) = force_format {
+        config = config.with_force_format(parse_format_string(format_str)?);
+    }
+
+    if let Some(re) = custom_regex {
+        let regex = Regex::new(re)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        config = config.with_custom_regex(regex);
+    }
+
+    Ok(config)
 }
 
 fn parse_format_string(fmt: &str) -> PyResult<logler_core::LogFormat> {

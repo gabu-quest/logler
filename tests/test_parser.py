@@ -31,7 +31,7 @@ def test_parse_plain_entry_extracts_metadata():
     entry = parser.parse_line(5, line)
 
     assert entry.line_number == 5
-    assert entry.timestamp == datetime(2024, 1, 2, 13, 14, 15)
+    assert entry.timestamp == datetime(2024, 1, 2, 13, 14, 15, tzinfo=timezone.utc)
     assert entry.level == "INFO"
     assert entry.thread_id == "thread-9"
     assert entry.correlation_id == "xyz"

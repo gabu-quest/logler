@@ -13,7 +13,7 @@ import re
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 @click.group()
@@ -188,8 +188,6 @@ def _parse_time_arg(value: str, flag_name: str) -> str:
         # Relative time: subtract duration from now
         try:
             delta = _parse_duration(value[1:])
-            from datetime import timezone
-
             return (datetime.now(timezone.utc) - delta).isoformat()
         except ValueError:
             _error_json(
@@ -197,9 +195,13 @@ def _parse_time_arg(value: str, flag_name: str) -> str:
                 f"Use format like '-30m', '-2h', '-1d'"
             )
     else:
-        # Absolute ISO8601 timestamp
+        # Absolute ISO8601 timestamp. Without a zone it is UTC, as a log timestamp without
+        # one is; every entry's time is zone-aware, so the bound must be too.
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.isoformat()
         except ValueError:
             _error_json(f"Invalid timestamp format for {flag_name}: {value}")
 

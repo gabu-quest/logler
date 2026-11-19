@@ -63,7 +63,6 @@ from ._search_core import (  # noqa: F401
     _select_diverse_samples,
     _load_files_with_config,
     _auto_detect_format_from_config,
-    _LEVEL_MAP,
 )
 
 # ---------------------------------------------------------------------------
