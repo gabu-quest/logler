@@ -322,8 +322,9 @@ def emit(
             tail_entries = buffer[-tail_n:] if tail_n else buffer
             for out in tail_entries:
                 click.echo(json.dumps(out, default=str))
+            emitted = len(tail_entries)
 
-        sys.exit(EXIT_SUCCESS)
+        sys.exit(EXIT_SUCCESS if emitted else EXIT_NO_RESULTS)
 
 
 @command()

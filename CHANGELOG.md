@@ -16,6 +16,7 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 - **A line number the file has no entry for is the caller's error.** `get_context()` raises `ValueError` (`LineNotFoundError`) with `<file>: no entry at line N`, where it raised `RuntimeError`, or `OverflowError` for a negative line. `llm context` exits 2 with that text, where it exited 3.
 - **A `representative` sample comes back in file order.** It was grouped by level.
 - **`llm emit --pretty` is removed.**
+- **`llm emit` exits 1 when nothing matches**, like every other `llm` command. It exited 0.
 - **`LogReader.tail(0)` gives no lines.** It gave the whole file.
 - **Fields of the pydantic models in `logler.models` follow the API's names:** `FileMetadata.lines` (was `line_count`) and `log_levels` (was `level_distribution`), `PatternMatch.occurrences` (was `count`), `SamplingResult.samples` (was `entries`). `SpanNode.entry_ids` holds the entries' ids as text.
 - **Importing logler never starts a build.** Without the compiled extension the import warns once and says how to build it.

@@ -110,6 +110,18 @@ class TestTriageCommand:
 class TestEmitCommand:
     """Tests for logler llm emit"""
 
+    @pytest.mark.parametrize("mode", [[], ["--tail", "5"]])
+    def test_no_match_prints_nothing_and_exits_1(self, three_hour_log, mode):
+        code, stdout, _ = invoke(["emit", three_hour_log, "--query", "no-such-text", *mode])
+        assert stdout == ""
+        assert code == EXIT_NO_RESULTS
+
+    @pytest.mark.parametrize("mode", [[], ["--tail", "5"]])
+    def test_a_match_exits_0(self, three_hour_log, mode):
+        code, stdout, _ = invoke(["emit", three_hour_log, "--query", "middle", *mode])
+        assert [json.loads(line)["line_number"] for line in stdout.splitlines()] == [2]
+        assert code == EXIT_SUCCESS
+
     def test_emit_basic(self, sample_log_file):
         """Test basic JSONL emission."""
         result = run_llm_command(["emit", sample_log_file])

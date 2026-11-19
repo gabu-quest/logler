@@ -42,8 +42,6 @@ All commands use consistent exit codes for automation:
 | 2 | User error (invalid arguments, a file that is missing or cannot be read, a line number the file has no entry for, a formats file that cannot be used) |
 | 3 | Internal error |
 
-`emit` writes a stream and has no code 1: when nothing matches it prints nothing and exits 0.
-
 ---
 
 ## Command Reference
@@ -901,7 +899,7 @@ logler llm emit app.log --exclude-level DEBUG --exclude-query "health"
 {"file":"app.log","line_number":1523,"timestamp":"2024-01-15T10:05:23Z","level":"ERROR","message":"Database timeout","thread_id":"worker-1"}
 ```
 
-When nothing matches, `emit` prints nothing and exits 0.
+When nothing matches, `emit` prints nothing and exits 1.
 
 ---
 
