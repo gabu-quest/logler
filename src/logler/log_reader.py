@@ -110,7 +110,7 @@ class LogReader:
             # Read in chunks from the end
             buffer = b""
             position = file_size
-            lines = []
+            lines: list[str] = []
 
             while position > 0:
                 # Determine chunk size
@@ -153,8 +153,7 @@ class LogReader:
             if max_lines:
                 lines_to_yield = lines_to_yield[:max_lines]
 
-            for line in lines_to_yield:
-                yield line
+            yield from lines_to_yield
 
     def tail(
         self, num_lines: int = 10, follow: bool = False, sleep_interval: float = 0.1
@@ -178,18 +177,18 @@ class LogReader:
         # One handle serves the first lines and the follow, so they share one position:
         # the first lines end where the follow begins, at the end of the last complete line.
         with open(self.file_path, "rb") as f:
-            lines = CompleteLines(f)
-            for line in deque(lines, maxlen=num_lines):
+            complete = CompleteLines(f)
+            for line in deque(complete, maxlen=num_lines):
                 yield line.rstrip("\n\r")
 
             while True:
-                for line in lines:
+                for line in complete:
                     yield line.rstrip("\n\r")
 
                 if os.fstat(f.fileno()).st_size < f.tell():
                     # File was truncated (log rotation), start from beginning
                     f.seek(0)
-                    lines = CompleteLines(f)
+                    complete = CompleteLines(f)
                 else:
                     time.sleep(sleep_interval)
 
@@ -267,11 +266,12 @@ class LogReader:
     @staticmethod
     def _format_bytes(size: int) -> str:
         """Format bytes to human-readable string."""
+        value = float(size)
         for unit in ["B", "KB", "MB", "GB", "TB"]:
-            if size < 1024.0:
-                return f"{size:.2f} {unit}"
-            size /= 1024.0
-        return f"{size:.2f} PB"
+            if value < 1024.0:
+                return f"{value:.2f} {unit}"
+            value /= 1024.0
+        return f"{value:.2f} PB"
 
     def count_lines(self) -> int:
         """

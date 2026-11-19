@@ -50,9 +50,9 @@ def schema(files: tuple, db_path: str | None, sample_size: int, full: bool, pret
 
     with _db_file_source(files, db_path) as file_list:
         # Track schema information
-        field_presence = defaultdict(int)
-        level_values = defaultdict(int)
-        format_counts = defaultdict(int)
+        field_presence: defaultdict[str, int] = defaultdict(int)
+        level_values: defaultdict[str, int] = defaultdict(int)
+        format_counts: defaultdict[str, int] = defaultdict(int)
         thread_patterns = set()
         correlation_patterns = set()
         custom_fields = set()
@@ -119,7 +119,7 @@ def schema(files: tuple, db_path: str | None, sample_size: int, full: bool, pret
             sys.exit(EXIT_NO_RESULTS)
 
         # Build schema output
-        schema_data = {}
+        schema_data: dict[str, dict[str, Any]] = {}
         for field, count in field_presence.items():
             presence = count / total_entries
             schema_data[field] = {"present": round(presence, 3)}
@@ -569,7 +569,7 @@ def sample(
         # Post-filter by exclude_level, service, and time
         entries = result.get("samples", []) or result.get("entries", [])
         if exclude_level:
-            excl_set = _level_texts(exclude_level)
+            excl_set = _level_texts(exclude_level) or set()
             entries = [e for e in entries if level_text(e.get("level")) not in excl_set]
         if service:
             svc_set = {s.strip() for s in service.split(",")}
@@ -588,7 +588,7 @@ def sample(
         result["samples"] = entries
 
         # Build output
-        output = {
+        output: dict[str, Any] = {
             "population": {
                 "total_entries": result.get("total_population", 0),
                 "files": file_list,
@@ -769,10 +769,10 @@ def summarize(
 
         # Collect stats
         total = 0
-        by_level = defaultdict(int)
-        errors = []
-        warnings = []
-        unique_errors = defaultdict(int)
+        by_level: defaultdict[str, int] = defaultdict(int)
+        errors: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        unique_errors: defaultdict[str, int] = defaultdict(int)
         first_time = last_time = first_text = last_text = None
         correlation_ids = set()
 

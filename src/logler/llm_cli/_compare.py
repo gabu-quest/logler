@@ -49,7 +49,7 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool, db_path: str | None)
             if not entries:
                 return {"id": req_id, "found": False}
 
-            levels = defaultdict(int)
+            levels: defaultdict[str, int] = defaultdict(int)
             messages = []
             timestamps = []
             errors = []
@@ -276,7 +276,7 @@ def diff(
             if not entries:
                 return {"total": 0, "error_rate": 0, "by_level": {}}
 
-            by_level = defaultdict(int)
+            by_level: defaultdict[str, int] = defaultdict(int)
             errors = 0
             for e in entries:
                 lvl = level_text(e.level)

@@ -4,6 +4,7 @@ Command-line interface for Logler.
 
 import asyncio
 import sys
+from typing import Any
 
 import click
 
@@ -109,7 +110,7 @@ def stats(files: tuple, output_json: bool):
         parser = LogParser.for_file(file_path)
         entries = [parser.parse_line(number, line) for number, line in read_lines(file_path)]
 
-        stats_data = {
+        stats_data: dict[str, Any] = {
             "total": len(entries),
             "by_level": {},
             "by_thread": {},
@@ -265,7 +266,7 @@ def investigate(
 
         # Thread/correlation following mode
         elif thread or correlation or trace:
-            identifier = thread or correlation or trace
+            identifier = thread or correlation or trace or ""  # one of them is set here
             id_type = "thread" if thread else "correlation" if correlation else "trace"
 
             # Hierarchy mode

@@ -68,8 +68,8 @@ def cross_service_timeline(
         raise RuntimeError("Rust backend not available")
 
     # Collect entries from all services
-    all_entries = []
-    service_counts = defaultdict(int)
+    all_entries: list[dict[str, Any]] = []
+    service_counts: defaultdict[str, int] = defaultdict(int)
 
     for service_name_key, service_files in files.items():
         if correlation_id:
@@ -117,8 +117,8 @@ def cross_service_timeline(
                 if start_dt <= ts <= end_dt:
                     filtered.append(e)
             all_entries = filtered
-        except Exception as e:
-            warnings.warn(f"Could not parse time window: {e}", stacklevel=2)
+        except Exception as exc:
+            warnings.warn(f"Could not parse time window: {exc}", stacklevel=2)
 
     # Parse timestamps and sort by actual datetime (lexicographic sort
     # fails when timestamps have mixed timezone offsets)
@@ -342,7 +342,7 @@ def _analyze_thread(entries: list[dict], thread_id: str) -> dict[str, Any]:
         }
 
     # Count log levels
-    level_counts = defaultdict(int)
+    level_counts: defaultdict[str, int] = defaultdict(int)
     error_count = 0
     messages = []
     services = set()
@@ -454,7 +454,7 @@ def _generate_comparison_summary(analysis_a: dict, analysis_b: dict, differences
 
 def _analyze_period(entries: list[dict], start: str, end: str) -> dict[str, Any]:
     """Analyse a time period's entries."""
-    level_counts = defaultdict(int)
+    level_counts: defaultdict[str, int] = defaultdict(int)
     error_messages = []
     threads = set()
 

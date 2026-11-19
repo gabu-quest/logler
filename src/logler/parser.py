@@ -17,7 +17,7 @@ from ._search_core import level_text
 try:
     import logler_rs
 except ImportError:  # the extension is not installed
-    logler_rs = None  # type: ignore[assignment]
+    logler_rs = None  # type: ignore[assignment]  # the extension is optional at import; None says it is absent
 
 
 @dataclass

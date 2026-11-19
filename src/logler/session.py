@@ -37,9 +37,9 @@ class InvestigationSession:
     def __init__(self, files: list[str] | None = None, name: str | None = None):
         self.files = files or []
         self.name = name or f"investigation_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        self.history = []
+        self.history: list[dict[str, Any]] = []
         self.current_index = -1
-        self.metadata = {}
+        self.metadata: dict[str, Any] = {}
 
         if files:
             self._add_to_history("init", "Initialize investigation", {"files": files}, None)

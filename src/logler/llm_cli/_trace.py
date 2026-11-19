@@ -444,6 +444,7 @@ def export_trace(
             node_to_span(root)
 
         # Format output based on target format
+        trace_output: dict[str, Any] | list[dict[str, Any]]
         if export_format == "jaeger":
             trace_output = {
                 "data": [

@@ -495,7 +495,7 @@ def find_patterns(
     return result
 
 
-def get_metadata(files: list[str]) -> dict[str, Any]:
+def get_metadata(files: list[str]) -> list[dict[str, Any]]:
     """Get metadata about log files.
 
     Args:
@@ -541,7 +541,7 @@ def _format_as_summary(result: dict[str, Any]) -> dict[str, Any]:
         }
 
     # Group by message
-    message_groups = defaultdict(
+    message_groups: defaultdict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "count": 0,
             "first_seen": None,
@@ -551,8 +551,8 @@ def _format_as_summary(result: dict[str, Any]) -> dict[str, Any]:
         }
     )
 
-    level_counts = defaultdict(int)
-    file_counts = defaultdict(int)
+    level_counts: defaultdict[str, int] = defaultdict(int)
+    file_counts: defaultdict[str, int] = defaultdict(int)
 
     for item in results:
         entry = item.get("entry", {})
@@ -626,8 +626,8 @@ def _format_as_count(result: dict[str, Any]) -> dict[str, Any]:
     if not results:
         return {"total_matches": 0, "by_level": {}, "by_file": {}, "time_range": None}
 
-    level_counts = defaultdict(int)
-    file_counts = defaultdict(int)
+    level_counts: defaultdict[str, int] = defaultdict(int)
+    file_counts: defaultdict[str, int] = defaultdict(int)
     timestamps = []
 
     for item in results:

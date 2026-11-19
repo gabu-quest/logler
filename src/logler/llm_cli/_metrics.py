@@ -6,6 +6,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -60,8 +61,10 @@ def verify_pattern(
 
         matches = []
         total_entries = 0
-        group_values = defaultdict(lambda: defaultdict(int))
-        by_thread = defaultdict(int)
+        group_values: defaultdict[str, defaultdict[str, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
+        by_thread: defaultdict[str, int] = defaultdict(int)
         first_match = None
         last_match = None
 
@@ -107,7 +110,7 @@ def verify_pattern(
                 _error_json(f"Permission denied: {file_path}")
 
         # Build output
-        output = {
+        output: dict[str, Any] = {
             "pattern": pattern,
             "hypothesis": hypothesis,
             "verified": len(matches) > 0,
@@ -225,7 +228,7 @@ def emit(
 
         # Collect entries (for tail mode we need to buffer)
         emitted = 0
-        buffer = [] if tail_n else None
+        buffer: list[dict[str, Any]] | None = [] if tail_n else None
 
         for file_path in file_list:
             try:

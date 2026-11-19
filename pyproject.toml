@@ -40,6 +40,10 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff==0.17.5",
+    "mypy==2.4.1",
+    "opentelemetry-api==1.45.2",
+    "types-pyyaml==6.0.12.20261113",
+    "types-pytz==2026.6.0.20261031",
     "maturin>=1.10.0",
     "patchelf>=0.17.0",
     "marimo>=0.17.6",
@@ -95,6 +99,17 @@ allowed-confusables = ["×", "ℹ", "➕", "➖"]
 [tool.ruff.format]
 # The examples in the docs keep one argument per line where that reads better.
 exclude = ["*.md"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+files = ["src/logler"]
+# The extension's stub sits beside its package under src/, so the checker reads it from there
+# whether or not the wheel is installed.
+mypy_path = "src"
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

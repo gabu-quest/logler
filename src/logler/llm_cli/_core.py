@@ -13,7 +13,7 @@ import sys
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import click
 
@@ -54,7 +54,7 @@ def _output_json(data: dict[str, Any], pretty: bool = False, err: bool = False) 
         click.echo(json.dumps(data, default=str), err=err)
 
 
-def _error_json(message: str, code: int = EXIT_USER_ERROR, err: bool = False) -> None:
+def _error_json(message: str, code: int = EXIT_USER_ERROR, err: bool = False) -> NoReturn:
     """Output error as JSON and exit."""
     _output_json({"error": message, "code": code}, err=err)
     sys.exit(code)

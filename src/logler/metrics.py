@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
@@ -109,7 +109,7 @@ _DURATION_PATTERN = re.compile(
 
 
 def extract_numeric_fields(
-    entries: Sequence[dict[str, Any]],
+    entries: Sequence[Mapping[str, Any]],
 ) -> dict[str, list[DataPoint]]:
     """Extract all numeric fields from a sequence of log entries.
 
@@ -335,8 +335,9 @@ def aggregate_time_buckets(
     delta = _parse_bucket_duration(bucket_size)
 
     # Filter and sort by timestamp
-    timestamped = [(p, to_utc(p.timestamp)) for p in points if p.timestamp]
-    timestamped = [(p, ts) for p, ts in timestamped if ts is not None]
+    timestamped = [
+        (p, ts) for p in points if p.timestamp and (ts := to_utc(p.timestamp)) is not None
+    ]
 
     if not timestamped:
         return []

@@ -117,6 +117,12 @@ uv run ruff check
 uv run ruff format --check
 ```
 
+Type-check the package (settings in `[tool.mypy]`, 0 errors expected; a CI step would run the same line):
+
+```bash
+uv run mypy
+```
+
 ### Stale .so gotcha
 
 After Rust changes, `maturin develop` may not update the extension.

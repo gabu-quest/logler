@@ -223,7 +223,7 @@ def analyze_error_flow(
         >>> if analysis["has_errors"]:
         ...     print(f"Root cause: {analysis['root_causes'][0]['node_id']}")
     """
-    result = {
+    result: dict[str, Any] = {
         "has_errors": False,
         "total_error_nodes": 0,
         "root_causes": [],
@@ -289,7 +289,7 @@ def analyze_error_flow(
         node_id = error_node["node_id"]
 
         # Build path from root to this node
-        path = []
+        path: list[str] = []
         current = node_id
         while current:
             path.insert(0, current)
@@ -357,7 +357,7 @@ def analyze_error_flow(
     max_depth = max((rc["depth"] for rc in root_causes), default=0)
 
     # Count concurrent failures (root causes at same depth)
-    depth_counts = defaultdict(int)
+    depth_counts: defaultdict[int, int] = defaultdict(int)
     for rc in root_causes:
         depth_counts[rc["depth"]] += 1
     concurrent = max(depth_counts.values(), default=0)
@@ -805,7 +805,7 @@ def analyze_bottlenecks(
         >>> for s in analysis["optimization_suggestions"]:
         ...     print(f"  - {s}")
     """
-    result = {
+    result: dict[str, Any] = {
         "primary_bottleneck": None,
         "secondary_bottlenecks": [],
         "optimization_suggestions": [],
@@ -977,7 +977,7 @@ def diff_hierarchies(
         >>> diff = diff_hierarchies(before_h, after_h)
         >>> print(f"Change: {diff['summary']['total_duration_change_pct']:.1f}%")
     """
-    result = {
+    result: dict[str, Any] = {
         "label_a": label_a,
         "label_b": label_b,
         "summary": {

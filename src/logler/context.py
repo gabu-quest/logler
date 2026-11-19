@@ -26,6 +26,7 @@ import traceback
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
+from typing import Any
 
 _correlation_id: ContextVar[str | None] = ContextVar("_correlation_id", default=None)
 
@@ -59,7 +60,7 @@ def correlation_context(correlation_id: str, otel_bridge: bool = False):
     try:
         if otel_bridge:
             try:
-                from opentelemetry import baggage, context  # type: ignore[import-untyped]
+                from opentelemetry import baggage, context
 
                 ctx = baggage.set_baggage("correlation_id", correlation_id)
                 otel_token = context.attach(ctx)
@@ -68,7 +69,7 @@ def correlation_context(correlation_id: str, otel_bridge: bool = False):
         yield correlation_id
     finally:
         if otel_bridge and otel_token is not None:
-            from opentelemetry import context  # type: ignore[import-untyped]
+            from opentelemetry import context
 
             context.detach(otel_token)
         _correlation_id.reset(token)
@@ -93,7 +94,7 @@ class CorrelationFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         if not getattr(record, "correlation_id", None):
-            record.correlation_id = get_correlation_id()  # type: ignore[attr-defined]
+            record.correlation_id = get_correlation_id()
         return True
 
 
@@ -174,7 +175,7 @@ class JsonHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            entry = {
+            entry: dict[str, Any] = {
                 "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
                 "level": record.levelname,
                 "message": record.getMessage(),

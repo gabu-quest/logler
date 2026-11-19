@@ -157,9 +157,9 @@ def _sample_diverse(entries: list[dict], size: int) -> list[dict]:
     if len(entries) <= size:
         return entries
 
-    samples = []
-    used_messages = set()
-    used_threads = set()
+    samples: list[dict] = []
+    used_messages: set[Any] = set()
+    used_threads: set[Any] = set()
 
     # First pass: unique messages
     for entry in entries:
@@ -270,8 +270,8 @@ def _sample_errors_focused(entries: list[dict], size: int) -> list[dict]:
 def _calculate_coverage(population: list[dict], sample: list[dict]) -> dict[str, Any]:
     """Calculate how well the sample covers the population."""
     # Time coverage
-    pop_times = [e.get("timestamp") for e in population if e.get("timestamp")]
-    sample_times = [e.get("timestamp") for e in sample if e.get("timestamp")]
+    pop_times = [t for e in population if (t := e.get("timestamp"))]
+    sample_times = [t for e in sample if (t := e.get("timestamp"))]
 
     time_coverage = 0.0
     if pop_times and sample_times:
@@ -293,7 +293,7 @@ def _calculate_coverage(population: list[dict], sample: list[dict]) -> dict[str,
             pass  # Skip if timestamps are invalid
 
     # Level coverage
-    level_coverage = defaultdict(int)
+    level_coverage: defaultdict[str, int] = defaultdict(int)
     for entry in sample:
         level = level_text(entry.get("level"))
         level_coverage[level] += 1

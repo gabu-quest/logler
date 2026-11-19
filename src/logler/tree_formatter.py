@@ -20,7 +20,6 @@ try:
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
-    Text = None  # Placeholder when Rich is not available
 
 
 def format_tree(
@@ -523,7 +522,7 @@ def format_waterfall(
     lines.append("├" + "─" * (effective_width - 2) + "┤")
 
     # Collect all nodes in order
-    nodes_flat = []
+    nodes_flat: list[dict] = []
     roots = hierarchy.get("roots", [])
     for root in roots:
         _collect_nodes_flat(root, nodes_flat, 0)

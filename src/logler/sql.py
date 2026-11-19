@@ -156,18 +156,22 @@ class SqlEngine:
             db_path: Optional path for a disk-backed DuckDB database.
                      Defaults to in-memory (``":memory:"``).
         """
-        self.conn = duckdb.connect(db_path or ":memory:")
+        self.conn: duckdb.DuckDBPyConnection | None = duckdb.connect(db_path or ":memory:")
         # External access is locked lazily before the first user SQL —
         # load_entries() needs filesystem access for the bulk CSV load.
         self._external_access_locked = False
 
-    def _lock_external_access(self) -> None:
-        """Disable filesystem access. One-way — cannot be re-enabled."""
+    def _lock_external_access(self) -> duckdb.DuckDBPyConnection:
+        """Disable filesystem access. One-way — cannot be re-enabled.
+
+        Returns the open connection; raises ``RuntimeError`` once the engine is closed.
+        """
         if self.conn is None:
             raise RuntimeError("SqlEngine has been closed")
         if not self._external_access_locked:
             self.conn.execute("SET enable_external_access = false")
             self._external_access_locked = True
+        return self.conn
 
     def close(self) -> None:
         """Close the underlying DuckDB connection."""
@@ -277,8 +281,8 @@ class SqlEngine:
 
         Raises ``duckdb.Error`` for a SQL error.
         """
-        self._lock_external_access()
-        result = self.conn.execute(sql)
+        conn = self._lock_external_access()
+        result = conn.execute(sql)
         columns = [desc[0] for desc in result.description]
         rows = [
             {col: _json_value(value) for col, value in zip(columns, row, strict=False)}
@@ -303,8 +307,8 @@ class SqlEngine:
         Returns:
             List of table names
         """
-        self._lock_external_access()
-        result = self.conn.execute(
+        conn = self._lock_external_access()
+        result = conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         )
         return [row[0] for row in result.fetchall()]

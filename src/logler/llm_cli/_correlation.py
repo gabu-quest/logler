@@ -64,7 +64,7 @@ def correlation_list(config_dir: str | None, pretty: bool):
         sys.exit(EXIT_USER_ERROR)
 
     for name, group in config.correlations.items():
-        rules_summary = []
+        rules_summary: list[dict[str, Any]] = []
         for rule in group.rules:
             if rule.type == "field_match":
                 rules_summary.append(
@@ -77,7 +77,7 @@ def correlation_list(config_dir: str | None, pretty: bool):
                     }
                 )
             elif rule.type == "temporal":
-                anchor_desc = {}
+                anchor_desc: dict[str, str | None] = {}
                 if rule.anchor.level:
                     anchor_desc["level"] = rule.anchor.level
                 if rule.anchor.pattern:

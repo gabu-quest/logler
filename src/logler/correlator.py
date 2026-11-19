@@ -213,7 +213,7 @@ def _apply_temporal_rule(
 
     Finds anchor events and collects all entries within the time window.
     """
-    clusters = []
+    clusters: list[dict[str, Any]] = []
     window = parse_duration(rule.window)
 
     # Find anchor events

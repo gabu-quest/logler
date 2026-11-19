@@ -119,7 +119,7 @@ def get_error_context(file: str, line_number: int, lines: int = 10) -> dict[str,
     }
 
 
-def analyze_thread_health(files: list[str]) -> dict[str, dict[str, int]]:
+def analyze_thread_health(files: list[str]) -> dict[str, Any]:
     """
     Analyze health of each thread.
 

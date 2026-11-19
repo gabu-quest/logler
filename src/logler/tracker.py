@@ -32,6 +32,8 @@ class ThreadTracker:
     def _track_thread(self, entry: LogEntry):
         """Track thread information."""
         thread_id = entry.thread_id
+        if thread_id is None:  # the caller tracks only entries that have one
+            return
 
         if thread_id not in self.threads:
             self.threads[thread_id] = {
@@ -61,6 +63,8 @@ class ThreadTracker:
     def _track_trace(self, entry: LogEntry):
         """Track trace information."""
         trace_id = entry.trace_id
+        if trace_id is None:  # the caller tracks only entries that have one
+            return
 
         if trace_id not in self.traces:
             self.traces[trace_id] = {

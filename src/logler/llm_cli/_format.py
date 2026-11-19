@@ -135,7 +135,7 @@ def format_test(
         _error_json("Regex must have at least one named group (?P<name>...)")
 
     # Test against files
-    results = []
+    results: list[dict[str, Any]] = []
     total_lines = 0
     matched_lines = 0
 

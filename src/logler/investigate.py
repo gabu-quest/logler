@@ -33,7 +33,7 @@ Example Usage::
 
 import contextlib
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # ---------------------------------------------------------------------------
 # Core search / navigation (private module)
@@ -114,6 +114,9 @@ from .sampling import (  # noqa: F401
 # ---------------------------------------------------------------------------
 from .session import InvestigationSession  # noqa: F401
 
+if TYPE_CHECKING:
+    from .sql import SqlEngine
+
 # ============================================================================
 # Investigator class — kept here to avoid circular imports
 # ============================================================================
@@ -154,7 +157,7 @@ class Investigator:
         self._investigator = logler_rs.PyInvestigator()
         self._files: list[str] = []
         self._db_temp_files: list[str] = []
-        self._sql_engine = None
+        self._sql_engine: SqlEngine | None = None
         self._sql_db_path = sql_db_path
 
     def load_files(
@@ -298,7 +301,7 @@ class Investigator:
         """Fetch a page of raw entries from the Rust index (JSON string)."""
         return self._investigator.get_entries_page(offset, limit)
 
-    def _get_sql_engine(self):
+    def _get_sql_engine(self) -> "SqlEngine":
         """Get a SQL engine loaded with current log data.
 
         The engine is built once and cached for the lifetime of this
