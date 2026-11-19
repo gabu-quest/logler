@@ -608,7 +608,7 @@ impl Investigator {
         }
 
         // Sort by occurrence count
-        patterns.sort_by(|a, b| b.occurrences.cmp(&a.occurrences));
+        patterns.sort_by_key(|a| std::cmp::Reverse(a.occurrences));
 
         Ok(PatternResults { patterns })
     }
@@ -778,7 +778,7 @@ impl Investigator {
                     last_seen: last,
                 })
                 .collect();
-            infos.sort_by(|a, b| b.count.cmp(&a.count));
+            infos.sort_by_key(|a| std::cmp::Reverse(a.count));
             infos
         }
 
