@@ -274,6 +274,22 @@ class TestCountsByLevelAddUp:
         _, stdout, _ = invoke(["triage", ten_lines_three_without_a_level])
         assert json.loads(stdout)["metrics"]["log_levels"] == self.EXPECTED
 
+    def test_triage_rate_counts_every_match_over_the_engine_cap(self, tmp_path):
+        """10,000 INFO lines then 2,000 ERROR lines: more than a search returns unasked."""
+        from tests.test_search_exact import _info_then_error_lines
+
+        path = tmp_path / "big.log"
+        path.write_text(_info_then_error_lines(10_000, 2_000))
+        _, stdout, _ = invoke(["triage", str(path)])
+        out = json.loads(stdout)
+        assert out["metrics"] == {
+            "error_rate": 0.1667,
+            "error_count": 2_000,
+            "total_entries": 12_000,
+            "log_levels": {"INFO": 10_000, "ERROR": 2_000},
+        }
+        assert out["assessment"]["severity"] == "high"
+
     def test_a_file_with_no_level_on_any_line(self, tmp_path):
         path = tmp_path / "none.log"
         path.write_text("alpha\nbeta\ngamma\n")
@@ -281,9 +297,10 @@ class TestCountsByLevelAddUp:
         assert json.loads(stdout)["stats"]["by_level"] == {"UNKNOWN": 3}
 
     @pytest.mark.parametrize("entry", [{}, {"level": None}, {"level": ""}])
-    def test_an_entry_dict_with_no_level_is_counted_under_unknown(self, entry):
-        from logler._search_core import _format_as_count, _format_as_summary
+    def test_a_json_line_with_no_level_is_counted_under_unknown(self, entry, tmp_path):
+        from logler.investigate import search
 
-        result = {"results": [{"entry": {"message": "m", "file": "f", **entry}}]}
-        assert _format_as_count(result)["by_level"] == {"UNKNOWN": 1}
-        assert _format_as_summary(result)["log_levels"] == {"UNKNOWN": 1}
+        path = tmp_path / "one.log"
+        path.write_text(json.dumps({"message": "m", **entry}) + "\n")
+        assert search([str(path)], output_format="count")["by_level"] == {"UNKNOWN": 1}
+        assert search([str(path)], output_format="summary")["log_levels"] == {"UNKNOWN": 1}

@@ -12,7 +12,6 @@ import contextlib
 import json
 import re
 import warnings
-from collections import defaultdict
 from datetime import timedelta
 from typing import Any
 
@@ -280,6 +279,7 @@ def search(
 
         With ``fields=[...]`` the shape is ``ProjectedSearchResult``: the same, but each
         ``entry`` holds only the asked keys (the context entries stay whole).
+
         Every entry, the context entries included, has its level in upper case (``INFO``);
         a line with no level reads ``UNKNOWN``.
         ``"summary"``, ``"count"`` and ``"compact"`` return the shapes of
@@ -321,6 +321,15 @@ def search(
         query_dict["count_only"] = True
     if offset > 0:
         query_dict["offset"] = offset
+    if output_format in ("summary", "count"):
+        # The engine counts every match; the page (``limit``, ``tail``, ``offset``) is only
+        # where the summary's samples come from, so it needs no context, and a count none.
+        query_dict["context_lines"] = 0
+        if output_format == "summary":
+            query_dict["aggregate"] = "messages"
+        else:
+            query_dict["aggregate"] = "counts"
+            query_dict["count_only"] = True
 
     # Call Rust engine
     result_json = investigator.search(json.dumps(query_dict))
@@ -563,134 +572,45 @@ def get_metadata(files: list[str]) -> list[dict[str, Any]]:
 
 
 def _format_as_summary(result: dict[str, Any]) -> dict[str, Any]:
-    """Convert full search results to token-efficient summary format.
+    """Convert search results to the token-efficient summary format.
 
-    Instead of returning all log entries, groups them by message and
-    provides aggregated statistics with a few examples.
+    Every count is the engine's, over every match of the query (``result["aggregates"]``);
+    the samples come from the returned page (``result["results"]``). In ``top_messages``
+    two messages of equal count come in the order of their first match.
     """
-    results = result.get("results", [])
-    if not results:
+    total = result["total_matches"]
+    if not total:
         return {
-            "total_matches": 0,
+            "total_matches": total,
             "unique_messages": 0,
             "log_levels": {},
             "top_messages": [],
             "sample_entries": [],
         }
-
-    # Group by message
-    message_groups: defaultdict[str, dict[str, Any]] = defaultdict(
-        lambda: {
-            "count": 0,
-            "first_seen": None,
-            "last_seen": None,
-            "levels": defaultdict(int),
-            "examples": [],
-        }
-    )
-
-    level_counts: defaultdict[str, int] = defaultdict(int)
-    file_counts: defaultdict[str, int] = defaultdict(int)
-
-    for item in results:
-        entry = item.get("entry", {})
-        message = entry.get("message", "").strip()
-        level = level_text(entry.get("level"))
-        timestamp = entry.get("timestamp")
-        file_path = entry.get("file", "")
-
-        # Update level counts
-        level_counts[level] += 1
-        file_counts[file_path] += 1
-
-        # Update message group
-        group = message_groups[message]
-        group["count"] += 1
-        group["levels"][level] += 1
-
-        if group["first_seen"] is None or (timestamp and timestamp < group["first_seen"]):
-            group["first_seen"] = timestamp
-
-        if group["last_seen"] is None or (timestamp and timestamp > group["last_seen"]):
-            group["last_seen"] = timestamp
-
-        # Keep up to 2 examples per message
-        if len(group["examples"]) < 2:
-            group["examples"].append(
-                {
-                    "file": file_path,
-                    "line": entry.get("line_number"),
-                    "timestamp": timestamp,
-                    "level": level,
-                }
-            )
-
-    # Convert to sorted list (most frequent first)
-    top_messages = []
-    for message, data in sorted(message_groups.items(), key=lambda x: x[1]["count"], reverse=True)[
-        :20
-    ]:
-        top_messages.append(
-            {
-                "message": message[:200],  # Truncate long messages
-                "count": data["count"],
-                "first_seen": data["first_seen"],
-                "last_seen": data["last_seen"],
-                "levels": dict(data["levels"]),
-                "examples": data["examples"],
-            }
-        )
-
-    # Sample entries (diverse selection)
-    sample_entries = _select_diverse_samples(results, max_samples=5)
-
+    counts = result["aggregates"]
     return {
-        "total_matches": len(results),
-        "unique_messages": len(message_groups),
-        "log_levels": dict(level_counts),
-        "by_file": dict(file_counts),
-        "top_messages": top_messages,
-        "sample_entries": sample_entries,
+        "total_matches": total,
+        "unique_messages": counts["unique_messages"],
+        "log_levels": counts["by_level"],
+        "by_file": counts["by_file"],
+        "top_messages": counts["top_messages"],
+        "sample_entries": _select_diverse_samples(result["results"], max_samples=5),
         "full_results_available": True,
     }
 
 
 def _format_as_count(result: dict[str, Any]) -> dict[str, Any]:
-    """Convert full search results to count-only format (minimal tokens).
-
-    Returns only statistics, no actual log content.
-    """
-    results = result.get("results", [])
-    if not results:
-        return {"total_matches": 0, "by_level": {}, "by_file": {}, "time_range": None}
-
-    level_counts: defaultdict[str, int] = defaultdict(int)
-    file_counts: defaultdict[str, int] = defaultdict(int)
-    timestamps = []
-
-    for item in results:
-        entry = item.get("entry", {})
-        level = level_text(entry.get("level"))
-        file_path = entry.get("file", "")
-        timestamp = entry.get("timestamp")
-
-        level_counts[level] += 1
-        file_counts[file_path] += 1
-
-        if timestamp:
-            timestamps.append(timestamp)
-
-    # Time range
-    time_range = None
-    if timestamps:
-        timestamps.sort()
-        time_range = {"start": timestamps[0], "end": timestamps[-1]}
-
+    """Convert search results to the count format (minimal tokens): the engine's counts
+    over every match of the query, and no log content."""
+    total = result["total_matches"]
+    if not total:
+        return {"total_matches": total, "by_level": {}, "by_file": {}, "time_range": None}
+    counts = result["aggregates"]
     return {
-        "total_matches": len(results),
-        "by_level": dict(level_counts),
-        "by_file": dict(file_counts),
-        "time_range": time_range,
+        "total_matches": total,
+        "by_level": counts["by_level"],
+        "by_file": counts["by_file"],
+        "time_range": counts["time_range"],
     }
 
 

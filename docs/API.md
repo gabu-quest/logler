@@ -15,8 +15,11 @@ errors = investigate.search(files=["app.log"], level="ERROR", output_format="sum
 ```
 
 `search()` with `output_format="summary"` returns a dict with `total_matches` at the
-top level. The summary is always smaller than full output — designed for LLM context
-windows.
+top level, the count of every match even when `limit` is given. Its other counts
+(`log_levels`, `by_file`, `unique_messages`, `top_messages`) are over every match too;
+`limit`, `tail` and `offset` choose only the `sample_entries`. In `top_messages` two
+messages of equal count come in the order of their first match. The summary is always
+smaller than full output — designed for LLM context windows.
 
 ### [C03] Compare threads
 

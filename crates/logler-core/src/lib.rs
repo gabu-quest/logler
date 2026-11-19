@@ -25,6 +25,7 @@
 //!     limit: Some(10),
 //!     count_only: None,
 //!     offset: None,
+//!     aggregate: None,
 //!     tail: None,
 //!     context_lines: Some(3),
 //! };
@@ -84,6 +85,7 @@ mod tests {
             limit: Some(10),
             count_only: None,
             offset: None,
+            aggregate: None,
             tail: None,
             context_lines: Some(1),
         };

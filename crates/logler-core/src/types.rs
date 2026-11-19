@@ -159,6 +159,20 @@ pub struct SearchQuery {
     /// Enables pagination: page 2 with 100/page → offset=100, limit=100.
     #[serde(default)]
     pub offset: Option<usize>,
+    /// When set, also count every match (`SearchResults::aggregates`), whatever the
+    /// limit, tail, offset or `count_only`.
+    #[serde(default)]
+    pub aggregate: Option<Aggregate>,
+}
+
+/// What a search counts over every match, beside the page of entries it returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Aggregate {
+    /// Levels, files and the time range.
+    Counts,
+    /// Those, and the messages.
+    Messages,
 }
 
 /// Filters for searching logs
@@ -229,6 +243,87 @@ pub struct SearchResults {
     pub results: Vec<SearchResult>,
     pub total_matches: usize,
     pub search_time_ms: u64,
+    /// Counts over every match; only when the query asked for them (`aggregate`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aggregates: Option<SearchAggregates>,
+}
+
+/// Counts by name, written as a JSON object whose keys come in the order each name was
+/// first counted (the order of the matches), never in hash order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OrderedCounts(pub Vec<(String, usize)>);
+
+impl Serialize for OrderedCounts {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.0.iter().map(|(k, v)| (k, v)))
+    }
+}
+
+impl<'de> Deserialize<'de> for OrderedCounts {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = OrderedCounts;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a map of names to counts")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut out = Vec::new();
+                while let Some(pair) = map.next_entry()? {
+                    out.push(pair);
+                }
+                Ok(OrderedCounts(out))
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
+/// What the summary and count formats report, counted over every match of a search in
+/// the order the search sorts them (by relevance then time; with `tail`, by time).
+///
+/// A level is its text in capitals (`LogLevel::as_str`); a line with no level is
+/// `UNKNOWN`. A message is the entry's message with white space cut from both ends.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchAggregates {
+    pub by_level: OrderedCounts,
+    /// Matches per file (the entry's `file`).
+    pub by_file: OrderedCounts,
+    /// How many different messages the matches hold (with `Aggregate::Messages`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unique_messages: Option<usize>,
+    /// The most frequent messages, at most `TOP_MESSAGES`, most frequent first; two of
+    /// equal count in the order their first match comes (with `Aggregate::Messages`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_messages: Option<Vec<MessageSummary>>,
+    /// The earliest and latest timestamp of a match; `None` when no match has one.
+    pub time_range: Option<TimeRange>,
+}
+
+/// One message of `SearchAggregates::top_messages`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageSummary {
+    /// The message, cut to its first `MESSAGE_CHARS` characters.
+    pub message: String,
+    pub count: usize,
+    /// The earliest and latest timestamp of its matches; `None` when none has one.
+    pub first_seen: Option<DateTime<Utc>>,
+    pub last_seen: Option<DateTime<Utc>>,
+    pub levels: OrderedCounts,
+    /// Its first `MESSAGE_EXAMPLES` matches.
+    pub examples: Vec<MessageExample>,
+}
+
+/// Where one match of a message is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageExample {
+    pub file: String,
+    pub line: usize,
+    pub timestamp: Option<DateTime<Utc>>,
+    pub level: String,
 }
 
 /// Page of raw entries for bulk export (no search/filter/sort overhead).

@@ -50,7 +50,7 @@ All commands use consistent exit codes for automation:
 
 **Quick severity assessment for incident response.**
 
-The first command to run when investigating an issue. Provides a severity level, the error counts and suggested actions.
+The first command to run when investigating an issue. Provides a severity level, the error counts and suggested actions. Every count is over every line in the time range, however many there are.
 
 ```bash
 logler llm triage app.log
