@@ -2,8 +2,40 @@
 
 import os
 import time
+from collections import deque
 from pathlib import Path
 from typing import Iterator, Optional
+
+
+class CompleteLines:
+    """The lines of a growing log file, each handed out once its newline has been written.
+
+    `f` is a handle opened for bytes. Each pass (`for line in lines`) yields the complete
+    lines the handle has from where it stands, as text, then stops. The start of a line still
+    being written is kept, and the line comes out whole on a later pass: a line is decoded
+    only when it is complete, so a character written in two parts is read as one. A byte that
+    is not UTF-8 becomes the replacement character.
+    """
+
+    def __init__(self, f):
+        self._f = f
+        self._unfinished = b""
+
+    def __iter__(self):
+        for data in iter(self._f.readline, b""):
+            if not data.endswith(b"\n"):
+                self._unfinished += data
+                return
+            yield self._text(self._unfinished + data)
+            self._unfinished = b""
+
+    def unfinished(self) -> str:
+        """The start of the line still being written, "" when the file ends in a newline."""
+        return self._text(self._unfinished)
+
+    @staticmethod
+    def _text(data: bytes) -> str:
+        return data.decode("utf-8", errors="replace")
 
 
 class LogReader:
@@ -140,38 +172,28 @@ class LogReader:
         Yields:
             Log lines as strings
         """
-        # First, yield the last n lines
-        for line in self._read_lines_reverse(max_lines=num_lines):
-            pass  # Skip initial lines in non-follow mode if we just want to set position
-
-        lines = list(self._read_lines_reverse(max_lines=num_lines))
-        for line in reversed(lines):
-            yield line
-
         if not follow:
+            lines = list(self._read_lines_reverse(max_lines=num_lines))
+            yield from reversed(lines)
             return
 
-        # Follow mode: watch for new lines
-        with open(self.file_path, "r", encoding="utf-8", errors="replace") as f:
-            # Seek to end
-            f.seek(0, os.SEEK_END)
+        # One handle serves the first lines and the follow, so they share one position:
+        # the first lines end where the follow begins, at the end of the last complete line.
+        with open(self.file_path, "rb") as f:
+            lines = CompleteLines(f)
+            for line in deque(lines, maxlen=num_lines):
+                yield line.rstrip("\n\r")
 
             while True:
-                line = f.readline()
-                if line:
+                for line in lines:
                     yield line.rstrip("\n\r")
-                else:
-                    # Check if file was truncated (log rotation)
-                    current_pos = f.tell()
-                    f.seek(0, os.SEEK_END)
-                    end_pos = f.tell()
 
-                    if current_pos > end_pos:
-                        # File was truncated, start from beginning
-                        f.seek(0)
-                    else:
-                        # No new data, sleep
-                        time.sleep(sleep_interval)
+                if os.fstat(f.fileno()).st_size < f.tell():
+                    # File was truncated (log rotation), start from beginning
+                    f.seek(0)
+                    lines = CompleteLines(f)
+                else:
+                    time.sleep(sleep_interval)
 
     def search(
         self,

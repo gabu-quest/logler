@@ -10,6 +10,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
+from .log_reader import CompleteLines
 from ._search_core import level_name, level_text
 from .parser import LogParser, LogEntry
 
@@ -53,33 +54,34 @@ class TerminalViewer:
         self.console.print(f"\n[bold cyan]📄 {path.name}[/bold cyan]")
         self.console.print(f"[dim]{path.absolute()}[/dim]\n")
 
-        # Read file
-        with open(file_path, "r") as f:
-            all_lines = f.readlines()
-
-        # Parse entries, each file with the format that names it
         parser = LogParser.for_file(file_path)
-        entries = [parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(all_lines)]
 
-        # Apply filters
-        entries = self._apply_filters(entries, level_filter, pattern, thread_filter)
+        # One handle and one reader serve the first read and the follow, so they share the
+        # position. Only the follow waits for the newline of a last line still being written.
+        with open(file_path, "rb") as f:
+            growing = CompleteLines(f)
+            all_lines = list(growing)
+            if not follow and growing.unfinished():
+                all_lines.append(growing.unfinished())
 
-        # Apply line limit
-        if lines and not follow:
-            entries = entries[-lines:]
+            # Parse entries, each file with the format that names it
+            entries = [parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(all_lines)]
 
-        # Display entries
-        if follow:
-            await self._follow_mode(
-                path,
-                entries[-lines:] if lines else entries,
-                level_filter,
-                pattern,
-                thread_filter,
-                parser,
-            )
-        else:
-            self._display_entries(entries)
+            # Apply filters
+            filtered = self._apply_filters(entries, level_filter, pattern, thread_filter)
+
+            if follow:
+                await self._follow_mode(
+                    growing,
+                    len(all_lines),
+                    filtered[-lines:] if lines else filtered,
+                    level_filter,
+                    pattern,
+                    thread_filter,
+                    parser,
+                )
+            else:
+                self._display_entries(filtered[-lines:] if lines else filtered)
 
     def _apply_filters(
         self,
@@ -160,36 +162,30 @@ class TerminalViewer:
 
     async def _follow_mode(
         self,
-        path: Path,
+        growing: CompleteLines,
+        line_number: int,
         initial_entries: list,
         level_filter: Optional[str],
         pattern: Optional[str],
         thread_filter: Optional[str],
         parser: LogParser,
     ):
-        """Follow log file in real-time."""
+        """Follow log file in real-time, from the reader and line number the first read ended at."""
         # Display initial entries
         self._display_entries(initial_entries)
 
         self.console.print("\n[bold green]📡 Following log file... (Ctrl+C to stop)[/bold green]\n")
 
-        # Track file position
-        with open(path, "r") as f:
-            f.seek(0, 2)  # Go to end
-            line_number = len(initial_entries)
+        while True:
+            for line in growing:
+                line_number += 1
+                entry = parser.parse_line(line_number, line.rstrip())
 
-            while True:
-                line = f.readline()
-                if line:
-                    line_number += 1
-                    entry = parser.parse_line(line_number, line.rstrip())
-
-                    # Apply filters
-                    filtered = self._apply_filters([entry], level_filter, pattern, thread_filter)
-                    if filtered:
-                        self._print_entry(entry)
-                else:
-                    await asyncio.sleep(0.1)
+                # Apply filters
+                filtered = self._apply_filters([entry], level_filter, pattern, thread_filter)
+                if filtered:
+                    self._print_entry(entry)
+            await asyncio.sleep(0.1)
 
     def display_thread_view(self, entries: list):
         """Display beautiful thread-correlated view."""
