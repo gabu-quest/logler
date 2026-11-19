@@ -117,39 +117,46 @@ def smart_sample(
 # ---------------------------------------------------------------------------
 
 
+def _level_quotas(counts: dict[str, int], size: int) -> dict[str, int]:
+    """Split ``size`` across levels so the parts add up to ``size`` exactly.
+
+    Each level gets the floor of its proportion, the largest remainders get
+    the entries the rounding left over, and every level keeps at least one
+    entry when ``size`` allows it.  Requires ``size`` < total entries.
+    """
+    total = sum(counts.values())
+    quotas = {lvl: size * n // total for lvl, n in counts.items()}
+    by_remainder = sorted(counts, key=lambda lvl: (-(size * counts[lvl] % total), lvl))
+    for lvl in by_remainder[: size - sum(quotas.values())]:
+        quotas[lvl] += 1
+
+    if size >= len(counts):
+        for lvl in [lvl for lvl, q in quotas.items() if q == 0]:
+            donor = max((d for d in quotas if quotas[d] > 1), key=lambda d: quotas[d])
+            quotas[donor] -= 1
+            quotas[lvl] = 1
+    return quotas
+
+
 def _sample_representative(entries: list[dict], size: int) -> list[dict]:
-    """Sample to represent overall distribution."""
+    """Sample to represent overall distribution, returning exactly ``size`` entries."""
     if len(entries) <= size:
         return entries
 
-    samples = []
+    by_level: dict[str, list[int]] = defaultdict(list)
+    for index, entry in enumerate(entries):
+        by_level[level_text(entry.get("level"))].append(index)
 
-    # Group by level
-    by_level = defaultdict(list)
-    for entry in entries:
-        level = level_text(entry.get("level"))
-        by_level[level].append(entry)
+    quotas = _level_quotas({lvl: len(ix) for lvl, ix in by_level.items()}, size)
 
-    # Calculate proportional samples per level
-    for level_entries in by_level.values():
-        proportion = len(level_entries) / len(entries)
-        level_sample_size = max(1, int(size * proportion))
+    chosen: list[int] = []
+    for lvl, positions in by_level.items():
+        quota = quotas[lvl]
+        if quota:
+            step = len(positions) / quota
+            chosen.extend(positions[int(i * step)] for i in range(quota))
 
-        # Sample evenly across time
-        if level_sample_size >= len(level_entries):
-            samples.extend(level_entries)
-        else:
-            step = len(level_entries) / level_sample_size
-            indices = [int(i * step) for i in range(level_sample_size)]
-            samples.extend([level_entries[i] for i in indices])
-
-    # If we have too many, trim to size
-    if len(samples) > size:
-        step = len(samples) / size
-        indices = [int(i * step) for i in range(size)]
-        samples = [samples[i] for i in indices]
-
-    return samples[:size]
+    return [entries[i] for i in sorted(chosen)]
 
 
 def _sample_diverse(entries: list[dict], size: int) -> list[dict]:

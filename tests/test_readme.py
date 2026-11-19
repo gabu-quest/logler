@@ -415,6 +415,74 @@ def test_C06_chronological_strategy_returns_requested_size(huge_log):
     )
 
 
+def test_C06_representative_strategy_returns_requested_size():
+    """representative strategy returns exactly the requested sample size."""
+    log = Path(__file__).resolve().parent.parent / "examples" / "logs" / "production_incident.log"
+    sample = smart_sample(files=[str(log)], sample_size=10, strategy="representative")
+    assert len(sample["samples"]) == 10, (
+        f"Expected 10 representative samples, got {len(sample['samples'])}"
+    )
+
+
+def _rep_entries(counts: dict):
+    """Entries in file order, interleaving levels, each tagged with its position."""
+    entries = []
+    remaining = dict(counts)
+    while any(remaining.values()):
+        for lvl in list(remaining):
+            if remaining[lvl]:
+                remaining[lvl] -= 1
+                entries.append({"level": lvl, "message": str(len(entries)), "pos": len(entries)})
+    return entries
+
+
+@pytest.mark.parametrize(
+    "counts,size,expected_len,expected_per_level",
+    [
+        ({"INFO": 10, "WARN": 10, "ERROR": 10, "DEBUG": 10}, 1, 1, None),
+        ({"INFO": 10, "WARN": 10, "ERROR": 10, "DEBUG": 10}, 40, 40, None),
+        ({"INFO": 10, "WARN": 10, "ERROR": 10, "DEBUG": 10}, 41, 40, None),
+        (
+            {"INFO": 97, "WARN": 1, "ERROR": 1, "DEBUG": 1},
+            10,
+            10,
+            {"WARN": 1, "ERROR": 1, "DEBUG": 1},
+        ),
+        ({"INFO": 50}, 7, 7, {"INFO": 7}),
+        ({"INFO": 20, "WARN": 20, "ERROR": 1}, 10, 10, {"ERROR": 1}),
+        ({"INFO": 41}, 10, 10, {"INFO": 10}),
+    ],
+)
+def test_C06_representative_split_adds_up(counts, size, expected_len, expected_per_level):
+    from logler.sampling import _sample_representative
+
+    entries = _rep_entries(counts)
+    out = _sample_representative(entries, size)
+    assert len(out) == expected_len
+    positions = [e["pos"] for e in out]
+    assert positions == sorted(set(positions))
+    got = {}
+    for e in out:
+        got[e["level"]] = got.get(e["level"], 0) + 1
+    for lvl, n in (expected_per_level or {}).items():
+        assert got[lvl] == n
+    total = sum(counts.values())
+    for lvl, n in counts.items():
+        # a level the minimum of one lifts above its share takes entries from the largest
+        if size < total and all(size * n / total >= 1 for n in counts.values()):
+            assert abs(got.get(lvl, 0) - size * n / total) < 1 + 1e-9
+
+
+def test_C06_representative_entry_without_level():
+    from logler.sampling import _sample_representative
+
+    entries = [{"message": str(i), "pos": i} for i in range(5)]
+    entries += [{"level": "INFO", "message": str(i), "pos": i} for i in range(5, 12)]
+    out = _sample_representative(entries, 6)
+    assert len(out) == 6
+    assert [e["pos"] for e in out] == sorted(e["pos"] for e in out)
+
+
 # ---------------- [C08] Thread hierarchy ----------------
 
 
