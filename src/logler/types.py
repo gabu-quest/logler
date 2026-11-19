@@ -181,6 +181,8 @@ class HierarchyNode(TypedDict):
     parent_id: str | None
     children: list["HierarchyNode"]
     entry_ids: list[str]
+    # The service of the first of its entries that names one; None when none does.
+    service: str | None
     start_time: str | None
     end_time: str | None
     duration_ms: int | None

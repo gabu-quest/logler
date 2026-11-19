@@ -25,6 +25,10 @@ pub struct SpanNode {
     /// Log entry IDs belonging to this node
     pub entry_ids: Vec<Uuid>,
 
+    /// The service of the first of its entries that names one (a `service_name` that is
+    /// not empty), in entry order; `None` when none does
+    pub service: Option<String>,
+
     /// First log entry timestamp
     pub start_time: Option<DateTime<Utc>>,
 
@@ -500,6 +504,11 @@ impl HierarchyBuilder {
 
         // Collect entry IDs and calculate stats
         let entry_ids: Vec<Uuid> = entries.iter().map(|e| e.id).collect();
+        let service = entries
+            .iter()
+            .filter_map(|e| e.service_name.as_deref())
+            .find(|s| !s.is_empty())
+            .map(str::to_string);
         let (start_time, end_time) = self.calculate_time_range(entries);
         let duration_ms = self.calculate_duration_for_node(entries, &start_time, &end_time);
         let error_count = entries.iter().filter(|e| self.is_error(e)).count();
@@ -528,6 +537,7 @@ impl HierarchyBuilder {
             parent_id,
             children,
             entry_ids,
+            service,
             start_time,
             end_time,
             duration_ms,
@@ -1199,6 +1209,34 @@ mod tests {
             let order: Vec<&str> = tree.roots.iter().map(|r| r.id.as_str()).collect();
             assert_eq!(order, ids, "roots in order of start time");
         }
+    }
+
+    #[test]
+    fn a_node_names_the_service_of_its_first_entry_that_has_one() {
+        let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let mut a1 = span_entry("req-1", "a", None, LogLevel::Info);
+        a1.service_name = Some(String::new());
+        let mut a2 = span_entry("req-1", "a", None, LogLevel::Info);
+        a2.service_name = Some("billing".to_string());
+        let mut a3 = span_entry("req-1", "a", None, LogLevel::Info);
+        a3.service_name = Some("gateway".to_string());
+        let b1 = span_entry("req-1", "b", Some("a"), LogLevel::Info);
+        for e in [a1, a2, a3, b1] {
+            builder.add_entry(e);
+        }
+        let tree = builder.build("req-1").expect("a tree");
+        assert_eq!(tree.roots.len(), 1);
+        let a = find_span(&tree.roots[0], "a").expect("span a");
+        assert_eq!(
+            a.service.as_deref(),
+            Some("billing"),
+            "first non-empty, in order"
+        );
+        let b = find_span(&tree.roots[0], "b").expect("span b");
+        assert_eq!(b.service, None, "no entry of b has a service");
+        let written = serde_json::to_value(&tree.roots[0]).unwrap();
+        assert_eq!(written["service"], json!("billing"));
+        assert_eq!(written["children"][0]["service"], json!(null));
     }
 
     #[test]

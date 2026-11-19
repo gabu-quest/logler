@@ -207,6 +207,9 @@ class SpanNode(BaseModel):
     # Entry references
     entry_ids: list[str] = Field(default_factory=list, description="Identifiers of entries")
     entry_count: int = Field(0, description="Number of log entries in this node")
+    service: str | None = Field(
+        None, description="Service of the first entry that names one; None when none does"
+    )
 
     # Timing
     start_time: str | None = Field(None, description="Start timestamp (ISO8601)")

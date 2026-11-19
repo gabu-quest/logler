@@ -62,6 +62,7 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 
 ### Added
 
+- **A node of a hierarchy names its service:** `service` is the `service_name` of the first of its entries that has one, or null.
 - **Type information.** The package ships `py.typed` and a stub for the compiled extension, and is checked with mypy.
 
 ### Development
