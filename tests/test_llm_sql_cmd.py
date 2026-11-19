@@ -292,3 +292,116 @@ class TestSqlOneLogsTable:
             (5, "2024-01-15T10:00:02Z INFO 10%\r20%"),
             (6, "2024-01-15T10:00:03Z INFO last, no newline\r"),
         ]
+
+    @pytest.mark.parametrize(
+        ("raw_bytes", "expected"),
+        [
+            (b"caf\xe9 here", "caf� here"),
+            (b"a\x80b", "a�b"),
+            (b"a\xe2\x82 b", "a� b"),
+            (b"a\xc0\xafb", "a��b"),
+            (b"a\xf5b", "a�b"),
+            (b"a\x00b", "a\x00b"),
+        ],
+    )
+    def test_a_byte_that_is_not_utf8_is_replaced_the_same_way_in_every_door(
+        self, tmp_path, raw_bytes, expected
+    ):
+        """Bytes that are not UTF-8 do not fail the file: the line stays, the bad bytes are
+        U+FFFD, and `search`, the API's SQL and `llm sql` (which cuts the file in Python) give
+        the same line numbers and the same `raw`."""
+        path = tmp_path / "bytes.log"
+        path.write_bytes(
+            b"2024-01-15T10:00:00Z INFO one\n2024-01-15T10:00:01Z INFO "
+            + raw_bytes
+            + b"\n2024-01-15T10:00:02Z INFO three\n"
+        )
+        expected_rows = [
+            (1, "2024-01-15T10:00:00Z INFO one"),
+            (2, "2024-01-15T10:00:01Z INFO " + expected),
+            (3, "2024-01-15T10:00:02Z INFO three"),
+        ]
+
+        code, out, _ = invoke(["search", str(path)])
+        assert code == 0, out
+        found = [(r["line_number"], r["raw"]) for r in json.loads(out)["results"]]
+        via_sql = [
+            (r["line_number"], r["raw"])
+            for r in self._api("SELECT line_number, raw FROM logs ORDER BY line_number", str(path))
+        ]
+
+        query = "SELECT line_number, raw FROM logs ORDER BY line_number"
+        via_command = [
+            (r["line_number"], r["raw"]) for r in self._command(query, str(path))["results"]
+        ]
+
+        assert sorted(found) == expected_rows
+        assert via_sql == expected_rows
+        assert via_command == expected_rows
+
+    def test_a_character_cut_off_at_the_end_of_the_file_is_one_replacement(self, tmp_path):
+        path = tmp_path / "cut.log"
+        path.write_bytes(b"2024-01-15T10:00:00Z INFO one\n2024-01-15T10:00:01Z INFO end\xe2\x82")
+
+        code, out, _ = invoke(["search", str(path)])
+        assert code == 0, out
+        found = sorted((r["line_number"], r["raw"]) for r in json.loads(out)["results"])
+        via_sql = [
+            (r["line_number"], r["raw"])
+            for r in self._api("SELECT line_number, raw FROM logs ORDER BY line_number", str(path))
+        ]
+
+        expected_rows = [
+            (1, "2024-01-15T10:00:00Z INFO one"),
+            (2, "2024-01-15T10:00:01Z INFO end�"),
+        ]
+        query = "SELECT line_number, raw FROM logs ORDER BY line_number"
+        via_command = [
+            (r["line_number"], r["raw"]) for r in self._command(query, str(path))["results"]
+        ]
+
+        assert found == expected_rows
+        assert via_sql == expected_rows
+        assert via_command == expected_rows
+
+    def test_a_byte_order_mark_is_not_part_of_line_one(self, tmp_path):
+        """A JSON log saved with a BOM parses its first line as JSON, in both doors."""
+        path = tmp_path / "bom.log"
+        path.write_bytes(
+            b"\xef\xbb\xbf"
+            b'{"timestamp": "2024-01-15T10:00:00Z", "level": "ERROR", "message": "first"}\n'
+            b'{"timestamp": "2024-01-15T10:00:01Z", "level": "INFO", "message": "second"}\n'
+        )
+        query = "SELECT line_number, level, message FROM logs ORDER BY line_number"
+
+        assert self._api(query, str(path)) == [
+            {"line_number": 1, "level": "ERROR", "message": "first"},
+            {"line_number": 2, "level": "INFO", "message": "second"},
+        ]
+        code, out, _ = invoke(["search", str(path), "--level", "ERROR"])
+        assert code == 0, out
+        assert [r["message"] for r in json.loads(out)["results"]] == ["first"]
+
+    def test_a_file_of_a_byte_order_mark_alone_has_no_lines(self, tmp_path):
+        path = tmp_path / "bom_only.log"
+        path.write_bytes(b"\xef\xbb\xbf")
+
+        assert self._api("SELECT count(*) AS n FROM logs", str(path)) == [{"n": 0}]
+
+    def test_read_lines_cuts_a_file_the_way_the_index_does(self, tmp_path):
+        """The Python twin of the index's rule: a BOM is not part of line 1, a bad byte is
+        U+FFFD, `\\r\\n` ends a line, a bare `\\r` stays, and a BOM alone is no line."""
+        from logler.parser import read_lines
+
+        path = tmp_path / "twin.log"
+        path.write_bytes(b"\xef\xbb\xbfone\r\na\xe9b\nx\ry\n\ntail")
+        assert list(read_lines(str(path))) == [
+            (1, "one"),
+            (2, "a�b"),
+            (3, "x\ry"),
+            (4, ""),
+            (5, "tail"),
+        ]
+
+        path.write_bytes(b"\xef\xbb\xbf")
+        assert list(read_lines(str(path))) == []

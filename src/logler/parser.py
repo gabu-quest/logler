@@ -42,9 +42,10 @@ def read_lines(path: str) -> Iterator[Tuple[int, str]]:
     at "\\n" or "\\r\\n", nothing else is trimmed and no line is skipped. So a reader that
     parses line by line gives the line numbers and the text that search gives.
 
-    Bytes that are not UTF-8 are replaced.
+    Bytes that are not UTF-8 are replaced; a UTF-8 byte-order mark at the start of the file is
+    not part of line 1.
     """
-    with open(path, encoding="utf-8", errors="replace", newline="\n") as f:
+    with open(path, encoding="utf-8-sig", errors="replace", newline="\n") as f:
         for number, line in enumerate(f, start=1):
             if line.endswith("\n"):
                 line = line[:-2] if line.endswith("\r\n") else line[:-1]

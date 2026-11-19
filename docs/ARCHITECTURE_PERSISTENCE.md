@@ -53,9 +53,6 @@ pub struct LogIndex {
     pub correlation_index: HashMap<String, Vec<usize>>,
     pub trace_index: HashMap<String, Vec<usize>>,
     pub level_index: HashMap<LogLevel, Vec<usize>>,
-
-    // Line offsets for fast file seeking
-    pub line_offsets: Vec<LineOffset>,
 }
 ```
 
