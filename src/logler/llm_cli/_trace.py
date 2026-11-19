@@ -1,6 +1,5 @@
 """Trace-related commands: correlate, hierarchy, bottleneck, context, export."""
 
-import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,14 +19,6 @@ from ._core import (
     db_source_option,
     time_filter_options,
 )
-
-
-def _stable_span_suffix(node_id: str) -> str:
-    """Eight hex digits from a digest of the node id: the same in every process.
-
-    (Python's `hash()` of a string is salted per process.)
-    """
-    return hashlib.sha256(str(node_id).encode()).hexdigest()[:8]
 
 
 @command()
@@ -414,117 +405,24 @@ def export_trace(
             )
             sys.exit(EXIT_NO_RESULTS)
 
-        # Convert hierarchy to spans
-        spans = []
+        from ..export import EXPORTERS
 
-        def node_to_span(node: dict[str, Any], parent_span_id: str | None = None):
-            node_id = node.get("id", "unknown")
-
-            # Generate span ID if not present
-            span_id = node.get("span_id") or f"span-{_stable_span_suffix(node_id)}"
-
-            span = {
-                "traceId": identifier.replace("trace-", "").replace("-", "")[:32].ljust(32, "0"),
-                "spanId": span_id.replace("-", "")[:16].ljust(16, "0"),
-                "operationName": node.get("name") or node.get("operation_name") or node_id,
-                "serviceName": node.get("service_name", "unknown"),
-                "startTime": node.get("start_time"),
-                "duration": (node.get("duration_ms", 0) or 0) * 1000,  # Convert to microseconds
-                "tags": [],
-                "logs": [],
-            }
-
-            if parent_span_id:
-                span["parentSpanId"] = parent_span_id.replace("-", "")[:16].ljust(16, "0")
-
-            # Add tags
-            if node.get("error_count", 0) > 0:
-                span["tags"].append({"key": "error", "value": True})
-
-            if node.get("entry_count"):
-                span["tags"].append({"key": "log.entry_count", "value": node["entry_count"]})
-
-            spans.append(span)
-
-            for child in node.get("children", []):
-                node_to_span(child, span_id)
-
-        for root in hierarchy_result.get("roots", []):
-            node_to_span(root)
-
-        # Format output based on target format
-        trace_output: dict[str, Any] | list[dict[str, Any]]
+        trace_output = EXPORTERS[export_format](hierarchy_result, identifier=identifier)
         if export_format == "jaeger":
-            trace_output = {
-                "data": [
-                    {
-                        "traceID": identifier.replace("trace-", "")
-                        .replace("-", "")[:32]
-                        .ljust(32, "0"),
-                        "spans": spans,
-                        "processes": {
-                            "p1": {
-                                "serviceName": "logler-export",
-                                "tags": [],
-                            }
-                        },
-                    }
-                ],
-                "total": 1,
-                "limit": 0,
-                "offset": 0,
-                "errors": None,
-            }
+            span_count = len(trace_output["data"][0]["spans"])
         elif export_format == "zipkin":
-            trace_output = [
-                {
-                    "traceId": span["traceId"],
-                    "id": span["spanId"],
-                    "name": span["operationName"],
-                    "timestamp": span.get("startTime"),
-                    "duration": span["duration"],
-                    "localEndpoint": {"serviceName": span.get("serviceName", "unknown")},
-                    "parentId": span.get("parentSpanId"),
-                    "tags": {t["key"]: str(t["value"]) for t in span.get("tags", [])},
-                }
-                for span in spans
-            ]
-        else:  # otlp
-            trace_output = {
-                "resourceSpans": [
-                    {
-                        "resource": {
-                            "attributes": [
-                                {
-                                    "key": "service.name",
-                                    "value": {"stringValue": "logler-export"},
-                                }
-                            ]
-                        },
-                        "scopeSpans": [
-                            {
-                                "scope": {"name": "logler"},
-                                "spans": [
-                                    {
-                                        "traceId": span["traceId"],
-                                        "spanId": span["spanId"],
-                                        "name": span["operationName"],
-                                        "startTimeUnixNano": span.get("startTime"),
-                                        "endTimeUnixNano": None,
-                                        "parentSpanId": span.get("parentSpanId"),
-                                    }
-                                    for span in spans
-                                ],
-                            }
-                        ],
-                    }
-                ]
-            }
+            span_count = len(trace_output)
+        else:
+            span_count = sum(
+                len(scope["spans"])
+                for resource in trace_output["resourceSpans"]
+                for scope in resource["scopeSpans"]
+            )
 
         output = {
             "identifier": identifier,
             "format": export_format,
-            "span_count": len(spans),
+            "span_count": span_count,
             "export": trace_output,
         }
 

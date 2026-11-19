@@ -537,6 +537,46 @@ class ZipkinSpan(TypedDict):
     parentId: NotRequired[str]
 
 
+class OtlpAttribute(TypedDict):
+    """An OTLP attribute: ``value`` is ``{"stringValue": str}`` or ``{"intValue": str}``."""
+
+    key: str
+    value: dict[str, str]
+
+
+class OtlpSpan(TypedDict):
+    """A span in the JSON form of OTLP; the two times are decimal text of nanoseconds."""
+
+    traceId: str
+    spanId: str
+    parentSpanId: NotRequired[str]  # absent on a root span
+    name: str
+    startTimeUnixNano: str
+    endTimeUnixNano: str
+    attributes: list[OtlpAttribute]
+    status: NotRequired[dict[str, int]]  # {"code": 2} on a span with errors
+
+
+class OtlpScopeSpans(TypedDict):
+    """The spans of one service under the ``logler`` scope."""
+
+    scope: dict[str, str]
+    spans: list[OtlpSpan]
+
+
+class OtlpResourceSpans(TypedDict):
+    """One service: its ``service.name`` attribute and its spans."""
+
+    resource: dict[str, list[OtlpAttribute]]
+    scopeSpans: list[OtlpScopeSpans]
+
+
+class OtlpExport(TypedDict):
+    """Return type of :func:`export_to_otlp`: one ``resourceSpans`` entry per service."""
+
+    resourceSpans: list[OtlpResourceSpans]
+
+
 # ---------------------------------------------------------------------------
 # Metrics / Detection types (thin wrappers)
 # ---------------------------------------------------------------------------

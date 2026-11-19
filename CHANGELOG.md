@@ -18,6 +18,7 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 - **`llm emit --pretty` is removed.**
 - **`llm emit` exits 1 when nothing matches**, like every other `llm` command. It exited 0.
 - **`LogReader.tail(0)` gives no lines.** It gave the whole file.
+- **The `export` value of `llm export` is the output of `export_to_jaeger`, `export_to_zipkin` or `export_to_otlp`.** Jaeger: each span names its service through `processID` and `processes` holds one process per service, where every span carried an inline `serviceName` and `parentSpanId` under one process `p1`; the parent is in `references`, ids are `spanID` and `traceID`, the operation is `operationName`, times are microseconds, and the keys `total`, `limit`, `offset` and `errors` are gone. OTLP: one `resourceSpans` entry per service, times are decimal text of nanoseconds, and a root span has no `parentSpanId`. Ids change in every format (see Fixed), and a span with no service is under `logler-export`, where it was `unknown`.
 - **Fields of the pydantic models in `logler.models` follow the API's names:** `FileMetadata.lines` (was `line_count`) and `log_levels` (was `level_distribution`), `PatternMatch.occurrences` (was `count`), `SamplingResult.samples` (was `entries`). `SpanNode.entry_ids` holds the entries' ids as text.
 - **Importing logler never starts a build.** Without the compiled extension the import warns once and says how to build it.
 - The unused HTTP server, the second command-line program and the old web back end are deleted from the repository. None of them was in the published package.
@@ -51,6 +52,8 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 - **A summary and a count describe every match.** `log_levels`, `by_level`, `by_file`, `unique_messages`, `top_messages` and `time_range` of the `summary` and `count` formats were counted from the entries returned, at most `limit` or 10,000, while `total_matches` was every match, so `llm triage` gave a file of 12,000 lines whose last 2,000 are errors an error rate of 0. The engine now counts them over every match; `limit`, `tail` and `offset` choose only the `sample_entries`. A message's `first_seen` and `last_seen` and the `time_range` are compared as times: a whole second, written with no fraction, came after a time later in that second.
 - **Reading a thread does not break the tracker.** `ThreadTracker.get_thread()` replaced the thread's set of correlation ids with a list, so the next line tracked for that thread failed. It returns a sorted copy.
 - **`trace_request()` names the services of a JSON log.** It read only a `service` field of the entry, which a JSON line does not keep there.
+- **A trace export carries the log's own span ids and services, and is the same in every run.** `export_to_jaeger` and `export_to_zipkin` made every span id and trace id up at random, and `llm export` named every service "unknown". A span keeps the span id of its log entries when it is 16 hexadecimal characters (in lower case) and not all zeros, which OTLP and W3C trace context call invalid; any other id, such as `s-one` or a UUID, is replaced by a 16-hex id derived from it with SHA-256, and parent links follow. No two spans of one export share an id. The trace id is the identifier when it is 32 hexadecimal characters and not all zeros, else derived from it the same way (new optional argument `identifier=`). A span is under the `service` of its node, else under `logler-export`.
+- **`llm export` uses the library's converters**, so its spans are valid in Jaeger, Zipkin and OTLP. It stripped and padded ids (`s-one` became `sone000000000000`, and two ids could become one), gave a Jaeger trace a single process, and its OTLP output named one service for every span and put a text time in `startTimeUnixNano`.
 - **`ProjectedSearchResult` describes `search(fields=[...])`**, whose entries hold only the asked keys; `LogEntryDict` still describes a whole entry.
 - A failed SQL load no longer leaves its temporary CSV behind.
 
@@ -58,11 +61,13 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 
 - **A long search no longer blocks the other threads of a Python program:** the engine releases the GIL while it works.
 - **Parsing is faster:** a JSON line is parsed once (about 30% less time a line), and a plain line costs less than it did in 1.3.
+- **The `count` format, and `llm export`, are faster.** On 1,000,000 lines a count took a quarter of the time; `llm export` no longer reads every line a second time to find the services, and took a quarter of the time and three fifths of the peak memory.
 - The index reads each file once, in file order, with bounded memory per batch.
 
 ### Added
 
 - **A node of a hierarchy names its service:** `service` is the `service_name` of the first of its entries that has one, or null.
+- **`export_to_otlp()`** exports a hierarchy to the JSON form of OTLP traces, with the arguments of `export_to_jaeger` and `export_to_zipkin`.
 - **Type information.** The package ships `py.typed` and a stub for the compiled extension, and is checked with mypy.
 
 ### Development

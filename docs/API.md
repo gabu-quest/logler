@@ -163,5 +163,6 @@ These functions are part of the public API but not yet covered by contract tests
 | `extract_metrics()` | Extract numeric values with stats (min/max/mean/p95/p99) |
 | `detect_formats()` | Auto-detect log format with confidence scoring |
 | `mine_log_templates()` | Drain algorithm template mining |
+| `export_to_jaeger()`, `export_to_zipkin()`, `export_to_otlp()` | A hierarchy as a Jaeger, Zipkin V2 or OTLP JSON trace. Arguments: `hierarchy`, `service_name` (default `logler-export`), `identifier`. A span is under its node's `service` (the `service_name` of the first of the node's entries that has one), else under `service_name`. With `identifier=` the trace id is made from it; an id that is all zeros is never kept |
 
 See `logler.types` for full TypedDict definitions.

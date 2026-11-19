@@ -8,7 +8,7 @@ Implementation is split across focused submodules for maintainability:
 
 * :mod:`logler._search_core`  — search, follow, context, patterns, metadata
 * :mod:`logler.hierarchy`     — thread hierarchy, error flow, bottleneck analysis
-* :mod:`logler.export`        — Jaeger / Zipkin trace export
+* :mod:`logler.export`        — Jaeger / Zipkin / OTLP trace export
 * :mod:`logler.comparison`    — thread & time-period comparison, cross-service timeline
 * :mod:`logler.sampling`      — smart sampling strategies
 * :mod:`logler.session`       — InvestigationSession (stateful investigations)
@@ -78,10 +78,11 @@ from .comparison import (  # noqa: F401
 )
 
 # ---------------------------------------------------------------------------
-# Export (Jaeger / Zipkin)
+# Export (Jaeger / Zipkin / OTLP)
 # ---------------------------------------------------------------------------
 from .export import (  # noqa: F401
     export_to_jaeger,
+    export_to_otlp,
     export_to_zipkin,
 )
 

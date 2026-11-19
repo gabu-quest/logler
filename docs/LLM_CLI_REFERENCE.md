@@ -921,21 +921,78 @@ logler llm export trace-abc123 --format otlp
 - `--format FORMAT` - Export format: `jaeger` (default), `zipkin`, `otlp`
 - `--pretty` - Pretty-print JSON output
 
+`export` is what `export_to_jaeger`, `export_to_zipkin` or `export_to_otlp` returns for the
+trace (`logler.export`); the command adds `identifier`, `format` and `span_count`.
+
+- **Span ids** are the log's own `span_id` when it is 16 hexadecimal characters (in lower
+  case) and not all zeros; any other id, and a node with no span id, gets a 16-hex id made with SHA-256, the
+  same in every run. No two spans share an id.
+- **The trace id** is `IDENTIFIER` when it is 32 hexadecimal characters and not all zeros,
+  else made from it the same way.
+- **The service** of a span is its hierarchy node's `service` (the `service_name` of the
+  node's first entry that has one), else `logler-export`.
+  Jaeger: one process per service, named by each span's `processID`. Zipkin:
+  `localEndpoint`. OTLP: one `resourceSpans` entry per service.
+
 **Output (jaeger format):**
 ```json
 {
   "identifier": "trace-abc123",
   "format": "jaeger",
-  "span_count": 5,
+  "span_count": 2,
   "export": {
     "data": [{
-      "traceID": "abc12300000000000000000000000000",
-      "spans": [...],
-      "processes": {...}
+      "traceID": "f77fa5b72c92206389a61d9faea3c4b3",
+      "spans": [
+        {"traceID": "f77fa5b72c92206389a61d9faea3c4b3", "spanID": "a1b2c3d4e5f60718",
+         "operationName": "GET /orders", "references": [],
+         "startTime": 1794650460000000, "duration": 1500000,
+         "tags": [{"key": "node_type", "type": "string", "value": "Span"}, ...],
+         "logs": [], "processID": "p1", "warnings": []},
+        {"traceID": "f77fa5b72c92206389a61d9faea3c4b3", "spanID": "1122334455667788",
+         "operationName": "charge card",
+         "references": [{"refType": "CHILD_OF", "traceID": "f77fa5b72c92206389a61d9faea3c4b3",
+                         "spanID": "a1b2c3d4e5f60718"}],
+         "startTime": 1794650460250000, "duration": 250000,
+         "tags": [...], "logs": [], "processID": "p2", "warnings": []}
+      ],
+      "processes": {
+        "p1": {"serviceName": "gateway", "tags": [{"key": "exported_by", "type": "string", "value": "logler"}]},
+        "p2": {"serviceName": "billing", "tags": [{"key": "exported_by", "type": "string", "value": "logler"}]}
+      },
+      "warnings": []
     }]
   }
 }
 ```
+
+**Output (otlp format), `export` only:**
+```json
+{
+  "resourceSpans": [
+    {
+      "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "gateway"}}]},
+      "scopeSpans": [{"scope": {"name": "logler"}, "spans": [
+        {"traceId": "f77fa5b72c92206389a61d9faea3c4b3", "spanId": "a1b2c3d4e5f60718",
+         "name": "GET /orders",
+         "startTimeUnixNano": "1794650460000000000", "endTimeUnixNano": "1794650461500000000",
+         "attributes": [{"key": "node_type", "value": {"stringValue": "Span"}},
+                        {"key": "entry_count", "value": {"intValue": "1"}},
+                        {"key": "error_count", "value": {"intValue": "0"}}]}
+      ]}]
+    },
+    {
+      "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "billing"}}]},
+      "scopeSpans": [{"scope": {"name": "logler"}, "spans": [
+        {"traceId": "f77fa5b72c92206389a61d9faea3c4b3", "spanId": "1122334455667788",
+         "parentSpanId": "a1b2c3d4e5f60718", "name": "charge card", "...": "..."}
+      ]}]
+    }
+  ]
+}
+```
+
+A root span has no `parentSpanId`; a span with errors has `"status": {"code": 2}`.
 
 ---
 
