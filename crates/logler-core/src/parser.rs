@@ -467,10 +467,18 @@ impl LogParser {
             fields.insert(key.to_string(), json_value);
         }
 
+        // Many logfmt lines lead with a bare timestamp and level before the pairs
+        // ("2024-01-15T15:00:00Z INFO service=api ..."). Those leading words are read when
+        // no key names the value; a word inside a pair's value never is.
+        let prefix = LOGFMT_PAIR_RE
+            .get()?
+            .find(raw)
+            .map_or("", |first_pair| &raw[..first_pair.start()]);
+
         if let Some(Value::String(level)) = fields.get("level").or_else(|| fields.get("lvl")) {
             entry.level = LogLevel::parse(level);
         } else {
-            entry.level = Some(LogLevel::Unknown);
+            entry.level = self.extract_level(prefix).or(Some(LogLevel::Unknown));
         }
         if let Some(Value::String(msg)) = fields.get("msg").or_else(|| fields.get("message")) {
             entry.message = msg.clone();
@@ -479,6 +487,8 @@ impl LogParser {
             entry.timestamp = DateTime::parse_from_rfc3339(ts)
                 .ok()
                 .map(|dt| dt.with_timezone(&Utc));
+        } else {
+            entry.timestamp = self.extract_timestamp(prefix);
         }
         if let Some(Value::String(thread)) =
             fields.get("thread").or_else(|| fields.get("thread_id"))
@@ -768,6 +778,47 @@ mod tests {
         assert_eq!(entry.format, LogFormat::Logfmt);
         assert_eq!(entry.level, Some(LogLevel::Unknown));
         assert_eq!(entry.message, "no level set");
+    }
+
+    #[test]
+    fn test_logfmt_after_a_leading_timestamp_and_level_keeps_both() {
+        // A common shape: the timestamp and level come first as bare words, the rest is pairs.
+        let parser = LogParser::new("test.log");
+        let line =
+            r#"2024-01-15T15:00:00.500Z WARN service=api thread_id=api-001 message="slow start""#;
+        let entry = parser.parse_line(13, line).unwrap();
+
+        assert_eq!(entry.format, LogFormat::Logfmt);
+        assert_eq!(entry.level, Some(LogLevel::Warn));
+        assert_eq!(
+            entry.timestamp,
+            Some(
+                DateTime::parse_from_rfc3339("2024-01-15T15:00:00.500Z")
+                    .unwrap()
+                    .with_timezone(&Utc)
+            )
+        );
+        assert_eq!(entry.message, "slow start");
+        assert_eq!(entry.service_name.as_deref(), Some("api"));
+        assert_eq!(entry.thread_id.as_deref(), Some("api-001"));
+    }
+
+    #[test]
+    fn test_logfmt_level_word_inside_a_value_is_not_the_level() {
+        // Only the words before the first pair can name the level; a value that happens to
+        // contain "error" does not, and a level key wins over a leading word.
+        let parser = LogParser::new("test.log");
+
+        let entry = parser
+            .parse_line(14, r#"service=api msg="error budget is fine" user=bob"#)
+            .unwrap();
+        assert_eq!(entry.format, LogFormat::Logfmt);
+        assert_eq!(entry.level, Some(LogLevel::Unknown));
+
+        let entry = parser
+            .parse_line(15, r#"INFO level=error msg="disk full" host=db1"#)
+            .unwrap();
+        assert_eq!(entry.level, Some(LogLevel::Error));
     }
 
     #[test]
