@@ -111,7 +111,7 @@ JSON (recommended), syslog (RFC 3164/5424, BSD), logfmt, Apache CLF, plain text.
 
 ## Performance
 
-Real numbers from the [benchmark suite](benchmarks/results/v3/REPORT.md)
+Real numbers from the [benchmark suite](docs/benchmarks/REPORT.md)
 (19 scenarios, deterministic data, Python 3.12, Rust backend):
 
 | Operation | Speed | Context |
@@ -125,7 +125,7 @@ Real numbers from the [benchmark suite](benchmarks/results/v3/REPORT.md)
 
 Three optimization rounds drove hierarchy building from 86 seconds to 349ms (246x speedup) and reduced memory usage for database operations from 85 MB to 1 MB (83x reduction).
 
-Full report with 19 charts: [benchmarks/results/v3/REPORT.md](benchmarks/results/v3/REPORT.md)
+Full report with 19 charts: [docs/benchmarks/REPORT.md](docs/benchmarks/REPORT.md)
 
 ## Showcase
 
@@ -278,7 +278,7 @@ Run locally: `uv run marimo edit examples/tours/tour_01_fundamentals.py`
 | [Python API Guide](docs/LLM_README.md) | Library usage and examples |
 | [Investigation API](docs/LLM_INVESTIGATION_API.md) | All investigation functions |
 | [Interactive Tours](https://gabu-quest.github.io/logler/) | 17 marimo notebooks |
-| [Benchmarks](benchmarks/results/v3/REPORT.md) | 19 scenarios with charts |
+| [Benchmarks](docs/benchmarks/REPORT.md) | 19 scenarios with charts |
 | [Web UI](https://github.com/gabu-quest/logler-web) | Vue3 + Naive-UI interface |
 
 ## Development

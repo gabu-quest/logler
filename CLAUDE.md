@@ -252,7 +252,7 @@ uv run python -m benchmarks compare -b v1.json -c v2.json -o results/v2  # Befor
 - Scales: small (1K/10K/50K), medium (10K/50K/100K), large (50K/100K/500K)
 - Memory scenarios use fixed scales (10K/50K/100K) ignoring config.scale for cross-run comparability
 - Deterministic data generation (seeded RNG), precision timing (warmup + percentiles)
-- v1 baseline preserved at `benchmarks/results/v1/baseline.json`
+- Output goes to `benchmarks/results/` (git-ignored); the published report is `docs/benchmarks/REPORT.md`
 - Comparison report generator produces scientific before/after analysis with confidence levels
 
 ### Memory Measurement Rules

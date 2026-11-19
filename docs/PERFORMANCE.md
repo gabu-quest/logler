@@ -6,18 +6,18 @@ Logler is built with Rust for maximum performance. This guide explains performan
 
 ## Measured Performance
 
-Numbers from the [benchmark suite](../benchmarks/results/REPORT.md)
-(14 scenarios, 3 iterations, Python 3.12, Rust backend, 8 cores):
+Medians from the [benchmark report](benchmarks/REPORT.md)
+(19 scenarios, logler 1.3.1, Python 3.12, Rust backend, 8 cores):
 
 | Operation | Measured | Scale |
 |-----------|----------|-------|
-| Search (level filter) | **7ms** / **39ms** / **694ms** | 1K / 10K / 50K entries |
-| Search (combined filters) | **4ms** / **25ms** / **173ms** | 1K / 10K / 50K entries |
-| Follow thread | **2.6ms** / **28ms** / **259ms** | 1K / 10K / 50K entries |
-| Cross-service timeline | **5ms** / **7ms** / **13ms** | 2 / 3 / 5 services |
-| Error flow analysis | **0.15ms** / **0.8ms** / **1.7ms** | 1K / 5K / 10K entries |
-| Smart sampling | **64ms** / **778ms** / **9.1s** | 1K / 10K / 50K entries |
-| Token savings (count vs full) | **2540x** | 100 ERRORs, 50K entries |
+| Search (level filter) | **5.6ms** / **8.9ms** / **40ms** | 1K / 10K / 50K entries |
+| Search (combined filters) | **0.9ms** / **7.5ms** / **19ms** | 1K / 10K / 50K entries |
+| Follow thread | **0.36ms** / **8.0ms** / **145ms** | 1K / 10K / 50K entries |
+| Cross-service timeline | **3.3ms** / **5.5ms** / **10.6ms** | 2 / 3 / 5 services |
+| Error flow analysis | **0.14ms** / **0.81ms** / **2.3ms** | small / medium / large hierarchy |
+| Smart sampling | **67ms** / **157ms** / **622ms** | 1K / 10K / 50K entries |
+| Token savings (count vs full) | **2540x** | 202 bytes against 513,018 for the same query |
 
 ## Architecture
 
@@ -328,7 +328,7 @@ uv run python -m benchmarks run --scale small -v
 uv run python -m benchmarks plot
 ```
 
-Results: [benchmarks/results/REPORT.md](../benchmarks/results/REPORT.md)
+The run writes to `benchmarks/results/`, which is not tracked. The published report: [benchmarks/REPORT.md](benchmarks/REPORT.md)
 
 ### Comparison with Traditional Tools
 
@@ -337,7 +337,7 @@ awareness. Direct comparisons aren't meaningful — they solve different problem
 string matching, use logler when you need thread tracking, hierarchy building, cross-service
 timelines, or structured investigation.
 
-See the [full benchmark report](../benchmarks/results/REPORT.md) for measured numbers across 14 scenarios.
+See the [full benchmark report](benchmarks/REPORT.md) for measured numbers across 19 scenarios.
 
 ## Performance Testing
 
