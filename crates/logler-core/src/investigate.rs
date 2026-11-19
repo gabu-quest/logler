@@ -4,7 +4,7 @@ use crate::types::*;
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -42,14 +42,15 @@ struct MatchCandidate {
 
 /// Main investigation API for LLM agents
 pub struct Investigator {
-    indices: HashMap<String, LogIndex>,
+    /// Loaded files by path. Ordered, so every walk over the files goes in order of path.
+    indices: BTreeMap<String, LogIndex>,
 }
 
 impl Investigator {
     /// Create a new investigator
     pub fn new() -> Self {
         Self {
-            indices: HashMap::new(),
+            indices: BTreeMap::new(),
         }
     }
 
@@ -500,7 +501,7 @@ impl Investigator {
             None
         };
 
-        let unique_spans: HashSet<String> = all_entries
+        let unique_spans: BTreeSet<String> = all_entries
             .iter()
             .filter_map(|e| e.span_id.clone())
             .collect();
@@ -606,7 +607,7 @@ impl Investigator {
                     Some(ts) => ts,
                     None => continue,
                 };
-                let affected_threads: HashSet<String> =
+                let affected_threads: BTreeSet<String> =
                     entries.iter().filter_map(|e| e.thread_id.clone()).collect();
 
                 patterns.push(Pattern {
@@ -621,8 +622,12 @@ impl Investigator {
             }
         }
 
-        // Sort by occurrence count
-        patterns.sort_by_key(|a| std::cmp::Reverse(a.occurrences));
+        // Most occurrences first; patterns with the same count in order of pattern
+        patterns.sort_by(|a, b| {
+            b.occurrences
+                .cmp(&a.occurrences)
+                .then_with(|| a.pattern.cmp(&b.pattern))
+        });
 
         Ok(PatternResults { patterns })
     }
@@ -669,7 +674,7 @@ impl Investigator {
             let size_bytes = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
 
             // Get available fields
-            let available_fields: HashSet<String> = entries
+            let available_fields: BTreeSet<String> = entries
                 .iter()
                 .flat_map(|e| e.fields.keys().cloned())
                 .collect();
@@ -792,7 +797,8 @@ impl Investigator {
                     last_seen: last,
                 })
                 .collect();
-            infos.sort_by_key(|a| std::cmp::Reverse(a.count));
+            // Highest count first; ids with the same count in order of id
+            infos.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.id.cmp(&b.id)));
             infos
         }
 
@@ -1546,5 +1552,133 @@ mod tests {
             "limit=0 should return all results"
         );
         assert_eq!(results.total_matches, 200);
+    }
+
+    // Each Investigator below is built again in a loop: every hash map has its own order,
+    // so one lucky run cannot pass.
+
+    #[test]
+    fn loaded_files_are_walked_in_order_of_path() {
+        for _ in 0..20 {
+            let files: Vec<NamedTempFile> = (0..8)
+                .map(|i| {
+                    make_test_file(&[&json_entry(
+                        "2024-01-15T10:00:00Z",
+                        "INFO",
+                        &format!("file {i}"),
+                        "t",
+                        "svc",
+                    )])
+                })
+                .collect();
+            let mut inv = Investigator::new();
+            let paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+            inv.load_files(&paths).unwrap();
+
+            let mut expected: Vec<String> = paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
+            expected.sort();
+            let walked: Vec<String> = inv
+                .get_metadata(&[])
+                .unwrap()
+                .into_iter()
+                .map(|m| m.path)
+                .collect();
+            assert_eq!(walked, expected);
+        }
+    }
+
+    #[test]
+    fn ids_with_the_same_count_come_in_order_of_id() {
+        let names = ["m", "c", "x", "a", "q", "b", "z", "d", "k", "f"];
+        for _ in 0..20 {
+            let lines: Vec<String> = names
+                .iter()
+                .map(|n| json_entry("2024-01-15T10:00:00Z", "INFO", "hi", &format!("w-{n}"), n))
+                .collect();
+            let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+            let file = make_test_file(&refs);
+            let ids = build_investigator(&file).extract_ids(None).unwrap();
+
+            let mut sorted: Vec<&str> = names.to_vec();
+            sorted.sort();
+            let threads: Vec<String> = ids.thread_ids.iter().map(|i| i.id.clone()).collect();
+            let expected: Vec<String> = sorted.iter().map(|n| format!("w-{n}")).collect();
+            assert_eq!(threads, expected);
+            let services: Vec<&str> = ids.services.iter().map(|i| i.id.as_str()).collect();
+            assert_eq!(services, sorted);
+        }
+    }
+
+    #[test]
+    fn error_patterns_with_the_same_count_come_in_order_of_pattern() {
+        let words = ["pear", "fig", "plum", "apple", "kiwi", "lime"];
+        for _ in 0..20 {
+            let lines: Vec<String> = words
+                .iter()
+                .flat_map(|w| {
+                    (0..2).map(move |i| {
+                        json_entry(
+                            "2024-01-15T10:00:00Z",
+                            "ERROR",
+                            &format!("{w} failed"),
+                            &format!("t-{w}-{i}"),
+                            "svc",
+                        )
+                    })
+                })
+                .collect();
+            let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+            let file = make_test_file(&refs);
+            let found = build_investigator(&file).find_patterns(&[], 2).unwrap();
+
+            let mut expected: Vec<String> = words.iter().map(|w| format!("{w} failed")).collect();
+            expected.sort();
+            let order: Vec<String> = found.patterns.iter().map(|p| p.pattern.clone()).collect();
+            assert_eq!(order, expected);
+            for p in &found.patterns {
+                let mut threads = p.affected_threads.clone();
+                threads.sort();
+                assert_eq!(p.affected_threads, threads, "threads of {}", p.pattern);
+            }
+        }
+    }
+
+    #[test]
+    fn a_result_writes_its_maps_with_the_keys_in_order() {
+        let keys = ["m", "c", "x", "a", "q", "b", "z", "d", "k", "f"];
+        for _ in 0..20 {
+            let lines = [r#"{"timestamp":"2024-01-15T10:00:00Z","level":"INFO","message":"hi","m":1,"c":1,"x":1,"a":1,"q":1,"b":1,"z":1,"d":1,"k":1,"f":1}"#.to_string()];
+            let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+            let file = make_test_file(&refs);
+            let inv = build_investigator(&file);
+            let entry = inv.get_entries_page(0, 1).entries.remove(0);
+            let written = serde_json::to_string(&entry).unwrap();
+            let at: Vec<usize> = ["a", "b", "c", "d", "f", "k", "m", "q", "x", "z"]
+                .iter()
+                .map(|k| written.find(&format!("\"{k}\":1")).unwrap())
+                .collect();
+            let mut in_order = at.clone();
+            in_order.sort();
+            assert_eq!(at, in_order, "fields of an entry in key order: {written}");
+            assert_eq!(keys.len(), at.len());
+
+            let mut stats = crate::stats::LogStats::new();
+            for k in keys {
+                stats.level_counts.insert(k.to_string(), 1);
+                stats.service_counts.insert(k.to_string(), 1);
+                stats.thread_counts.insert(k.to_string(), 1);
+            }
+            let written = serde_json::to_string(&stats).unwrap();
+            let sorted = r#"{"a":1,"b":1,"c":1,"d":1,"f":1,"k":1,"m":1,"q":1,"x":1,"z":1}"#;
+            for field in ["level_counts", "service_counts", "thread_counts"] {
+                assert!(
+                    written.contains(&format!("\"{field}\":{sorted}")),
+                    "{field} in key order: {written}"
+                );
+            }
+        }
     }
 }

@@ -128,11 +128,11 @@ def schema(files: tuple, db_path: str | None, sample_size: int, full: bool, pret
                 schema_data[field]["values"] = list(level_values.keys())
             elif field == "thread_id" and thread_patterns:
                 # Extract patterns from thread IDs
-                patterns = _extract_patterns(list(thread_patterns)[:100])
+                patterns = _extract_patterns(sorted(thread_patterns)[:100])
                 if patterns:
                     schema_data[field]["patterns"] = patterns
             elif field == "correlation_id" and correlation_patterns:
-                patterns = _extract_patterns(list(correlation_patterns)[:100])
+                patterns = _extract_patterns(sorted(correlation_patterns)[:100])
                 if patterns:
                     schema_data[field]["patterns"] = patterns
 

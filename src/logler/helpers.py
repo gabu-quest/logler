@@ -92,7 +92,7 @@ def trace_request(files: list[str], correlation_id: str) -> dict[str, Any]:
         "entries": timeline["entries"],
         "duration_ms": timeline.get("duration_ms"),
         "error_count": error_count,
-        "services": list(services),
+        "services": sorted(services),
         "total_entries": timeline["total_entries"],
     }
 

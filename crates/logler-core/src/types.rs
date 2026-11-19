@@ -4,6 +4,35 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
+use serde::Serializer;
+use std::collections::BTreeMap;
+
+/// A map that can be written as a JSON object with its keys in order.
+/// A `HashMap` has a different order in every process; this is the one place that
+/// fixes it, used with `#[serde(serialize_with = "sorted_map")]` on each map field.
+pub trait SortedMap {
+    fn serialize_sorted<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error>;
+}
+
+impl<K: Serialize + Ord, V: Serialize> SortedMap for HashMap<K, V> {
+    fn serialize_sorted<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.iter().collect::<BTreeMap<_, _>>())
+    }
+}
+
+impl<M: SortedMap> SortedMap for Option<M> {
+    fn serialize_sorted<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Some(map) => map.serialize_sorted(serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+}
+
+pub fn sorted_map<S: Serializer, M: SortedMap>(map: &M, serializer: S) -> Result<S::Ok, S::Error> {
+    map.serialize_sorted(serializer)
+}
+
 /// Log entry representing a single log line
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
@@ -21,6 +50,7 @@ pub struct LogEntry {
     pub span_id: Option<String>,
     pub parent_span_id: Option<String>,
     pub service_name: Option<String>,
+    #[serde(serialize_with = "sorted_map")]
     pub fields: HashMap<String, serde_json::Value>,
 }
 
@@ -284,7 +314,9 @@ pub struct TimelineEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimelineStatistics {
     pub total_entries: usize,
+    #[serde(serialize_with = "sorted_map")]
     pub by_level: HashMap<String, usize>,
+    #[serde(serialize_with = "sorted_map")]
     pub by_thread: HashMap<String, usize>,
     pub errors_per_minute: Vec<usize>,
 }
@@ -358,6 +390,7 @@ pub struct ErrorGroup {
 /// Statistical analysis result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Statistics {
+    #[serde(serialize_with = "sorted_map")]
     pub metrics: HashMap<String, MetricStats>,
     pub insights: Vec<String>,
 }
@@ -366,7 +399,9 @@ pub struct Statistics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricStats {
     pub total: usize,
+    #[serde(serialize_with = "sorted_map")]
     pub by_level: Option<HashMap<String, usize>>,
+    #[serde(serialize_with = "sorted_map")]
     pub by_thread: Option<HashMap<String, usize>>,
     pub time_series: Vec<TimeSeriesPoint>,
     pub percentiles: Option<Percentiles>,
@@ -399,6 +434,7 @@ pub struct FileMetadata {
     pub available_fields: Vec<String>,
     pub unique_threads: usize,
     pub unique_correlation_ids: usize,
+    #[serde(serialize_with = "sorted_map")]
     pub log_levels: HashMap<String, usize>,
 }
 

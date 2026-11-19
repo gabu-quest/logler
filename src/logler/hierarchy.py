@@ -689,7 +689,8 @@ def detect_correlation_chains(
         root_ids = [root_correlation_id] if root_correlation_id in root_ids else []
 
     # Convert hierarchy to regular dict
-    hierarchy_dict = {k: list(set(v)) for k, v in hierarchy.items()}
+    # Children in the order they first appear in the logs, repeats dropped
+    hierarchy_dict = {k: list(dict.fromkeys(v)) for k, v in hierarchy.items()}
 
     return {
         "chains": unique_chains,
@@ -1034,7 +1035,8 @@ def diff_hierarchies(
     result["summary"]["node_count_change"] = len(nodes_b) - len(nodes_a)
 
     # Compare individual nodes
-    all_node_ids = set(nodes_a.keys()) | set(nodes_b.keys())
+    # Tree order: every node of A, then the nodes only B has
+    all_node_ids = list(dict.fromkeys([*nodes_a, *nodes_b]))
 
     for node_id in all_node_ids:
         in_a = node_id in nodes_a

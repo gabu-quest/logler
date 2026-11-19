@@ -383,7 +383,7 @@ def _analyze_thread(entries: list[dict], thread_id: str) -> dict[str, Any]:
         "log_levels": dict(level_counts),
         "unique_messages": len(set(messages)),
         "messages": messages,
-        "services": list(services),
+        "services": sorted(services),
     }
 
 
@@ -396,14 +396,15 @@ def _compute_differences(analysis_a: dict, analysis_b: dict) -> dict[str, Any]:
     error_diff = analysis_b["error_count"] - analysis_a["error_count"]
 
     # Message differences
+    # In the order each message first appears in its own thread, repeats dropped
     messages_a = set(analysis_a["messages"])
     messages_b = set(analysis_b["messages"])
-    only_in_a = list(messages_a - messages_b)
-    only_in_b = list(messages_b - messages_a)
+    only_in_a = [m for m in dict.fromkeys(analysis_a["messages"]) if m not in messages_b]
+    only_in_b = [m for m in dict.fromkeys(analysis_b["messages"]) if m not in messages_a]
 
     # Log level changes
     level_changes = {}
-    all_levels = set(list(analysis_a["log_levels"].keys()) + list(analysis_b["log_levels"].keys()))
+    all_levels = sorted(set(analysis_a["log_levels"]) | set(analysis_b["log_levels"]))
     for level in all_levels:
         count_a = analysis_a["log_levels"].get(level, 0)
         count_b = analysis_b["log_levels"].get(level, 0)
@@ -502,10 +503,11 @@ def _compute_period_changes(analysis_a: dict, analysis_b: dict) -> dict[str, Any
         error_rate_multiplier = float("inf") if analysis_b["error_rate"] > 0 else 1.0
 
     # New vs resolved errors
+    # top_errors is already in order of first appearance; keep that order
     errors_a = set(analysis_a["top_errors"])
     errors_b = set(analysis_b["top_errors"])
-    new_errors = list(errors_b - errors_a)
-    resolved_errors = list(errors_a - errors_b)
+    new_errors = [e for e in analysis_b["top_errors"] if e not in errors_a]
+    resolved_errors = [e for e in analysis_a["top_errors"] if e not in errors_b]
 
     return {
         "log_volume_change_pct": volume_change_pct,

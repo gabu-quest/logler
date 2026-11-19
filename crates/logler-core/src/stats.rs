@@ -1,4 +1,4 @@
-use crate::types::{LogEntry, LogLevel};
+use crate::types::{sorted_map, LogEntry, LogLevel};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -6,8 +6,11 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogStats {
     pub total_count: usize,
+    #[serde(serialize_with = "sorted_map")]
     pub level_counts: HashMap<String, usize>,
+    #[serde(serialize_with = "sorted_map")]
     pub service_counts: HashMap<String, usize>,
+    #[serde(serialize_with = "sorted_map")]
     pub thread_counts: HashMap<String, usize>,
     pub error_rate: f64,
     pub first_timestamp: Option<DateTime<Utc>>,

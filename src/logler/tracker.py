@@ -99,7 +99,7 @@ class ThreadTracker:
         """Get thread information."""
         thread = self.threads.get(thread_id)
         if thread:
-            thread["correlation_ids"] = list(thread["correlation_ids"])
+            thread["correlation_ids"] = sorted(thread["correlation_ids"])
         return thread
 
     def get_all_threads(self) -> list[dict]:
@@ -107,7 +107,7 @@ class ThreadTracker:
         result = []
         for thread in self.threads.values():
             thread_copy = thread.copy()
-            thread_copy["correlation_ids"] = list(thread["correlation_ids"])
+            thread_copy["correlation_ids"] = sorted(thread["correlation_ids"])
             result.append(thread_copy)
         return sorted(result, key=lambda x: x["log_count"], reverse=True)
 
@@ -116,7 +116,7 @@ class ThreadTracker:
         trace = self.traces.get(trace_id)
         if trace:
             trace_copy = trace.copy()
-            trace_copy["services"] = list(trace["services"])
+            trace_copy["services"] = sorted(trace["services"])
             if trace_copy["start_time"] and trace_copy["end_time"]:
                 delta = trace_copy["end_time"] - trace_copy["start_time"]
                 trace_copy["duration_ms"] = delta.total_seconds() * 1000

@@ -1,5 +1,6 @@
 """Trace-related commands: correlate, hierarchy, bottleneck, context, export."""
 
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,14 @@ from ._core import (
     db_source_option,
     time_filter_options,
 )
+
+
+def _stable_span_suffix(node_id: str) -> str:
+    """Eight hex digits from a digest of the node id: the same in every process.
+
+    (Python's `hash()` of a string is salted per process.)
+    """
+    return hashlib.sha256(str(node_id).encode()).hexdigest()[:8]
 
 
 @command()
@@ -144,7 +153,7 @@ def correlate(
             "identifier_type": detected_type,
             "trace": {
                 "total_entries": len(timeline),
-                "services": list(services),
+                "services": sorted(services),
                 "duration_ms": result.get("duration_ms"),
                 "outcome": "error" if error_point else "success",
             },
@@ -412,7 +421,7 @@ def export_trace(
             node_id = node.get("id", "unknown")
 
             # Generate span ID if not present
-            span_id = node.get("span_id") or f"span-{hash(node_id) & 0xFFFFFFFF:08x}"
+            span_id = node.get("span_id") or f"span-{_stable_span_suffix(node_id)}"
 
             span = {
                 "traceId": identifier.replace("trace-", "").replace("-", "")[:32].ljust(32, "0"),
