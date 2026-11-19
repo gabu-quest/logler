@@ -88,7 +88,26 @@ pub const LEVEL_WORDS: &[(LogLevel, &[&str])] = &[
     ),
 ];
 
+/// The one table of level numbers, two schemes that share no number: pino and bunyan write
+/// 10 to 60; syslog and GELF write 0 to 7.
+pub const LEVEL_NUMBERS: &[(LogLevel, &[u64])] = &[
+    (LogLevel::Trace, &[10]),
+    (LogLevel::Debug, &[20, 7]),
+    (LogLevel::Info, &[30, 5, 6]),
+    (LogLevel::Warn, &[40, 4]),
+    (LogLevel::Error, &[50, 3]),
+    (LogLevel::Fatal, &[60, 0, 1, 2]),
+];
+
 impl LogLevel {
+    /// The level a whole number names in `LEVEL_NUMBERS`; `None` for any other number.
+    pub fn from_number(n: u64) -> Option<Self> {
+        LEVEL_NUMBERS
+            .iter()
+            .find(|(_, numbers)| numbers.contains(&n))
+            .map(|(level, _)| *level)
+    }
+
     /// The byte length of the longest word in `LEVEL_WORDS`.
     pub const LONGEST_WORD: usize = {
         let (mut longest, mut level) = (0, 0);

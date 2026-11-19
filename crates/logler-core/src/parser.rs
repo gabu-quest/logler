@@ -547,9 +547,35 @@ impl LogParser {
             Value::Number(number) => epoch_timestamp(number),
             _ => None,
         });
-        entry.level = take_first(LEVEL_KEYS, &mut taken, |key| {
-            obj.get(key)?.as_str().and_then(LogLevel::parse)
-        });
+        // A word beats a number, whichever key holds it: a word names its level, while a number
+        // is read from `LEVEL_NUMBERS` and its writer may have meant another scale. Among words
+        // the first key wins, and among numbers the first that is in the table. A number that
+        // was not read is left in `fields`.
+        let mut numbered = None;
+        for key in LEVEL_KEYS {
+            match obj.get(*key) {
+                Some(Value::String(word)) => {
+                    if let Some(level) = LogLevel::parse(word) {
+                        entry.level = Some(level);
+                        taken.push(key);
+                        break;
+                    }
+                }
+                Some(Value::Number(number)) if numbered.is_none() => {
+                    numbered = number
+                        .as_u64()
+                        .and_then(LogLevel::from_number)
+                        .map(|level| (*key, level));
+                }
+                _ => {}
+            }
+        }
+        if entry.level.is_none() {
+            if let Some((key, level)) = numbered {
+                entry.level = Some(level);
+                taken.push(key);
+            }
+        }
         entry.message = take_first(MESSAGE_KEYS, &mut taken, |key| {
             obj.get(key)?.as_str().map(String::from)
         })
@@ -598,14 +624,8 @@ impl LogParser {
         if let Some(cap) = SYSLOG_PRIORITY_RE.get()?.captures(raw) {
             let priority: u32 = cap[1].parse().unwrap_or(0);
             let severity = priority & 0x07;
-            entry.level = Some(match severity {
-                0 => LogLevel::Fatal,
-                1..=3 => LogLevel::Error,
-                4 => LogLevel::Warn,
-                5..=6 => LogLevel::Info,
-                7 => LogLevel::Debug,
-                _ => LogLevel::Unknown,
-            });
+            entry.level =
+                Some(LogLevel::from_number(u64::from(severity)).unwrap_or(LogLevel::Unknown));
             remaining = &raw[cap.get(0)?.end()..];
         }
 
@@ -1564,16 +1584,102 @@ mod tests {
     }
 
     #[test]
+    fn test_json_numeric_level_is_read_from_the_two_tables() {
+        let rows: &[(&str, Option<LogLevel>)] = &[
+            (r#"{"level": 10, "msg": "x"}"#, Some(LogLevel::Trace)),
+            (r#"{"level": 20, "msg": "x"}"#, Some(LogLevel::Debug)),
+            (r#"{"level": 30, "msg": "x"}"#, Some(LogLevel::Info)),
+            (r#"{"level": 40, "msg": "x"}"#, Some(LogLevel::Warn)),
+            (r#"{"level": 50, "msg": "x"}"#, Some(LogLevel::Error)),
+            (r#"{"level": 60, "msg": "x"}"#, Some(LogLevel::Fatal)),
+            (r#"{"level": 0, "msg": "x"}"#, Some(LogLevel::Fatal)),
+            (r#"{"level": 1, "msg": "x"}"#, Some(LogLevel::Fatal)),
+            (r#"{"level": 2, "msg": "x"}"#, Some(LogLevel::Fatal)),
+            (r#"{"level": 3, "msg": "x"}"#, Some(LogLevel::Error)),
+            (r#"{"level": 4, "msg": "x"}"#, Some(LogLevel::Warn)),
+            (r#"{"level": 5, "msg": "x"}"#, Some(LogLevel::Info)),
+            (r#"{"level": 6, "msg": "x"}"#, Some(LogLevel::Info)),
+            (r#"{"level": 7, "msg": "x"}"#, Some(LogLevel::Debug)),
+            (r#"{"severity": 6, "msg": "x"}"#, Some(LogLevel::Info)),
+            // Any other number, a string of digits and a bool are not a level: the entry has none,
+            // and counts as UNKNOWN wherever levels are counted.
+            (r#"{"level": 8, "msg": "x"}"#, None),
+            (r#"{"level": 35, "msg": "x"}"#, None),
+            (r#"{"level": 600, "msg": "x"}"#, None),
+            (r#"{"level": -1, "msg": "x"}"#, None),
+            (r#"{"level": 3.5, "msg": "x"}"#, None),
+            (r#"{"level": 30.0, "msg": "x"}"#, None),
+            (r#"{"level": 1e3, "msg": "x"}"#, None),
+            (r#"{"level": "30", "msg": "x"}"#, Some(LogLevel::Unknown)),
+            (r#"{"level": true, "msg": "x"}"#, None),
+            (r#"{"level": "warn", "msg": "x"}"#, Some(LogLevel::Warn)),
+        ];
+        for (line, expected) in rows {
+            assert_eq!(parse(line).level, *expected, "{line}");
+        }
+        // A number that is not a level stays in `fields`; one that is a level is taken.
+        assert_eq!(
+            parse(r#"{"level": 35}"#).fields.get("level"),
+            Some(&serde_json::json!(35))
+        );
+        assert_eq!(parse(r#"{"level": 30}"#).fields.get("level"), None);
+    }
+
+    #[test]
+    fn test_json_level_word_beats_a_level_number() {
+        // A word in a later key beats a number in an earlier one, and the number stays a field.
+        let entry = parse(r#"{"level": 30, "severity": "ERROR"}"#);
+        assert_eq!(entry.level, Some(LogLevel::Error), "word after number");
+        assert_eq!(entry.fields.get("level"), Some(&serde_json::json!(30)));
+        assert_eq!(entry.fields.get("severity"), None);
+        let entry = parse(r#"{"level": "warn", "severity": 3}"#);
+        assert_eq!(entry.level, Some(LogLevel::Warn), "word before number");
+        assert_eq!(entry.fields.get("severity"), Some(&serde_json::json!(3)));
+        // Among numbers the first one in the table is read: 35 is no level, 4 is WARN.
+        let entry = parse(r#"{"level": 35, "severity": 4, "lvl": 50}"#);
+        assert_eq!(
+            entry.level,
+            Some(LogLevel::Warn),
+            "first number in the table"
+        );
+        assert_eq!(entry.fields.get("level"), Some(&serde_json::json!(35)));
+        assert_eq!(entry.fields.get("severity"), None);
+        assert_eq!(entry.fields.get("lvl"), Some(&serde_json::json!(50)));
+        // Among words the first key wins, as before.
+        let entry = parse(r#"{"level": "info", "lvl": "warn"}"#);
+        assert_eq!(entry.level, Some(LogLevel::Info), "first word");
+        assert_eq!(entry.fields.get("lvl"), Some(&serde_json::json!("warn")));
+    }
+
+    #[test]
+    fn test_syslog_severities_through_the_one_table() {
+        let rows: &[(&str, LogLevel)] = &[
+            ("<0>Oct 11 22:14:15 host su: x", LogLevel::Fatal),
+            ("<9>Oct 11 22:14:15 host su: x", LogLevel::Fatal),
+            ("<10>Oct 11 22:14:15 host su: x", LogLevel::Fatal),
+            ("<11>Oct 11 22:14:15 host su: x", LogLevel::Error),
+            ("<12>Oct 11 22:14:15 host su: x", LogLevel::Warn),
+            ("<13>Oct 11 22:14:15 host su: x", LogLevel::Info),
+            ("<14>Oct 11 22:14:15 host su: x", LogLevel::Info),
+            ("<15>Oct 11 22:14:15 host su: x", LogLevel::Debug),
+            ("<191>Oct 11 22:14:15 host su: x", LogLevel::Debug),
+        ];
+        for (line, expected) in rows {
+            assert_eq!(parse(line).level, Some(*expected), "{line}");
+        }
+    }
+
+    #[test]
     fn test_json_key_that_was_not_read_stays_in_fields() {
         let entry = parse(
-            r#"{"msg": "a", "text": "b", "level": 30, "lvl": "warn", "time": "soon", "ts": 1705312800, "thread": ["x"], "tid": 7, "user": "u1"}"#,
+            r#"{"msg": "a", "text": "b", "level": 35, "lvl": "warn", "time": "soon", "ts": 1705312800, "thread": ["x"], "tid": 7, "user": "u1"}"#,
         );
         assert_eq!(entry.message, "a", "message");
         assert_eq!(entry.level, Some(LogLevel::Warn), "level");
         assert_eq!(entry.timestamp, utc("2024-01-15T10:00:00Z"), "timestamp");
         assert_eq!(entry.thread_id.as_deref(), Some("7"), "thread id");
         let expected: HashMap<String, Value> = serde_json::from_str(
-            r#"{"text": "b", "level": 30, "time": "soon", "thread": ["x"], "user": "u1"}"#,
+            r#"{"text": "b", "level": 35, "time": "soon", "thread": ["x"], "user": "u1"}"#,
         )
         .unwrap();
         assert_eq!(entry.fields, expected, "fields");

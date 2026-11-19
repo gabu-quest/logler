@@ -56,6 +56,8 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 - **`llm export` uses the library's converters**, so its spans are valid in Jaeger, Zipkin and OTLP. It stripped and padded ids (`s-one` became `sone000000000000`, and two ids could become one), gave a Jaeger trace a single process, and its OTLP output named one service for every span and put a text time in `startTimeUnixNano`.
 - **`ProjectedSearchResult` describes `search(fields=[...])`**, whose entries hold only the asked keys; `LogEntryDict` still describes a whole entry.
 - A failed SQL load no longer leaves its temporary CSV behind.
+- **A JSON line whose level is a number has a level.** pino and bunyan write 10 to 60 (10 TRACE, 20 DEBUG, 30 INFO, 40 WARN, 50 ERROR, 60 FATAL); syslog and GELF write 0 to 7 (0, 1, 2 FATAL, 3 ERROR, 4 WARN, 5 and 6 INFO, 7 DEBUG). Such lines were `UNKNOWN`, so `--level ERROR` found nothing in them. Any other number (35, -1, 3.5, 1e3) and a string of digits stay `UNKNOWN`, and a number that is not a level stays in `fields`. A level word beats a level number, whichever key holds it: `{"level": 30, "severity": "ERROR"}` is ERROR, as it was.
+- **Syslog severities 1 and 2 are FATAL**, as `ALERT` and `CRIT` are: `<9>` and `<10>` gave ERROR. 3 stays ERROR.
 
 ### Changed
 

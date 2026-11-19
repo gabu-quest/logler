@@ -421,6 +421,27 @@ class TestSyslogLevelComesFromTheEngine:
         assert levels == {1: "INFO", 2: "ERROR", 3: "WARN"}
 
 
+class TestJsonLevelWrittenAsANumber:
+    """pino and bunyan write 10 to 60, syslog and GELF 0 to 7; a level search finds them."""
+
+    def test_level_search_finds_numbered_lines(self, tmp_path):
+        path = tmp_path / "pino.log"
+        path.write_text(
+            '{"level": 30, "time": "2024-01-15T10:00:00Z", "msg": "started"}\n'
+            '{"level": 50, "time": "2024-01-15T10:00:01Z", "msg": "boom"}\n'
+            '{"level": 3, "time": "2024-01-15T10:00:02Z", "msg": "gelf error"}\n'
+            '{"level": 30, "severity": "ERROR", "time": "2024-01-15T10:00:03Z", "msg": "word"}\n'
+            '{"level": 35, "time": "2024-01-15T10:00:04Z", "msg": "no such level"}\n'
+        )
+        levels = {
+            i["entry"]["line_number"]: i["entry"]["level"] for i in search([str(path)])["results"]
+        }
+        assert levels == {1: "INFO", 2: "ERROR", 3: "ERROR", 4: "ERROR", 5: "UNKNOWN"}
+        errors = search([str(path)], level="ERROR")
+        assert errors["total_matches"] == 3
+        assert [i["entry"]["line_number"] for i in errors["results"]] == [2, 3, 4]
+
+
 class TestExplicitFormatNeverReachesTheCache:
     def test_custom_regex_then_plain_gives_builtin_reading(self, tmp_path):
         path = tmp_path / "robot.log"
