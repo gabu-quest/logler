@@ -4,35 +4,52 @@ on:
   push:
     branches: ["main", "master"]
   pull_request:
+  # The publish workflow runs this file before it builds anything.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   python:
+    name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - name: Lint
-        run: |
-          uv run --extra dev ruff check .
-          uv run --extra dev black --check .
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      # `uv run` builds the Rust extension on its first call; --locked fails on a stale uv.lock.
       - name: Tests
+        run: uv run --locked --python ${{ matrix.python-version }} --extra dev pytest
+      - name: Lint
+        if: matrix.python-version == '3.12'
         run: |
-          uv run --extra dev pytest
+          uv run --locked --python 3.12 --extra dev ruff check .
+          uv run --locked --python 3.12 --extra dev ruff format --check .
+      - name: Type check
+        if: matrix.python-version == '3.12'
+        run: uv run --locked --python 3.12 --extra dev mypy
 
   rust:
+    name: Rust
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - name: Cargo fmt
         run: cargo fmt --all --check
       - name: Cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
