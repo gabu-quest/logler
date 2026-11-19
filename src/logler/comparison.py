@@ -103,15 +103,15 @@ def cross_service_timeline(
     if time_window:
         start_time, end_time = time_window
         try:
-            start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            start_dt = datetime.fromisoformat(start_time)
+            end_dt = datetime.fromisoformat(end_time)
             filtered = []
             for e in all_entries:
                 ts_str = e["timestamp_str"]
                 if not ts_str:
                     continue
                 try:
-                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    ts = datetime.fromisoformat(ts_str)
                 except (ValueError, TypeError):
                     continue
                 if start_dt <= ts <= end_dt:
@@ -126,7 +126,7 @@ def cross_service_timeline(
         ts_str = e["timestamp_str"]
         if ts_str:
             try:
-                e["timestamp"] = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                e["timestamp"] = datetime.fromisoformat(ts_str)
             except (ValueError, TypeError):
                 e["timestamp"] = None
         else:
@@ -368,7 +368,7 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
             for e in entries:
                 ts_str = e.get("timestamp", "")
                 if ts_str:
-                    timestamps.append(datetime.fromisoformat(ts_str.replace("Z", "+00:00")))
+                    timestamps.append(datetime.fromisoformat(ts_str))
             if len(timestamps) >= 2:
                 duration_ms = int((max(timestamps) - min(timestamps)).total_seconds() * 1000)
         except (ValueError, TypeError, AttributeError):
@@ -552,9 +552,9 @@ def _in_time_range(entry: Dict, start: str, end: str) -> bool:
         return False
 
     try:
-        timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        timestamp = datetime.fromisoformat(timestamp_str)
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
         return start_dt <= timestamp <= end_dt
     except (ValueError, TypeError, AttributeError):
         return False

@@ -39,7 +39,7 @@ def search_around_timestamp(
         Search results with window metadata added.
     """
     delta = parse_duration(window)
-    anchor_dt = datetime.fromisoformat(anchor_timestamp.replace("Z", "+00:00"))
+    anchor_dt = datetime.fromisoformat(anchor_timestamp)
 
     time_start = (anchor_dt - delta).isoformat()
     time_end = (anchor_dt + delta).isoformat()
@@ -214,7 +214,7 @@ def _correlate_around_timestamp(
     window: str,
 ) -> Optional[Dict[str, Any]]:
     """Build a correlation cluster around a timestamp."""
-    anchor_dt = datetime.fromisoformat(anchor_timestamp.replace("Z", "+00:00"))
+    anchor_dt = datetime.fromisoformat(anchor_timestamp)
 
     result = investigate.search(
         files=files,

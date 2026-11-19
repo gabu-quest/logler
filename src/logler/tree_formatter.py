@@ -535,7 +535,7 @@ def format_waterfall(
         start_str = node.get("start_time")
         if start_str:
             try:
-                start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                start_time = datetime.fromisoformat(start_str)
                 if earliest is None or start_time < earliest:
                     earliest = start_time
             except (ValueError, TypeError):
@@ -562,7 +562,7 @@ def format_waterfall(
             continue
 
         try:
-            start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            start_time = datetime.fromisoformat(start_str)
             offset_ms = int((start_time - earliest).total_seconds() * 1000)
         except (ValueError, TypeError):
             continue  # Skip nodes with invalid timestamps

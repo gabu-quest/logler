@@ -189,7 +189,7 @@ def _parse_entry_timestamp(entry: Dict[str, Any]) -> Optional[datetime]:
     if isinstance(ts, datetime):
         return ts
     try:
-        return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(ts))
     except (ValueError, TypeError):
         return None
 

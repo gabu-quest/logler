@@ -279,10 +279,10 @@ def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str,
         sample_times.sort()
         # Simple coverage: sample span / population span
         try:
-            pop_start = datetime.fromisoformat(pop_times[0].replace("Z", "+00:00"))
-            pop_end = datetime.fromisoformat(pop_times[-1].replace("Z", "+00:00"))
-            sample_start = datetime.fromisoformat(sample_times[0].replace("Z", "+00:00"))
-            sample_end = datetime.fromisoformat(sample_times[-1].replace("Z", "+00:00"))
+            pop_start = datetime.fromisoformat(pop_times[0])
+            pop_end = datetime.fromisoformat(pop_times[-1])
+            sample_start = datetime.fromisoformat(sample_times[0])
+            sample_end = datetime.fromisoformat(sample_times[-1])
 
             pop_duration = (pop_end - pop_start).total_seconds()
             sample_duration = (sample_end - sample_start).total_seconds()

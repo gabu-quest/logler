@@ -45,7 +45,7 @@ def export_to_jaeger(
         if start_time:
             if isinstance(start_time, str):
                 try:
-                    dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                    dt = datetime.fromisoformat(start_time)
                     start_us = int(dt.timestamp() * 1_000_000)
                 except Exception:
                     start_us = 0
@@ -147,7 +147,7 @@ def export_to_zipkin(
         if start_time:
             if isinstance(start_time, str):
                 try:
-                    dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                    dt = datetime.fromisoformat(start_time)
                     timestamp_us = int(dt.timestamp() * 1_000_000)
                 except Exception:
                     pass

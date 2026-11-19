@@ -365,7 +365,7 @@ def _parse_ts(ts_str: Optional[str]) -> Optional[datetime]:
     if not ts_str:
         return None
     try:
-        return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        return datetime.fromisoformat(ts_str)
     except (ValueError, TypeError):
         return None
 
