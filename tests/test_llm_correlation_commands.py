@@ -341,3 +341,40 @@ class TestCorrelationRun:
         assert result.exit_code == EXIT_USER_ERROR
         data = json.loads(result.output)
         assert "error" in data
+
+    def test_run_under_a_formats_file_that_cannot_be_used_is_a_user_error(
+        self, runner, correlations_dir
+    ):
+        """The format file's error reaches the user; the log file is not skipped in silence."""
+        formats = correlations_dir / ".logler" / "formats.yaml"
+        formats.write_text("not: valid: yaml: {{{")
+        log_file = correlations_dir / "mes_prod.log"
+        log_file.write_text("2024-01-15T10:00:00Z INFO Batch B-042 started\n")
+
+        result = runner.invoke(
+            llm,
+            ["correlation", "run", "-f", str(log_file), "--config-dir", str(correlations_dir)],
+        )
+        assert result.exit_code == EXIT_USER_ERROR, result.output
+        error = json.loads(result.output)["error"]
+        assert str(formats) in error
+        assert "Invalid YAML" in error
+
+    def test_run_with_a_correlations_file_that_cannot_be_used_names_it(self, runner, tmp_path):
+        """A rule with a missing key is the user's error, named by file and key."""
+        (tmp_path / ".logler").mkdir()
+        config = tmp_path / ".logler" / "correlations.yaml"
+        config.write_text(
+            "correlations:\n  alarm:\n    rules:\n      - type: temporal\n        window: 5s\n"
+        )
+        log_file = tmp_path / "a.log"
+        log_file.write_text("2024-01-15T10:00:00Z INFO started\n")
+
+        result = runner.invoke(
+            llm, ["correlation", "run", "-f", str(log_file), "--config-dir", str(tmp_path)]
+        )
+        assert result.exit_code == EXIT_USER_ERROR, result.output
+        assert json.loads(result.output)["error"] == (
+            f"Unusable correlations file: {config}: "
+            "correlations.alarm.rules.0.temporal.anchor: Field required"
+        )

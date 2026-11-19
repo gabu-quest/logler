@@ -17,7 +17,7 @@ from ._core import (
     _expand_globs,
 )
 from ..safe_regex import safe_compile, RegexTimeoutError, RegexPatternTooLongError
-from ..config import find_config, load_config
+from ..config import FormatFileError, config_for_file, find_config, load_usable_config
 from ..builtin_formats import get_builtin_formats, get_builtin_format
 
 
@@ -62,14 +62,14 @@ def format_list(builtin: bool, config_dir: Optional[str], pretty: bool):
     if config_path:
         output["config_path"] = str(config_path)
         try:
-            config = load_config(config_path)
+            config = load_usable_config(config_path)
             for name, fmt in config.formats.items():
                 output["user_formats"][name] = {
                     "regex": fmt.regex,
                     "timestamp_format": fmt.timestamp_format,
                     "file_patterns": fmt.file_patterns,
                 }
-        except Exception as e:
+        except FormatFileError as e:
             output["config_error"] = str(e)
 
     has_any = output["builtin_formats"] or output["user_formats"]
@@ -113,9 +113,8 @@ def format_test(
             format_source = "builtin"
         else:
             # Try user config
-            config_path = find_config(Path(file_list[0]).parent)
-            if config_path:
-                config = load_config(config_path)
+            config = config_for_file(file_list[0])
+            if config:
                 if name in config.formats:
                     test_regex = config.formats[name].regex
                     format_source = "user_config"
@@ -276,8 +275,8 @@ def format_validate(
     formats_valid = {}
 
     try:
-        config = load_config(config_path)
-    except Exception as e:
+        config = load_usable_config(config_path)
+    except FormatFileError as e:
         _output_json(
             {
                 "valid": False,

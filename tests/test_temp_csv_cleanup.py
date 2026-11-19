@@ -93,15 +93,19 @@ def test_cli_sql_success_leaves_nothing(tmp_path):
     assert list(scratch.iterdir()) == []
 
 
+@pytest.mark.skipif(
+    os.name != "posix" or os.geteuid() == 0, reason="needs a file its owner cannot read"
+)
 def test_cli_sql_unreadable_second_file_leaves_nothing(tmp_path):
     log = tmp_path / "a.log"
     log.write_text("2024-01-15 10:00:00 INFO hello\n")
-    # A dangling symlink is matched by the glob expansion (a plain missing
-    # path is dropped before the loop), so open() fails after file one is
-    # already written to the temp CSV.
-    dangling = tmp_path / "b.log"
-    dangling.symlink_to(tmp_path / "does-not-exist.log")
-    result, scratch = _run_sql_cli(tmp_path, [log, dangling])
+    # A file with no read permission is still a file to the glob expansion (a
+    # missing path or a dangling link is dropped before the loop), so open()
+    # fails after file one is already written to the temp CSV.
+    unreadable = tmp_path / "b.log"
+    unreadable.write_text("2024-01-15 10:00:01 INFO never read\n")
+    unreadable.chmod(0)
+    result, scratch = _run_sql_cli(tmp_path, [log, unreadable])
     assert result.returncode == 2
     assert "Cannot read file" in result.stdout + result.stderr
     assert list(scratch.iterdir()) == []

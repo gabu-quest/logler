@@ -17,7 +17,14 @@ from pathlib import Path
 from typing import Annotated, Dict, List, Literal, Optional, Union
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from .safe_regex import RegexPatternTooLongError, RegexTimeoutError, safe_compile
 
@@ -247,6 +254,29 @@ def find_correlations_config(start_dir: str | Path) -> Path | None:
     return _find_config_file(start_dir, CORRELATIONS_FILENAME)
 
 
+def _read_mapping(path: Path) -> dict | None:
+    """The top-level mapping of a YAML config file; ``None`` for an empty file."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML: {exc}") from exc
+    if not data:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected a YAML mapping at top level, got {type(data).__name__}")
+    return data
+
+
+def config_problem(exc: Exception) -> str:
+    """Why a config file cannot be used, as text for its user: a schema error is one
+    ``key.path: what is wrong`` per error."""
+    if isinstance(exc, ValidationError):
+        return "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+    return str(exc)
+
+
 def load_config(path: str | Path) -> LoglerConfig:
     """Load and validate a .logler/formats.yaml config file.
 
@@ -258,30 +288,12 @@ def load_config(path: str | Path) -> LoglerConfig:
 
     Raises:
         FileNotFoundError: If the file does not exist.
-        ValueError: If the YAML is invalid or cannot be parsed.
+        ValueError: If the YAML is invalid or cannot be parsed. The message does not name the
+            file; the caller knows which one it asked for.
         pydantic.ValidationError: If the config fails schema validation.
     """
-    path = Path(path)
-
-    if not path.is_file():
-        raise FileNotFoundError(f"Config file not found: {path}")
-
-    raw_text = path.read_text(encoding="utf-8")
-
-    try:
-        data = yaml.safe_load(raw_text)
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
-
-    if not data:
-        return LoglerConfig()
-
-    if not isinstance(data, dict):
-        raise ValueError(
-            f"Expected a YAML mapping at top level in {path}, got {type(data).__name__}"
-        )
-
-    return LoglerConfig.model_validate(data)
+    data = _read_mapping(Path(path))
+    return LoglerConfig() if data is None else LoglerConfig.model_validate(data)
 
 
 def load_correlations_config(path: str | Path) -> CorrelationsConfig:
@@ -298,27 +310,8 @@ def load_correlations_config(path: str | Path) -> CorrelationsConfig:
         ValueError: If the YAML is invalid or cannot be parsed.
         pydantic.ValidationError: If the config fails schema validation.
     """
-    path = Path(path)
-
-    if not path.is_file():
-        raise FileNotFoundError(f"Config file not found: {path}")
-
-    raw_text = path.read_text(encoding="utf-8")
-
-    try:
-        data = yaml.safe_load(raw_text)
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
-
-    if not data:
-        return CorrelationsConfig()
-
-    if not isinstance(data, dict):
-        raise ValueError(
-            f"Expected a YAML mapping at top level in {path}, got {type(data).__name__}"
-        )
-
-    return CorrelationsConfig.model_validate(data)
+    data = _read_mapping(Path(path))
+    return CorrelationsConfig() if data is None else CorrelationsConfig.model_validate(data)
 
 
 def get_format_for_file(config: LoglerConfig, filepath: str | Path) -> FormatConfig | None:
@@ -348,7 +341,8 @@ def get_format_for_file(config: LoglerConfig, filepath: str | Path) -> FormatCon
 # Which format parses a file
 # =============================================================================
 
-# A loaded config per formats.yaml, valid while the file's (mtime, size) is unchanged.
+# Per formats.yaml: (stamp, config, problem), valid while the file's (mtime, size) is
+# unchanged. One of config and problem is None.
 _config_cache: Dict[str, tuple] = {}
 
 
@@ -373,33 +367,80 @@ def formats_stamp(file: str | Path) -> tuple | None:
         return None
 
 
+class FormatFileError(ValueError):
+    """A ``.logler/formats.yaml`` that cannot be used: the message names the file and the
+    problem. A ``ValueError`` because the explicit-regex path raises one for a regex the
+    engine cannot compile, and callers catch that."""
+
+    def __init__(self, path: str | Path, problem: str):
+        super().__init__(f"{path}: {problem}")
+        self.path = str(path)
+        self.problem = problem
+
+
 @lru_cache(maxsize=256)
-def _rust_accepts(regex: str) -> bool:
-    """True when the Rust engine, the only reader of a custom regex, can compile it."""
+def _rust_error(regex: str) -> str | None:
+    """What the Rust engine, the only reader of a custom regex, says about a regex it cannot
+    compile; ``None`` when it compiles."""
+    import logler_rs
+
     try:
-        import logler_rs
-
         logler_rs.PyLineParser(custom_regex=regex)
-    except Exception:
-        return False
-    return True
+    except Exception as exc:
+        return str(exc)
+    return None
 
 
-def _load_cached(config_path: Path) -> LoglerConfig | None:
+def load_usable_config(path: str | Path) -> LoglerConfig:
+    """The one decision whether a formats.yaml can be used: ``load_config`` plus the Rust
+    engine's compile of every format's regex, so the verdict is for the whole file.
+
+    Raises:
+        FormatFileError: naming the file and the problem (and the format, for a regex).
+    """
+    try:
+        config = load_config(path)
+    except (OSError, ValueError) as exc:  # pydantic's ValidationError is a ValueError
+        raise FormatFileError(path, config_problem(exc)) from exc
+    for name, fmt in config.formats.items():
+        error = _rust_error(fmt.regex)
+        if error is not None:
+            raise FormatFileError(
+                path, f"format '{name}': the regex cannot be compiled by the Rust engine: {error}"
+            )
+    return config
+
+
+def _load_cached(config_path: Path) -> LoglerConfig:
+    """The usable config of a formats.yaml, loaded once per (mtime, size). A failure is kept
+    the same way, as its text: each call raises a new error, because one error object raised
+    again and again grows its traceback for the life of the process."""
     key = str(config_path)
     try:
         stamp = _stamp(config_path)
-    except OSError:
-        return None
+    except OSError as exc:
+        raise FormatFileError(config_path, str(exc)) from exc
     cached = _config_cache.get(key)
-    if cached is not None and cached[0] == stamp:
-        return cached[1]
-    try:
-        config: LoglerConfig | None = load_config(config_path)
-    except Exception:
-        config = None
-    _config_cache[key] = (stamp, config)
-    return config
+    if cached is None or cached[0] != stamp:
+        try:
+            cached = (stamp, load_usable_config(config_path), None)
+        except FormatFileError as exc:
+            cached = (stamp, None, exc.problem)
+        _config_cache[key] = cached
+    if cached[2] is not None:
+        raise FormatFileError(config_path, cached[2])
+    return cached[1]
+
+
+def config_for_file(path: str | Path) -> LoglerConfig | None:
+    """The usable ``.logler/formats.yaml`` found from the file's own directory, ``None`` when
+    there is none.
+
+    Raises:
+        FormatFileError: the file found cannot be used (see ``load_usable_config``).
+    """
+    config_path = find_config(Path(path).resolve().parent)
+    return None if config_path is None else _load_cached(config_path)
 
 
 def format_for_file(path: str | Path) -> FormatConfig | None:
@@ -407,18 +448,10 @@ def format_for_file(path: str | Path) -> FormatConfig | None:
 
     This is the one place that decides which format a file gets: the first format of the
     ``.logler/formats.yaml`` found from the file's own directory whose ``file_patterns`` match
-    the file's name. ``None`` also when there is no config, the config cannot be loaded, or
-    the Rust engine cannot compile the matched format's regex: such a format is skipped and the
-    file loads with the built-in detection. (Whether a broken format file should be an error
-    instead is an open question for the user; it is kept as it was.)
+    the file's name. ``None`` when there is no config or no format names the file.
+
+    Raises:
+        FormatFileError: the config found cannot be used, whichever file is asked for.
     """
-    config_path = find_config(Path(path).resolve().parent)
-    if config_path is None:
-        return None
-    config = _load_cached(config_path)
-    if config is None:
-        return None
-    fmt = get_format_for_file(config, path)
-    if fmt is None or not _rust_accepts(fmt.regex):
-        return None
-    return fmt
+    config = config_for_file(path)
+    return None if config is None else get_format_for_file(config, path)

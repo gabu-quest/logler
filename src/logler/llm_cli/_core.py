@@ -17,6 +17,7 @@ from typing import Optional, List, Dict, Any, Set, Tuple
 from datetime import datetime, timedelta, timezone
 
 from .._search_core import _parse_levels, level_text
+from ..config import FormatFileError
 from ..parser import _to_utc
 
 
@@ -68,7 +69,8 @@ def command(
 
     Registers the function on ``group`` (default ``llm``) under ``name``, gives it the
     ``--pretty`` option (passed to it as ``pretty``) and turns an exception it does not
-    handle into the JSON internal error with exit code 3. ``sys.exit`` passes through.
+    handle into the JSON internal error with exit code 3, except a formats.yaml that cannot
+    be used (``FormatFileError``), which is the user's error (exit code 2). ``sys.exit`` passes through.
     ``stream=True`` is for a command whose stdout is a stream of one JSON object per line:
     it has no ``--pretty``, and that error goes to stderr.
     """
@@ -78,6 +80,8 @@ def command(
         def wrapper(*args, **kwargs):
             try:
                 return fn(*args, **kwargs)
+            except FormatFileError as e:
+                _error_json(f"Unusable format file: {e}", err=stream)
             except Exception as e:
                 _error_json(f"Internal error: {e}", EXIT_INTERNAL_ERROR, err=stream)
 
@@ -128,15 +132,15 @@ def _parse_duration(duration: str) -> timedelta:
 
 
 def _expand_globs(patterns: List[str]) -> List[str]:
-    """Expand glob patterns to file paths."""
+    """The files the patterns name. A folder a pattern matches is not a log file."""
     import glob
 
     files = []
     for pattern in patterns:
-        matches = glob.glob(pattern, recursive=True)
+        matches = [m for m in glob.glob(pattern, recursive=True) if Path(m).is_file()]
         if matches:
             files.extend(matches)
-        elif Path(pattern).exists():
+        elif Path(pattern).is_file():
             files.append(pattern)
     return sorted(set(files))
 

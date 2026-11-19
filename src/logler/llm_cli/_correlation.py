@@ -18,7 +18,7 @@ from ._core import (
     db_source_option,
     _db_file_source,
 )
-from ..config import find_correlations_config, load_correlations_config
+from ..config import config_problem, find_correlations_config, load_correlations_config
 
 
 @llm.group()
@@ -57,8 +57,8 @@ def correlation_list(config_dir: Optional[str], pretty: bool):
 
     try:
         config = load_correlations_config(config_path)
-    except Exception as e:
-        output["config_error"] = str(e)
+    except (OSError, ValueError) as e:
+        output["config_error"] = config_problem(e)
         _output_json(output, pretty)
         sys.exit(EXIT_USER_ERROR)
 
@@ -139,25 +139,21 @@ def correlation_run(
         if not config_path:
             _error_json("No .logler/correlations.yaml found. Create one or specify --config-dir.")
 
-        config = load_correlations_config(config_path)
+        try:
+            config = load_correlations_config(config_path)
+        except (OSError, ValueError) as e:
+            _error_json(f"Unusable correlations file: {config_path}: {config_problem(e)}")
         if not config.correlations:
             _error_json("No correlation rules defined in config.")
 
         # Load all entries from files
         all_entries = []
         for file_path in file_list:
-            try:
-                result = investigate.search(
-                    files=[file_path],
-                    output_format="full",
-                )
-                for item in result.get("results", []):
-                    entry = item.get("entry", {})
-                    if entry:
-                        all_entries.append(entry)
-            except Exception:
-                # Skip files that fail to load
-                pass
+            result = investigate.search(files=[file_path], output_format="full")
+            for item in result.get("results", []):
+                entry = item.get("entry", {})
+                if entry:
+                    all_entries.append(entry)
 
         if not all_entries:
             output = {
@@ -327,7 +323,7 @@ def correlate_events_cmd(
                         break
                 if anchor_entry is None:
                     _error_json(f"Could not find entry at {anchor_file}:{anchor_line}")
-            except Exception as e:
+            except RuntimeError as e:  # what the engine raises for a file it cannot read
                 _error_json(f"Failed to read anchor file: {e}")
 
         # Build trigger dict if trigger options specified

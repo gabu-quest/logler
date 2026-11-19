@@ -235,6 +235,24 @@ class TestFormatValidate:
         assert "plc_alarm" in data["formats"]
         assert "sensor_csv" in data["formats"]
 
+    def test_validate_names_the_format_the_rust_engine_refuses(self, runner, tmp_path):
+        (tmp_path / ".logler").mkdir()
+        (tmp_path / ".logler" / "formats.yaml").write_text(
+            "formats:\n  robot:\n    regex: '(?=e)(?P<message>.+)'\n    file_patterns: ['*.log']\n"
+        )
+        result = runner.invoke(llm, ["format", "validate", "--config-dir", str(tmp_path)])
+        assert result.exit_code == 2
+        data = json.loads(result.output)
+        assert data["valid"] is False
+        assert "robot" in data["issues"][0]
+        assert "Rust" in data["issues"][0]
+
+    def test_list_reports_an_unusable_file_as_its_result(self, runner, tmp_path):
+        (tmp_path / ".logler").mkdir()
+        (tmp_path / ".logler" / "formats.yaml").write_text("not: valid: yaml: {{{")
+        result = runner.invoke(llm, ["format", "list", "--config-dir", str(tmp_path)])
+        assert "Invalid YAML" in json.loads(result.output)["config_error"]
+
     def test_validate_no_config_found(self, runner, tmp_path):
         result = runner.invoke(llm, ["format", "validate", "--config-dir", str(tmp_path)])
         assert result.exit_code == 1  # EXIT_NO_RESULTS

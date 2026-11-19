@@ -538,23 +538,14 @@ def detect_formats(
     """
     from .format_detector import detect_format as _detect
 
-    # Load custom formats from config if available
-    custom_formats = None
-    try:
-        from pathlib import Path as _Path
-        from .config import find_config, load_config
+    from .config import config_for_file
 
-        if files:
-            start_dir = _Path(files[0]).resolve().parent
-            config_path = find_config(start_dir)
-            if config_path:
-                config = load_config(config_path)
-                if config.formats:
-                    custom_formats = {
-                        name: {"regex": fmt.regex} for name, fmt in config.formats.items()
-                    }
-    except Exception:
-        pass  # Config loading should never break detection
+    config = config_for_file(files[0]) if files else None
+    custom_formats = (
+        {name: {"regex": fmt.regex} for name, fmt in config.formats.items()}
+        if config and config.formats
+        else None
+    )
 
     results = {}
     for file_path in files:

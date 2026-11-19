@@ -7,11 +7,23 @@ import click
 import sys
 from typing import Optional
 
+from .config import FormatFileError
 from .terminal import TerminalViewer
 from .llm_cli import llm as llm_group
 
 
-@click.group(invoke_without_command=True)
+class _LoglerGroup(click.Group):
+    """The one place a plain command turns a formats.yaml that cannot be used into its exit."""
+
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except FormatFileError as e:
+            click.echo(f"Error: unusable format file: {e}", err=True)
+            sys.exit(2)
+
+
+@click.group(cls=_LoglerGroup, invoke_without_command=True)
 @click.pass_context
 @click.version_option()
 def main(ctx):
@@ -69,6 +81,8 @@ def view(
         except KeyboardInterrupt:
             click.echo("\n👋 Goodbye!")
             sys.exit(0)
+        except FormatFileError:
+            raise
         except Exception as e:
             click.echo(f"❌ Error: {e}", err=True)
             sys.exit(1)
@@ -310,6 +324,8 @@ def investigate(
                             error_flow_str = format_error_flow(error_analysis)
                             console.print(error_flow_str)
 
+                except FormatFileError:
+                    raise
                 except Exception as e:
                     console.print(f"[red]❌ Error building hierarchy: {e}[/red]")
                     console.print("[yellow]Falling back to regular thread following...[/yellow]\n")
@@ -433,6 +449,8 @@ def investigate(
                     message = entry.get("message", "")[:100]
                     console.print(f"[dim]{timestamp}[/dim] {level:8s} {message}")
 
+    except FormatFileError:
+        raise
     except Exception as e:
         console.print(f"[red]❌ Error:[/red] {e}", err=True)
         if "--debug" in sys.argv:

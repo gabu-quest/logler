@@ -1313,3 +1313,23 @@ class TestCommandShell:
 
 def _boom(*args, **kwargs):
     raise RuntimeError("boom")
+
+
+class TestFilesArgument:
+    """Which files a FILES argument names."""
+
+    def test_a_folder_matched_by_a_glob_is_not_a_log_file(self, three_hour_log, tmp_path):
+        (tmp_path / "old").mkdir()
+
+        code, out, _ = invoke(["search", str(tmp_path / "*"), "--count-only"])
+
+        assert code == 0, out
+        assert json.loads(out)["total_matches"] == 3
+
+    def test_a_folder_given_by_name_is_no_file(self, tmp_path):
+        (tmp_path / "old").mkdir()
+
+        code, out, _ = invoke(["search", str(tmp_path / "old")])
+
+        assert code == 2, out
+        assert json.loads(out)["error"].startswith("No files found matching")

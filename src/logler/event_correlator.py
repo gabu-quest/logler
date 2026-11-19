@@ -258,12 +258,9 @@ def _correlate_by_trigger(
     # Load candidate trigger entries
     all_candidates: List[Dict[str, Any]] = []
     for fp in files:
-        try:
-            result = investigate.search(files=[fp], **search_kwargs)
-            for item in result.get("results", []):
-                all_candidates.append(item.get("entry", item))
-        except Exception:
-            pass
+        result = investigate.search(files=[fp], **search_kwargs)
+        for item in result.get("results", []):
+            all_candidates.append(item.get("entry", item))
 
     # If field/condition specified, filter further
     if trigger.get("field") and trigger.get("condition"):

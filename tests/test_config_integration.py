@@ -6,10 +6,13 @@ file's own directory and returns the first format whose file_patterns match the 
 
 from __future__ import annotations
 
+import os
 import textwrap
 from pathlib import Path
 
-from logler.config import format_for_file
+import pytest
+
+from logler.config import FormatFileError, format_for_file
 
 
 def _write_config(tmp_path: Path, body: str) -> None:
@@ -110,13 +113,85 @@ class TestFormatForFile:
             assert fmt is not None
             assert fmt.regex == "(?P<plc_msg>.+)"
 
-    def test_config_that_cannot_be_loaded_gives_none(self, tmp_path: Path) -> None:
-        """Broken YAML does not raise: the file reads with the built-in detection."""
-        _write_config(tmp_path, "not: valid: yaml: {{{")
-        log_file = tmp_path / "plc_001.log"
+    @pytest.mark.parametrize(
+        ("body", "words"),
+        [
+            ("not: valid: yaml: {{{", "Invalid YAML"),
+            ("- just\n- a list\n", "mapping"),
+            (
+                "formats:\n  plc:\n    file_patterns: ['*.log']\n",
+                "formats.yaml: formats.plc.regex: Field required",
+            ),
+            ("formats:\n  plc:\n    regex: '(?P<m>[unclosed'\n", "plc"),
+            # the Rust engine refuses this one, and the format does not name the log file
+            (
+                "formats:\n  other:\n    regex: '(?=x)(?P<m>.+)'\n    file_patterns: ['x_*.log']\n",
+                "other",
+            ),
+        ],
+        ids=["broken_yaml", "top_level_list", "no_regex", "python_regex", "rust_regex_unmatched"],
+    )
+    def test_a_config_that_cannot_be_used_is_an_error(
+        self, tmp_path: Path, body: str, words: str
+    ) -> None:
+        """The error names the file and the problem, for a file no format names too."""
+        _write_config(tmp_path, body)
+        log_file = tmp_path / "app.log"
         log_file.write_text("test\n")
 
-        assert format_for_file(str(log_file)) is None
+        with pytest.raises(FormatFileError) as raised:
+            format_for_file(str(log_file))
+        assert str(tmp_path / ".logler" / "formats.yaml") in str(raised.value)
+        assert words in str(raised.value)
+
+    def test_a_config_that_is_not_utf8_is_an_error(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "")
+        (tmp_path / ".logler" / "formats.yaml").write_bytes(b"formats: \xff\xfe\n")
+
+        with pytest.raises(FormatFileError, match="utf-8"):
+            format_for_file(str(tmp_path / "app.log"))
+
+    def test_an_empty_config_is_no_formats(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "")
+
+        assert format_for_file(str(tmp_path / "app.log")) is None
+
+    def test_a_broken_config_two_folders_up_is_an_error(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "not: valid: yaml: {{{")
+        deep = tmp_path / "a" / "b"
+        deep.mkdir(parents=True)
+
+        with pytest.raises(FormatFileError, match="Invalid YAML"):
+            format_for_file(str(deep / "app.log"))
+
+    def test_a_kept_failure_is_raised_as_a_new_error_each_time(self, tmp_path: Path) -> None:
+        """One error object raised again and again grows its traceback for the life of a server."""
+        _write_config(tmp_path, "not: valid: yaml: {{{")
+        raised = []
+        for _ in range(2):
+            with pytest.raises(FormatFileError) as info:
+                format_for_file(str(tmp_path / "app.log"))
+            raised.append(info.value)
+
+        assert raised[0] is not raised[1]
+        assert str(raised[0]) == str(raised[1])
+
+    def test_a_fixed_config_is_read_by_the_next_call(self, tmp_path: Path) -> None:
+        """A failure is kept per (mtime, size) of the file, not for the process."""
+        _write_config(tmp_path, "not: valid: yaml: {{{")
+        log_file = tmp_path / "plc_001.log"
+        with pytest.raises(FormatFileError):
+            format_for_file(str(log_file))
+
+        config = tmp_path / ".logler" / "formats.yaml"
+        config.write_text(
+            "formats:\n  plc:\n    regex: '(?P<message>.+)'\n    file_patterns: ['plc_*.log']\n"
+        )
+        stat = config.stat()
+        os.utime(config, (stat.st_atime + 10, stat.st_mtime + 10))
+
+        fmt = format_for_file(str(log_file))
+        assert fmt is not None and fmt.regex == "(?P<message>.+)"
 
     def test_unmatched_file_beside_a_matched_one(self, tmp_path: Path) -> None:
         """The unmatched file gets None and the matched file its format."""

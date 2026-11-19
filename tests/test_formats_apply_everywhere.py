@@ -27,7 +27,7 @@ from click.testing import CliRunner
 
 from logler.cache import clear_cache
 from logler.cli import main
-from logler.config import format_for_file
+from logler.config import FormatFileError, format_for_file
 from logler.investigate import Investigator, get_metadata, search
 from logler.parser import LogParser
 from logler.terminal import TerminalViewer
@@ -417,33 +417,61 @@ formats:
 """
 
 BUILTIN_ROBOT = {("UNKNOWN", "error;3;overtravel"), ("UNKNOWN", "info;1;homed")}
-BUILTIN_ROBOT_EMIT = {("UNKNOWN", "error;3;overtravel"), ("UNKNOWN", "info;1;homed")}
+
+# A formats.yaml that cannot be used -> the words its error must carry besides the file's path.
+UNUSABLE = {
+    "broken_yaml": ("not: valid: yaml: {{{", "Invalid YAML"),
+    "rust_cannot_compile": (LOOKAHEAD_YAML, "robot"),
+}
 
 
-def test_format_rust_cannot_compile_loads_with_builtin_detection(logdir: Path) -> None:
-    (logdir / ".logler" / "formats.yaml").write_text(LOOKAHEAD_YAML)
-
-    assert format_for_file("robot_1.log") is None
-    found = search(["robot_1.log"], limit=10)["results"]
-    assert {(i["entry"]["level"], i["entry"]["message"]) for i in found} == BUILTIN_ROBOT
-    emitted = [json.loads(x) for x in _llm("emit", "robot_1.log").output.strip().splitlines()]
-    assert {(e["level"], e["message"]) for e in emitted} == BUILTIN_ROBOT_EMIT
-    assert LogParser.for_file("robot_1.log").parse_line(1, "error;3;x").format == "PlainText"
+def _expect_stopped(output: str, config: Path, words: str) -> None:
+    """A command's refusal: the file's path and the problem, no traceback."""
+    assert str(config) in output
+    assert words in output
+    assert "Traceback" not in output
 
 
-def test_broken_yaml_loads_with_builtin_detection(logdir: Path) -> None:
-    (logdir / ".logler" / "formats.yaml").write_text("not: valid: yaml: {{{")
+@pytest.mark.parametrize("kind", sorted(UNUSABLE))
+def test_unusable_formats_file_stops_every_door(logdir: Path, kind: str) -> None:
+    text, words = UNUSABLE[kind]
+    config = logdir / ".logler" / "formats.yaml"
+    config.write_text(text)
 
-    assert format_for_file("robot_1.log") is None
-    found = search(["robot_1.log"], limit=10)["results"]
-    assert {(i["entry"]["level"], i["entry"]["message"]) for i in found} == BUILTIN_ROBOT
-    emitted = [json.loads(x) for x in _llm("emit", "robot_1.log").output.strip().splitlines()]
-    assert {(e["level"], e["message"]) for e in emitted} == BUILTIN_ROBOT_EMIT
+    with pytest.raises(FormatFileError) as raised:
+        search(["robot_1.log"], limit=10)
+    _expect_stopped(str(raised.value), config, words)
+    with pytest.raises(FormatFileError):
+        LogParser.for_file("robot_1.log")
+    # the verdict is for the whole file: a log no format names is stopped too
+    with pytest.raises(FormatFileError):
+        format_for_file("app.log")
+
+    for args in (("search", "robot_1.log"), ("emit", "robot_1.log"), ("schema", "app.log")):
+        result = CliRunner().invoke(main, ["llm", *args])
+        assert result.exit_code == 2, result.output
+        _expect_stopped(result.output, config, words)
+    for args in (
+        ["stats", "robot_1.log"],
+        ["view", "robot_1.log"],
+        ["investigate", "robot_1.log", "--thread", "t1", "--hierarchy"],
+    ):
+        result = CliRunner().invoke(main, args)
+        assert result.exit_code == 2, result.output
+        _expect_stopped(result.stderr, config, words)
+        assert "Falling back" not in result.output
 
 
 def test_explicit_custom_regex_rust_cannot_compile_is_an_error(logdir: Path) -> None:
     with pytest.raises(ValueError):
         search(["robot_1.log"], custom_regex="(?=x)")
+
+
+def test_explicit_regex_does_not_consult_a_broken_formats_file(logdir: Path) -> None:
+    (logdir / ".logler" / "formats.yaml").write_text("not: valid: yaml: {{{")
+
+    found = search(["robot_1.log"], limit=10, custom_regex=r"^(?P<lvl>\w+);(?P<msg>.*)$")
+    assert len(found["results"]) == 2
 
 
 def _bump(path: Path, seconds: int = 10) -> None:
