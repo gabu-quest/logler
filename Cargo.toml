@@ -33,7 +33,6 @@ pyo3 = { version = "0.30", features = ["abi3-py312", "anyhow", "chrono"] }
 
 # Utilities
 uuid = { version = "1.11", features = ["v4", "serde"] }
-dashmap = "6.1"
 
 # Testing
 tempfile = "3.8"

@@ -40,7 +40,6 @@ pub mod index;
 pub mod investigate;
 pub mod parser;
 pub mod stats;
-pub mod thread_tracker;
 pub mod trace;
 pub mod types;
 
@@ -49,7 +48,6 @@ pub use index::{IndexStats, LogIndex};
 pub use investigate::Investigator;
 pub use parser::{LogParser, ParserConfig};
 pub use stats::LogStats;
-pub use thread_tracker::ThreadTracker;
 pub use trace::TraceExporter;
 pub use types::*;
 

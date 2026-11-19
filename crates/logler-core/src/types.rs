@@ -343,37 +343,6 @@ pub struct ThreadTimeline {
     pub unique_spans: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ThreadContext {
-    pub thread_id: String,
-    pub first_seen: DateTime<Utc>,
-    pub last_seen: DateTime<Utc>,
-    pub log_count: usize,
-    pub error_count: usize,
-    pub correlation_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraceContext {
-    pub trace_id: String,
-    pub spans: Vec<SpanInfo>,
-    pub services: Vec<String>,
-    pub start_time: DateTime<Utc>,
-    pub end_time: Option<DateTime<Utc>>,
-    pub duration_ms: Option<f64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpanInfo {
-    pub span_id: String,
-    pub parent_span_id: Option<String>,
-    pub operation_name: Option<String>,
-    pub start_time: DateTime<Utc>,
-    pub end_time: Option<DateTime<Utc>>,
-    pub duration_ms: Option<f64>,
-    pub logs: Vec<Uuid>,
-}
-
 /// Context around a specific log entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogContext {

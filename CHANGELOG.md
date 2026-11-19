@@ -62,6 +62,7 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 - **A long search no longer blocks the other threads of a Python program:** the engine releases the GIL while it works.
 - **Parsing is faster:** a JSON line is parsed once (about 30% less time a line), and a plain line costs less than it did in 1.3.
 - **The `count` format, and `llm export`, are faster.** On 1,000,000 lines a count took a quarter of the time; `llm export` no longer reads every line a second time to find the services, and took a quarter of the time and three fifths of the peak memory.
+- The unused Rust `ThreadTracker` (not the Python one) and the `dashmap` dependency are removed.
 - The index reads each file once, in file order, with bounded memory per batch.
 
 ### Added
