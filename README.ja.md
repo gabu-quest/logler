@@ -155,6 +155,7 @@ tree = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
 | [エージェント向けコマンドリファレンス](docs/LLM_CLI_REFERENCE.md) | `logler llm` の全コマンドと全フラグ |
 | [Pythonガイド](docs/LLM_README.md) | ライブラリとしての使い方 |
 | [設定](docs/CONFIGURATION.md) | 独自のログフォーマットと相関ルール |
+| [タイムスタンプ](docs/TIMESTAMPS.md) | 読み取れる時刻の書き方と、タイムゾーンの決め方 |
 | [リクエストツリー](docs/HIERARCHY_GUIDE.md) | リクエストのスパンをどう見つけ、どう表示するか |
 | [変更履歴](CHANGELOG.md) | 変更点と、アップグレード時に直す箇所 |
 | [Web UI](https://github.com/gabu-quest/logler-web) | ブラウザ用インターフェース（別リポジトリ） |

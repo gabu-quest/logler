@@ -153,6 +153,7 @@ Seventeen [marimo](https://marimo.io) notebooks with their own sample data: **[o
 | [Agent command reference](docs/LLM_CLI_REFERENCE.md) | Every `logler llm` command and flag |
 | [Python guide](docs/LLM_README.md) | Library usage |
 | [Configuration](docs/CONFIGURATION.md) | Your own log formats and correlation rules |
+| [Timestamps](docs/TIMESTAMPS.md) | Which spellings of a time are read, and how the zone is decided |
 | [Request trees](docs/HIERARCHY_GUIDE.md) | How a request's spans are found and shown |
 | [Changelog](CHANGELOG.md) | What changed, and what to change when upgrading |
 | [Web UI](https://github.com/gabu-quest/logler-web) | A browser interface, in its own repository |
