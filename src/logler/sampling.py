@@ -39,8 +39,13 @@ def smart_sample(
                 "total_population": int,
                 "sample_size": int,
                 "strategy": str,
-                "coverage": {"time_coverage": float, "level_coverage": {...}, ...}
+                "coverage": {"time_coverage": float, "level_coverage": {...},
+                             "unique_threads_in_sample": int,
+                             "unique_threads_in_population": int,
+                             "thread_coverage_pct": float}
             }
+
+        When nothing matches, ``coverage`` is ``{}`` and ``sample_size`` is 0.
 
     Example::
 

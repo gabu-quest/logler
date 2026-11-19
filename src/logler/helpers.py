@@ -17,10 +17,13 @@ def quick_summary(files: list[str]) -> dict[str, Any]:
 
     Returns a dictionary with:
     - total_lines: Total number of log entries
-    - time_range: Start and end timestamps
+    - time_range: ``{"start": str, "end": str}``, or None when no entry has a timestamp
     - log_levels: Count of each log level
-    - error_rate: Percentage of ERROR/FATAL logs
-    - top_threads: Most active threads
+    - error_rate: Percentage of ERROR/FATAL/CRITICAL logs
+    - unique_threads: Number of distinct thread ids
+    - unique_correlations: Number of distinct correlation ids
+
+    Returns an empty dictionary when no file is given.
 
     Example:
         summary = quick_summary(["app.log"])
@@ -68,9 +71,10 @@ def trace_request(files: list[str], correlation_id: str) -> dict[str, Any]:
 
     Returns a dictionary with:
     - entries: List of all log entries for this request
-    - duration_ms: Total request duration
+    - duration_ms: Total request duration, or None when it cannot be told
     - error_count: Number of errors in this request
-    - services: List of services involved (if available)
+    - services: Sorted list of the ``service`` fields of its entries (may be empty)
+    - total_entries: Number of entries of this request
 
     Example:
         trace = trace_request(["app.log"], "req-abc123")
@@ -123,13 +127,12 @@ def analyze_thread_health(files: list[str]) -> dict[str, Any]:
     """
     Analyze health of each thread.
 
-    Returns a dictionary mapping thread IDs to their log level counts.
+    Not implemented per thread: returns a dictionary with ``note`` (a sentence saying so)
+    and ``total_threads`` (the first file's number of distinct thread ids).
 
     Example:
         health = analyze_thread_health(["app.log"])
-        for thread, counts in health.items():
-            error_rate = counts.get('ERROR', 0) / counts.get('total', 1) * 100
-            print(f"{thread}: {error_rate:.1f}% errors")
+        print(health["total_threads"])
     """
     # Get all entries
     metadata = investigate.get_metadata(files)

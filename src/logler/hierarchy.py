@@ -53,7 +53,8 @@ def follow_thread_hierarchy(
                 "max_depth": int,
                 "total_duration_ms": int | None,
                 "concurrent_count": int,
-                "bottleneck": {"node_id": str, "duration_ms": int, ...} | None,
+                "bottleneck": {"node_id": str, "node_name": str | None,
+                               "duration_ms": int, "percentage": float, "depth": int} | None,
                 "error_nodes": [str, ...],
                 "detection_method": str,
                 "detection_methods": [str, ...]
@@ -725,7 +726,10 @@ def build_hierarchy_with_correlation_chains(
         min_confidence: Minimum confidence score.
 
     Returns:
-        HierarchyResult dict with additional correlation chain information.
+        HierarchyResult dict. With ``include_correlation_chains`` it also has
+        ``correlation_chains`` and ``chained_correlation_ids``, and, only when a chain was
+        found, ``has_correlation_chains``, ``correlation_chain_count`` and
+        ``related_correlation_ids``.
 
     Example::
 
@@ -797,8 +801,12 @@ def analyze_bottlenecks(
                 "secondary_bottlenecks": [...],
                 "optimization_suggestions": [str, ...],
                 "parallelization_opportunities": [...],
+                "caching_opportunities": [str, ...],
                 "estimated_improvement_ms": float
             }
+
+        All six keys are always returned; a hierarchy with no total duration gets the
+        empty values.
 
     Example::
 
@@ -966,11 +974,15 @@ def diff_hierarchies(
         HierarchyDiffResult dict with shape::
 
             {
-                "summary": {"total_duration_change_ms": float, ...},
+                "label_a": str,
+                "label_b": str,
+                "summary": {"total_duration_change_ms": float, "total_duration_change_pct": float,
+                            "node_count_change": int, "new_errors": int, "resolved_errors": int},
                 "improved_nodes": [...],
                 "degraded_nodes": [...],
                 "new_nodes": [...],
-                "removed_nodes": [...]
+                "removed_nodes": [...],
+                "error_changes": {"new_errors": [str, ...], "resolved_errors": [str, ...]}
             }
 
     Example::

@@ -262,16 +262,27 @@ def search(
             for page 2).  Applied Rust-side before materialization.
 
     Returns:
-        SearchResult dict with shape::
+        With ``output_format="full"``, a SearchResult dict with shape::
 
             {
+                "results": [
+                    {
+                        "entry": {...},
+                        "context_before": [{...}, ...],
+                        "context_after": [{...}, ...],
+                        "relevance_score": float
+                    },
+                    ...
+                ],
                 "total_matches": int,
-                "results": [{"entry": {...}, ...}, ...],
-                "query": str | None,
-                "files": [str, ...],
-                "filters": {"level": str | None, ...},
-                "metadata": {"level_counts": {...}, "files_searched": int, ...}
+                "search_time_ms": int
             }
+
+        Every entry, the context entries included, has its level in upper case (``INFO``);
+        a line with no level reads ``UNKNOWN``.
+        ``"summary"``, ``"count"`` and ``"compact"`` return the shapes of
+        ``SearchSummaryResult``, ``SearchCountResult`` and ``SearchCompactResult``
+        (``logler.types``).
 
     Example::
 
@@ -352,17 +363,23 @@ def extract_ids(
         ExtractedIds dict with shape::
 
             {
-                "thread_ids": [str, ...],
-                "correlation_ids": [str, ...],
-                "trace_ids": [str, ...],
-                "services": [str, ...],
-                "total_entries": int
+                "thread_ids": [{"id": str, "count": int, "first_seen": str | None,
+                                "last_seen": str | None}, ...],
+                "correlation_ids": [{...}, ...],
+                "trace_ids": [{...}, ...],
+                "services": [{...}, ...],
+                "total_entries": int,
+                "time_range": {"start": str, "end": str} | None
             }
+
+        Each list holds the most frequent id first; ``time_range`` is ``None`` when no
+        entry has a timestamp.
 
     Example::
 
         >>> ids = extract_ids(["app.log"])
         >>> print(f"{len(ids['thread_ids'])} threads found")
+        >>> print(ids["thread_ids"][0]["id"], ids["thread_ids"][0]["count"])
     """
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
@@ -440,7 +457,8 @@ def get_context(
             {
                 "target": {...},
                 "context_before": [...],
-                "context_after": [...]
+                "context_after": [...],
+                "related_threads": [{"thread_id": str, "entries": [...]}, ...]
             }
 
     Example::
@@ -477,9 +495,19 @@ def find_patterns(
 
             {
                 "patterns": [
-                    {"pattern": str, "occurrences": int, "first_seen": str, ...}
+                    {
+                        "pattern_type": "RepeatedError",
+                        "pattern": str,
+                        "occurrences": int,
+                        "first_seen": str,
+                        "last_seen": str,
+                        "affected_threads": [str, ...],
+                        "examples": [{...}, ...]
+                    }
                 ]
             }
+
+        Nothing else is returned: there is no total or file list.
 
     Example::
 
@@ -506,7 +534,13 @@ def get_metadata(files: list[str]) -> list[dict[str, Any]]:
     Returns:
         List of file metadata dicts with shape::
 
-            [{"path": str, "size_bytes": int, "lines": int, "format": str, ...}]
+            [{
+                "path": str, "size_bytes": int, "lines": int, "format": str,
+                "time_range": {"start": str, "end": str} | None,
+                "available_fields": [str, ...],
+                "unique_threads": int, "unique_correlation_ids": int,
+                "log_levels": {"INFO": int, ...}
+            }]
 
     Example::
 

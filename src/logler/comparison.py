@@ -46,7 +46,8 @@ def cross_service_timeline(
         CrossServiceTimelineResult dict with shape::
 
             {
-                "timeline": [{"service": str, "timestamp": str, "entry": {...}, "relative_time_ms": int}],
+                "timeline": [{"service": str, "timestamp": str | None, "entry": {...},
+                              "relative_time_ms": int | None}],
                 "services": [str, ...],
                 "total_entries": int,
                 "duration_ms": int | None,

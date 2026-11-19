@@ -413,7 +413,10 @@ def extract_metrics(
         anomaly_threshold: Z-score threshold for anomaly detection.
 
     Returns:
-        Dict with "fields" mapping, each containing stats and optional buckets.
+        Dict with "fields" (field name to ``count``, ``stats``, ``first_timestamp``,
+        ``last_timestamp``, ``anomalies``, and ``buckets`` only with ``bucket_size`` and
+        ``unit`` only when every point has the same unit) and "entries_scanned". The
+        :func:`logler.investigate.extract_metrics` wrapper adds "files_searched".
     """
     all_series = extract_numeric_fields(entries)
 

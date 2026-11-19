@@ -453,15 +453,30 @@ def extract_metrics(
         MetricsExtractionResult dict with shape::
 
             {
-                "fields": {"field_name": {"count": int, "min": float, "max": float, ...}},
+                "fields": {
+                    "field_name": {
+                        "count": int,
+                        "stats": {"min": float, "max": float, "mean": float, "median": float,
+                                  "stddev": float, "p95": float, "p99": float},
+                        "first_timestamp": str | None,
+                        "last_timestamp": str | None,
+                        "anomalies": [{"timestamp": ..., "value": float, "z_score": float,
+                                       "file": ..., "line_number": ...}, ...],
+                        "buckets": [{"start": ..., "end": ..., "min": float, "max": float,
+                                     "avg": float, "count": int}, ...],  # only with bucket_size
+                        "unit": str  # only when every point of the field has the same unit
+                    }
+                },
                 "entries_scanned": int,
                 "files_searched": int
             }
 
+    The numbers are under ``["stats"]``, not on the field itself.
+
     Example::
 
         >>> metrics = extract_metrics(["app.log"], fields=["duration_ms"])
-        >>> stats = metrics["fields"]["duration_ms"]
+        >>> stats = metrics["fields"]["duration_ms"]["stats"]
         >>> print(f"p95={stats['p95']}ms, mean={stats['mean']:.1f}ms")
     """
     from .metrics import extract_metrics as _extract

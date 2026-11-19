@@ -8,63 +8,69 @@ on function signatures and for IDE autocompletion.
 Note: These complement the Pydantic models in ``models.py``.  Pydantic models
 are validated *runtime* representations; TypedDicts describe the *wire format*
 returned by functions before any validation.
+
+Every class is total: each declared key is one the function returns. A key it returns only
+under a condition is ``NotRequired``, with a comment that names the condition. The module must
+not use ``from __future__ import annotations``: typing cannot see ``NotRequired`` in a string
+annotation, so every such key would count as required. ``tests/test_models.py`` checks each class
+against the real output of its function.
 """
 
-from __future__ import annotations
-
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 # ---------------------------------------------------------------------------
 # Search types
 # ---------------------------------------------------------------------------
 
 
-class LogEntryDict(TypedDict, total=False):
+class LogEntryDict(TypedDict):
     """A single parsed log entry as returned by the Rust backend."""
 
+    id: str
     line_number: int
+    raw: str
+    format: str
     timestamp: str | None
-    level: str
+    level: str  # upper case; ``UNKNOWN`` for a line with no level
     message: str
     thread_id: str | None
     correlation_id: str | None
     trace_id: str | None
     span_id: str | None
+    parent_span_id: str | None
     service_name: str | None
     file: str
     fields: dict[str, Any]
-    duration_ms: NotRequired[float | None]
 
 
 class SearchResultItem(TypedDict):
     """One hit inside ``SearchResult.results``."""
 
     entry: LogEntryDict
-    context_before: NotRequired[list[LogEntryDict]]
-    context_after: NotRequired[list[LogEntryDict]]
+    context_before: list[LogEntryDict]
+    context_after: list[LogEntryDict]
+    relevance_score: float
 
 
-class SearchResult(TypedDict, total=False):
+class SearchResult(TypedDict):
     """Return type of :func:`search` with ``output_format="full"``."""
 
     total_matches: int
+    search_time_ms: int
     results: list[SearchResultItem]
-    query: str | None
-    files: list[str]
-    filters: dict[str, Any]
-    metadata: dict[str, Any]
 
 
-class SearchSummaryResult(TypedDict, total=False):
+class SearchSummaryResult(TypedDict):
     """Return type of :func:`search` with ``output_format="summary"``."""
 
     total_matches: int
     unique_messages: int
     log_levels: dict[str, int]
-    by_file: dict[str, int]
     top_messages: list[dict[str, Any]]
     sample_entries: list[LogEntryDict]
-    full_results_available: bool
+    # The next two are returned only when the search has at least one match.
+    by_file: NotRequired[dict[str, int]]
+    full_results_available: NotRequired[bool]
 
 
 class SearchCountResult(TypedDict):
@@ -83,24 +89,33 @@ class SearchCompactResult(TypedDict):
     total: int
 
 
-class ExtractedIds(TypedDict, total=False):
+class IdInfo(TypedDict):
+    """One id found by :func:`extract_ids`, with how often and when it was seen."""
+
+    id: str
+    count: int
+    first_seen: str | None  # None when none of its entries has a timestamp
+    last_seen: str | None
+
+
+class ExtractedIds(TypedDict):
     """Return type of :func:`extract_ids`."""
 
-    thread_ids: list[str]
-    correlation_ids: list[str]
-    trace_ids: list[str]
-    services: list[str]
+    thread_ids: list[IdInfo]
+    correlation_ids: list[IdInfo]
+    trace_ids: list[IdInfo]
+    services: list[IdInfo]
     total_entries: int
-    time_range: NotRequired[dict[str, str]]
+    time_range: dict[str, str] | None  # {"start", "end"}; None when no entry has a timestamp
 
 
-class FollowThreadResult(TypedDict, total=False):
+class FollowThreadResult(TypedDict):
     """Return type of :func:`follow_thread`."""
 
     entries: list[LogEntryDict]
     total_entries: int
-    duration_ms: NotRequired[int | None]
-    unique_spans: NotRequired[list[str]]
+    duration_ms: int | None
+    unique_spans: list[str]
 
 
 class ContextResult(TypedDict):
@@ -109,6 +124,7 @@ class ContextResult(TypedDict):
     target: LogEntryDict
     context_before: list[LogEntryDict]
     context_after: list[LogEntryDict]
+    related_threads: list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -116,14 +132,14 @@ class ContextResult(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-class HierarchyNode(TypedDict, total=False):
+class HierarchyNode(TypedDict):
     """A single node in a thread/span hierarchy tree."""
 
     id: str
-    node_type: str  # "Thread" | "Span" | "CorrelationGroup"
-    name: str
+    node_type: Literal["Thread", "Span", "Correlation", "Trace", "Inferred"]
+    name: str | None
     parent_id: str | None
-    children: list[HierarchyNode]
+    children: list["HierarchyNode"]
     entry_ids: list[str]
     start_time: str | None
     end_time: str | None
@@ -136,16 +152,17 @@ class HierarchyNode(TypedDict, total=False):
     relationship_evidence: list[str]
 
 
-class BottleneckInfo(TypedDict, total=False):
+class BottleneckInfo(TypedDict):
     """Bottleneck detected within a hierarchy."""
 
     node_id: str
+    node_name: str | None
     duration_ms: int
     percentage: float
     depth: int
 
 
-class HierarchyResult(TypedDict, total=False):
+class HierarchyResult(TypedDict):
     """Return type of :func:`follow_thread_hierarchy`."""
 
     roots: list[HierarchyNode]
@@ -156,16 +173,18 @@ class HierarchyResult(TypedDict, total=False):
     bottleneck: BottleneckInfo | None
     error_nodes: list[str]
     detection_method: str
-    detection_methods: NotRequired[list[str]]
-    # Added by build_hierarchy_with_correlation_chains
+    detection_methods: list[str]
+    # Added by build_hierarchy_with_correlation_chains, only with include_correlation_chains
+    # (the default); never by follow_thread_hierarchy.
     correlation_chains: NotRequired[list[dict[str, Any]]]
     chained_correlation_ids: NotRequired[list[str]]
+    # Only when detect_correlation_chains found at least one chain for the root identifier.
     has_correlation_chains: NotRequired[bool]
     correlation_chain_count: NotRequired[int]
     related_correlation_ids: NotRequired[list[str]]
 
 
-class RootCauseInfo(TypedDict, total=False):
+class RootCauseInfo(TypedDict):
     """A root cause identified by :func:`analyze_error_flow`."""
 
     node_id: str
@@ -207,7 +226,7 @@ class ErrorFlowResult(TypedDict):
     recommendations: list[str]
 
 
-class BottleneckAnalysis(TypedDict, total=False):
+class BottleneckAnalysis(TypedDict):
     """Return type of :func:`analyze_bottlenecks`."""
 
     primary_bottleneck: BottleneckInfo | None
@@ -241,7 +260,7 @@ class HierarchyDiffResult(TypedDict):
     error_changes: dict[str, list[str]]
 
 
-class CorrelationChainLink(TypedDict, total=False):
+class CorrelationChainLink(TypedDict):
     """A single parent-child correlation chain link."""
 
     parent_correlation_id: str
@@ -266,7 +285,7 @@ class CorrelationChainResult(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-class ThreadAnalysis(TypedDict, total=False):
+class ThreadAnalysis(TypedDict):
     """Analysis of a single thread for comparison."""
 
     id: str
@@ -280,7 +299,7 @@ class ThreadAnalysis(TypedDict, total=False):
     services: list[str]
 
 
-class ThreadDifferences(TypedDict, total=False):
+class ThreadDifferences(TypedDict):
     """Differences between two threads."""
 
     duration_diff_ms: int
@@ -300,7 +319,7 @@ class ThreadComparison(TypedDict):
     summary: str
 
 
-class PeriodAnalysis(TypedDict, total=False):
+class PeriodAnalysis(TypedDict):
     """Analysis of a single time period for comparison."""
 
     start: str
@@ -313,7 +332,7 @@ class PeriodAnalysis(TypedDict, total=False):
     unique_threads: int
 
 
-class PeriodChanges(TypedDict, total=False):
+class PeriodChanges(TypedDict):
     """Changes between two time periods."""
 
     log_volume_change_pct: float
@@ -338,7 +357,7 @@ class PeriodComparison(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-class TimelineEvent(TypedDict, total=False):
+class TimelineEvent(TypedDict):
     """A single event in a cross-service timeline."""
 
     service: str
@@ -362,24 +381,22 @@ class CrossServiceTimelineResult(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-class PatternInfo(TypedDict, total=False):
+class PatternInfo(TypedDict):
     """A single repeated log pattern."""
 
+    pattern_type: Literal["RepeatedError"]
     pattern: str
     occurrences: int
-    first_seen: str | None
-    last_seen: str | None
+    first_seen: str
+    last_seen: str
     affected_threads: list[str]
     examples: list[LogEntryDict]
 
 
-class PatternResult(TypedDict, total=False):
+class PatternResult(TypedDict):
     """Return type of :func:`find_patterns`."""
 
     patterns: list[PatternInfo]
-    total_entries: NotRequired[int]
-    total_patterns: NotRequired[int]
-    files: NotRequired[list[str]]
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +404,7 @@ class PatternResult(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class FileMetadataInfo(TypedDict, total=False):
+class FileMetadataInfo(TypedDict):
     """Metadata for a single log file."""
 
     path: str
@@ -406,7 +423,7 @@ class FileMetadataInfo(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class CoverageInfo(TypedDict, total=False):
+class CoverageInfo(TypedDict):
     """Coverage statistics for a sample."""
 
     time_coverage: float
@@ -416,6 +433,10 @@ class CoverageInfo(TypedDict, total=False):
     thread_coverage_pct: float
 
 
+class EmptyCoverage(TypedDict):
+    """``SampleResult.coverage`` when the population is empty: an empty dict."""
+
+
 class SampleResult(TypedDict):
     """Return type of :func:`smart_sample`."""
 
@@ -423,7 +444,7 @@ class SampleResult(TypedDict):
     total_population: int
     sample_size: int
     strategy: str
-    coverage: CoverageInfo
+    coverage: CoverageInfo | EmptyCoverage
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +452,7 @@ class SampleResult(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-class JaegerSpan(TypedDict, total=False):
+class JaegerSpan(TypedDict):
     """A single span in Jaeger format."""
 
     traceID: str
@@ -461,7 +482,7 @@ class JaegerExport(TypedDict):
     data: list[JaegerTrace]
 
 
-class ZipkinSpan(TypedDict, total=False):
+class ZipkinSpan(TypedDict):
     """A single span in Zipkin V2 format."""
 
     traceId: str
@@ -479,10 +500,9 @@ class ZipkinSpan(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class MetricsFieldStats(TypedDict, total=False):
-    """Statistics for a single extracted metric field."""
+class MetricsStats(TypedDict):
+    """The numbers of one metric field, under ``MetricsFieldStats.stats``."""
 
-    count: int
     min: float
     max: float
     mean: float
@@ -490,13 +510,21 @@ class MetricsFieldStats(TypedDict, total=False):
     stddev: float
     p95: float
     p99: float
+
+
+class MetricsFieldStats(TypedDict):
+    """Statistics for a single extracted metric field."""
+
+    count: int
+    stats: MetricsStats
+    first_timestamp: str | None
+    last_timestamp: str | None
     anomalies: list[dict[str, Any]]
-    values: list[float]
-    timestamps: list[str | None]
-    buckets: NotRequired[list[dict[str, Any]]]
+    buckets: NotRequired[list[dict[str, Any]]]  # only when bucket_size is given
+    unit: NotRequired[str]  # only when every point of the field has the same unit
 
 
-class MetricsExtractionResult(TypedDict, total=False):
+class MetricsExtractionResult(TypedDict):
     """Return type of :func:`extract_metrics`."""
 
     fields: dict[str, MetricsFieldStats]
@@ -504,7 +532,7 @@ class MetricsExtractionResult(TypedDict, total=False):
     files_searched: int
 
 
-class FormatDetectionInfo(TypedDict, total=False):
+class FormatDetectionInfo(TypedDict):
     """Detection result for a single file."""
 
     format: str
