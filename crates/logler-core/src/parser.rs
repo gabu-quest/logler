@@ -1,7 +1,7 @@
 use crate::types::{LogEntry, LogFormat, LogLevel};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use regex::Regex;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use uuid::Uuid;
@@ -45,6 +45,39 @@ const TRACE_KEYS: &[&str] = &["trace_id", "traceId"];
 const SPAN_KEYS: &[&str] = &["span_id", "spanId"];
 const PARENT_SPAN_KEYS: &[&str] = &["parent_span_id", "parentSpanId"];
 const SERVICE_KEYS: &[&str] = &["service", "service_name", "serviceName"];
+
+/// The object a line holds when, trimmed, it is one JSON object and nothing else.
+fn json_object(line: &str) -> Option<Map<String, Value>> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+    match serde_json::from_str(trimmed).ok()? {
+        Value::Object(object) => Some(object),
+        _ => None,
+    }
+}
+
+/// Whether a line starts with a month's three letters, as a BSD syslog line does.
+fn starts_with_month(text: &str) -> bool {
+    matches!(
+        text.as_bytes().get(..3),
+        Some(
+            b"Jan"
+                | b"Feb"
+                | b"Mar"
+                | b"Apr"
+                | b"May"
+                | b"Jun"
+                | b"Jul"
+                | b"Aug"
+                | b"Sep"
+                | b"Oct"
+                | b"Nov"
+                | b"Dec"
+        )
+    )
+}
 
 /// The first key of `keys` for which `read` gives a value.
 fn first_by<T>(keys: &[&str], read: impl Fn(&str) -> Option<T>) -> Option<T> {
@@ -166,9 +199,9 @@ fn leading_word(text: &str) -> Option<&str> {
 /// `[2024-01-15 10:00:00] warn ...`; spaces, `-`, `|` or `:` may stand between), or the
 /// first word of the line when a colon follows it (`error: disk full`).
 /// `timestamp` is the first timestamp of `text`, as `find_timestamp` gives it.
-fn head_level(text: &str, timestamp: Option<&regex::Match>) -> Option<LogLevel> {
+fn head_level(text: &str, timestamp: Option<&Found>) -> Option<LogLevel> {
     let lead = text.len() - text.trim_start().len();
-    let leads = |found: &&regex::Match| {
+    let leads = |found: &&Found| {
         let rest = &text[lead..found.start()];
         rest.is_empty() || (rest == "[" && text[found.end()..].starts_with(']'))
     };
@@ -200,9 +233,70 @@ fn bracket_level(text: &str) -> Option<LogLevel> {
     })
 }
 
-/// The first timestamp in a text. One search serves both the timestamp and the level.
-fn find_timestamp(text: &str) -> Option<regex::Match<'_>> {
-    TIMESTAMP_RE.get()?.find(text)
+/// Where a timestamp stands in a text: the bytes `start..end` of `text`.
+#[derive(Debug, Clone, Copy)]
+struct Found<'t> {
+    text: &'t str,
+    start: usize,
+    end: usize,
+}
+
+impl<'t> Found<'t> {
+    fn start(&self) -> usize {
+        self.start
+    }
+
+    fn end(&self) -> usize {
+        self.end
+    }
+
+    fn as_str(&self) -> &'t str {
+        &self.text[self.start..self.end]
+    }
+}
+
+/// The end of a numeric offset that stands after one space at `from` (` +0900`, ` -05:30`):
+/// the hours are 00 to 14, the minutes 00, 15, 30 or 45, and a space, a `]` or the end of the
+/// text follows. Anything else (`-1234 widgets`, `+9 retries`, `-0500ms`) is no zone.
+fn zone_after_space(text: &str, from: usize) -> Option<usize> {
+    let rest = text.as_bytes().get(from..)?;
+    let [b' ', b'+' | b'-', zone @ ..] = rest else {
+        return None;
+    };
+    let (h1, h2, m1, m2, after) = match zone {
+        [h1, h2, b':', m1, m2, after @ ..] | [h1, h2, m1, m2, after @ ..] => {
+            (*h1, *h2, *m1, *m2, after)
+        }
+        _ => return None,
+    };
+    if !matches!(after.first(), None | Some(b' ' | b']')) {
+        return None;
+    }
+    let (hours, minutes) = (number(&[h1, h2])?, number(&[m1, m2])?);
+    let real = hours <= 14 && matches!(minutes, 0 | 15 | 30 | 45);
+    real.then(|| text.len() - after.len())
+}
+
+/// The first timestamp in a text. One search serves both the timestamp and the level. The
+/// pattern stops at the seconds or at a zone written with no space; a numeric offset after
+/// one space is the zone too (`zone_after_space`), unless a zone was already read.
+fn find_timestamp(text: &str) -> Option<Found<'_>> {
+    let found = TIMESTAMP_RE.get()?.find(text)?;
+    // Read as bytes: the pattern's `\d` takes any Unicode digit, so byte 19 of what it found
+    // can fall inside a letter. Such a text is no timestamp to `read_timestamp` either way.
+    let has_zone = found.as_str().as_bytes()[19..]
+        .iter()
+        .any(|b| matches!(b, b'Z' | b'+' | b'-'));
+    let end = if has_zone {
+        found.end()
+    } else {
+        zone_after_space(text, found.end()).unwrap_or(found.end())
+    };
+    Some(Found {
+        text,
+        start: found.start(),
+        end,
+    })
 }
 
 fn init_regexes() {
@@ -326,12 +420,19 @@ impl LogParser {
     }
 
     pub fn parse_line(&self, line_number: usize, raw: &str) -> anyhow::Result<LogEntry> {
-        let format = self
-            .config
-            .force_format
-            .unwrap_or_else(|| Self::detect_format(raw));
+        // A JSON line is parsed once: detection keeps the object it parsed for the reader.
+        let (format, json) = match self.config.force_format {
+            Some(format) => (format, None),
+            None => match json_object(raw) {
+                Some(object) => (LogFormat::Json, Some(object)),
+                None => (Self::detect_text(raw.trim()), None),
+            },
+        };
         let parsed = match format {
-            LogFormat::Json => self.try_parse_json(line_number, raw),
+            LogFormat::Json => match json {
+                Some(object) => Some(self.json_entry(line_number, raw, object)),
+                None => self.try_parse_json(line_number, raw),
+            },
             LogFormat::Syslog => self.parse_syslog(line_number, raw),
             LogFormat::CommonLog => self.parse_common_log(line_number, raw),
             LogFormat::Logfmt => self.parse_logfmt(line_number, raw),
@@ -355,7 +456,8 @@ impl LogParser {
         }
 
         // Fallback: if syslog priority is present but detection missed, still parse as syslog.
-        if entry.format == LogFormat::PlainText {
+        // The pattern is anchored on `<`, so a line that does not start with one is not run.
+        if entry.format == LogFormat::PlainText && raw.starts_with('<') {
             if let Some(syslog_re) = SYSLOG_PRIORITY_RE.get() {
                 if syslog_re.is_match(raw) {
                     if let Some(syslog_entry) = self.parse_syslog(line_number, raw) {
@@ -370,26 +472,39 @@ impl LogParser {
 
     pub fn detect_format(line: &str) -> LogFormat {
         init_regexes();
-        let trimmed = line.trim();
-        if trimmed.starts_with('{') && serde_json::from_str::<Value>(trimmed).is_ok() {
+        if json_object(line).is_some() {
             return LogFormat::Json;
         }
-        if SYSLOG_PRIORITY_RE.get().unwrap().is_match(trimmed) {
+        Self::detect_text(line.trim())
+    }
+
+    /// The format of a trimmed line that is not a JSON object. Each pattern is tried only on a
+    /// line that holds the bytes it cannot match without, so a bare plain line costs a few
+    /// byte tests, not four regex runs.
+    fn detect_text(trimmed: &str) -> LogFormat {
+        if trimmed.starts_with('<') && SYSLOG_PRIORITY_RE.get().unwrap().is_match(trimmed) {
             return LogFormat::Syslog;
         }
-        if BSD_SYSLOG_RE.get().unwrap().is_match(trimmed) {
+        // `Jan`..`Dec` open a BSD syslog line; `[` and `"` are in a common log line's pattern.
+        if starts_with_month(trimmed) && BSD_SYSLOG_RE.get().unwrap().is_match(trimmed) {
             return LogFormat::Syslog;
         }
-        if COMMON_LOG_RE.get().unwrap().is_match(trimmed) {
+        if trimmed.contains('[')
+            && trimmed.contains('"')
+            && COMMON_LOG_RE.get().unwrap().is_match(trimmed)
+        {
             return LogFormat::CommonLog;
         }
-        let logfmt_matches = LOGFMT_PAIR_RE
-            .get()
-            .unwrap()
-            .find_iter(trimmed)
-            .take(2)
-            .count();
-        if logfmt_matches >= 2 {
+        // A logfmt pair has an `=`.
+        if trimmed.contains('=')
+            && LOGFMT_PAIR_RE
+                .get()
+                .unwrap()
+                .find_iter(trimmed)
+                .take(2)
+                .count()
+                >= 2
+        {
             return LogFormat::Logfmt;
         }
         LogFormat::PlainText
@@ -416,13 +531,12 @@ impl LogParser {
     }
 
     fn try_parse_json(&self, line_number: usize, raw: &str) -> Option<LogEntry> {
-        let trimmed = raw.trim();
-        if !trimmed.starts_with('{') {
-            return None;
-        }
+        let object = json_object(raw)?;
+        Some(self.json_entry(line_number, raw, object))
+    }
 
-        let value: Value = serde_json::from_str(trimmed).ok()?;
-        let obj = value.as_object()?;
+    /// The entry of a JSON object read from `raw`.
+    fn json_entry(&self, line_number: usize, raw: &str, obj: Map<String, Value>) -> LogEntry {
         let mut entry = self.base_entry(line_number, raw, LogFormat::Json);
 
         // The keys read into an entry field. Every other key stays in `fields`, a listed key
@@ -439,7 +553,7 @@ impl LogParser {
         entry.message = take_first(MESSAGE_KEYS, &mut taken, |key| {
             obj.get(key)?.as_str().map(String::from)
         })
-        .unwrap_or_else(|| serde_json::to_string(obj).unwrap_or_default());
+        .unwrap_or_else(|| serde_json::to_string(&obj).unwrap_or_default());
         let mut id = |keys: &[&'static str]| {
             take_first(keys, &mut taken, |key| match obj.get(key)? {
                 Value::String(text) => Some(text.clone()),
@@ -454,13 +568,13 @@ impl LogParser {
         entry.parent_span_id = id(PARENT_SPAN_KEYS);
         entry.service_name = id(SERVICE_KEYS);
 
-        for (key, value) in obj.iter() {
+        for (key, value) in obj {
             if !taken.contains(&key.as_str()) {
-                entry.fields.insert(key.clone(), value.clone());
+                entry.fields.insert(key, value);
             }
         }
 
-        Some(entry)
+        entry
     }
 
     fn parse_plain(&self, line_number: usize, raw: &str) -> LogEntry {
@@ -730,7 +844,7 @@ impl LogParser {
     /// anywhere. In any letter case it counts at the head of the line (`head_level`) and alone
     /// in square brackets (`bracket_level`); a lower-case word inside a sentence does not.
     /// `timestamp` is the first timestamp of `text`, as `find_timestamp` gives it.
-    fn extract_level(&self, text: &str, timestamp: Option<&regex::Match>) -> Option<LogLevel> {
+    fn extract_level(&self, text: &str, timestamp: Option<&Found>) -> Option<LogLevel> {
         if let Some(level) = head_level(text, timestamp) {
             return Some(level);
         }
@@ -1598,6 +1712,244 @@ mod tests {
                 "correlation id of {line}"
             );
             assert_eq!(entry.fields, expected, "fields of {line}");
+        }
+    }
+
+    #[test]
+    fn test_zone_after_a_space_is_the_timestamps_zone() {
+        // (line, timestamp, level): a numeric offset after one space, then a space or the
+        // end of the line, belongs to the timestamp; the level is read after it.
+        let rows: &[(&str, &str, Option<LogLevel>)] = &[
+            (
+                "2024-01-15 10:00:00 +0900 INFO started",
+                "2024-01-15T01:00:00Z",
+                Some(LogLevel::Info),
+            ),
+            (
+                "2024-01-15 10:00:00 +09:00 INFO started",
+                "2024-01-15T01:00:00Z",
+                Some(LogLevel::Info),
+            ),
+            (
+                "2024-01-15 10:00:00 -0500 WARN started",
+                "2024-01-15T15:00:00Z",
+                Some(LogLevel::Warn),
+            ),
+            (
+                "2024-01-15 10:00:00 +0900 info started",
+                "2024-01-15T01:00:00Z",
+                Some(LogLevel::Info),
+            ),
+            (
+                "2024-01-15 10:00:00.123 +0530 ERROR started",
+                "2024-01-15T04:30:00.123Z",
+                Some(LogLevel::Error),
+            ),
+            (
+                "2024-01-15T10:00:00,5 -03:30 started",
+                "2024-01-15T13:30:00.5Z",
+                None,
+            ),
+            ("2024-01-15 10:00:00 +0900", "2024-01-15T01:00:00Z", None),
+            (
+                "2024-01-15 10:00:00.250 +05:45",
+                "2024-01-15T04:15:00.250Z",
+                None,
+            ),
+            (
+                "2024-01-15 10:00:00 +1400 INFO a",
+                "2024-01-14T20:00:00Z",
+                Some(LogLevel::Info),
+            ),
+            // `+0100 items` is read as the zone: a real offset and then a space.
+            (
+                "2024-01-15 10:00:00 +0100 items",
+                "2024-01-15T09:00:00Z",
+                None,
+            ),
+            // A zone written with no space is the zone as before.
+            (
+                "2024-01-15 10:00:00+0900 INFO a",
+                "2024-01-15T01:00:00Z",
+                Some(LogLevel::Info),
+            ),
+            // A zone twice: the first is the timestamp's, the second is message.
+            (
+                "2024-01-15 10:00:00 +0900 +0100 INFO a",
+                "2024-01-15T01:00:00Z",
+                Some(LogLevel::Info),
+            ),
+            (
+                "2024-01-15 10:00:00Z +0900 INFO a",
+                "2024-01-15T10:00:00Z",
+                Some(LogLevel::Info),
+            ),
+            // A timestamp in brackets: the offset ends at the bracket, the level follows it.
+            (
+                "[2024-01-15 10:00:00 +0900] warn started",
+                "2024-01-15T01:00:00Z",
+                Some(LogLevel::Warn),
+            ),
+            (
+                "[2024-01-15 10:00:00.5 -05:00] started",
+                "2024-01-15T15:00:00.5Z",
+                None,
+            ),
+            // A timestamp that does not lead the line.
+            (
+                "started at 2024-01-15 10:00:00 +0900 by INFO desk",
+                "2024-01-15T01:00:00Z",
+                Some(LogLevel::Info),
+            ),
+        ];
+        for (line, timestamp, level) in rows {
+            let entry = LogParser::new("test.log").parse_line(1, line).unwrap();
+            assert_eq!(entry.timestamp, utc(timestamp), "timestamp of {line}");
+            assert_eq!(entry.level, *level, "level of {line}");
+            assert_eq!(entry.message, *line, "message of {line}");
+            assert_eq!(entry.format, LogFormat::PlainText, "format of {line}");
+        }
+    }
+
+    #[test]
+    fn test_zone_after_a_space_leads_a_logfmt_line_too() {
+        let line = "2024-01-15 10:00:00 +0900 level=info msg=started";
+        let entry = LogParser::new("test.log").parse_line(1, line).unwrap();
+        assert_eq!(entry.format, LogFormat::Logfmt);
+        assert_eq!(entry.timestamp, utc("2024-01-15T01:00:00Z"));
+        assert_eq!(entry.level, Some(LogLevel::Info));
+        assert_eq!(entry.message, "started");
+    }
+
+    #[test]
+    fn test_a_digit_that_is_not_ascii_in_the_time_is_no_timestamp() {
+        // The pattern's `\d` takes any Unicode digit, so the text it finds is not always
+        // 19 bytes of ASCII: byte 19 can fall inside a letter.
+        for line in [
+            "2024-01-15 10:00:0\u{0660} INFO x",
+            "2024-01-15 10:00:\u{0966}0 +0900 INFO x",
+            "\u{ff12}024-01-15 10:00:00 INFO x",
+        ] {
+            let entry = LogParser::new("test.log").parse_line(1, line).unwrap();
+            assert_eq!(entry.timestamp, None, "timestamp of {line}");
+            assert_eq!(entry.level, Some(LogLevel::Info), "level of {line}");
+            assert_eq!(entry.message, line, "message of {line}");
+        }
+    }
+
+    #[test]
+    fn test_text_after_the_seconds_that_is_no_zone_stays_message() {
+        let rows: &[&str] = &[
+            "2024-01-15 10:00:00 -1234 widgets left",
+            "2024-01-15 10:00:00 +9 retries",
+            "2024-01-15 10:00:00 -0500ms",
+            "2024-01-15 10:00:00 +0900x INFO a",
+            "2024-01-15 10:00:00 +1500 INFO a",
+            "2024-01-15 10:00:00 +0910 INFO a",
+            "2024-01-15 10:00:00  +0900 INFO a",
+            "2024-01-15 10:00:00 +09:0 INFO a",
+        ];
+        for line in rows {
+            let entry = LogParser::new("test.log").parse_line(1, line).unwrap();
+            assert_eq!(
+                entry.timestamp,
+                utc("2024-01-15T10:00:00Z"),
+                "timestamp of {line}"
+            );
+            assert_eq!(entry.message, *line, "message of {line}");
+        }
+        let entry = LogParser::new("test.log")
+            .parse_line(1, "2024-01-15 10:00:00 -1234 widgets left")
+            .unwrap();
+        assert_eq!(
+            entry.level, None,
+            "level of a line with a count after the time"
+        );
+    }
+
+    #[test]
+    fn test_utc_and_gmt_after_the_seconds_read_as_they_did() {
+        // Pins head: the time has no zone word and is UTC already, and the level is found.
+        for zone in ["UTC", "GMT"] {
+            let parser = LogParser::new("test.log");
+            let line = format!("2024-01-15 10:00:00 {zone} INFO started");
+            let entry = parser.parse_line(1, &line).unwrap();
+            assert_eq!(entry.timestamp, utc("2024-01-15T10:00:00Z"), "{line}");
+            assert_eq!(entry.level, Some(LogLevel::Info), "{line}");
+            assert_eq!(entry.message, line, "{line}");
+        }
+    }
+
+    #[test]
+    fn test_json_line_edge_shapes() {
+        let parser = LogParser::new("test.log");
+
+        let entry = parser.parse_line(1, "{not json").unwrap();
+        assert_eq!(entry.format, LogFormat::PlainText, "format of {{not json");
+        assert_eq!(entry.message, "{not json");
+        assert_eq!(entry.level, None);
+
+        let line = r#"{"a":1} trailing"#;
+        let entry = parser.parse_line(1, line).unwrap();
+        assert_eq!(entry.format, LogFormat::PlainText, "format of {line}");
+        assert_eq!(entry.message, line);
+        assert!(
+            entry.fields.is_empty(),
+            "no fields from a line that is no JSON"
+        );
+
+        let entry = parser.parse_line(1, "{}").unwrap();
+        assert_eq!(entry.format, LogFormat::Json, "format of {{}}");
+        assert_eq!(entry.message, "{}", "message of an empty object");
+        assert!(entry.fields.is_empty(), "fields of an empty object");
+
+        let line = r#"  {"level":"ERROR"}  "#;
+        let entry = parser.parse_line(1, line).unwrap();
+        assert_eq!(entry.format, LogFormat::Json, "format of {line}");
+        assert_eq!(entry.level, Some(LogLevel::Error));
+        assert_eq!(entry.raw, line, "raw keeps the spaces");
+        assert_eq!(entry.message, r#"{"level":"ERROR"}"#);
+        assert!(entry.fields.is_empty(), "the level key is taken");
+
+        // A line that starts with `{` and is logfmt after it is not JSON.
+        let line = "{ level=info msg=hello";
+        let entry = parser.parse_line(1, line).unwrap();
+        assert_eq!(entry.format, LogFormat::Logfmt, "format of {line}");
+        assert_eq!(entry.level, Some(LogLevel::Info));
+        assert_eq!(entry.message, "hello");
+
+        let text = "x".repeat(1_000_000);
+        let line = format!(r#"{{"level":"INFO","message":"{text}","n":7}}"#);
+        let entry = parser.parse_line(1, &line).unwrap();
+        assert_eq!(entry.format, LogFormat::Json, "format of a 1 MB line");
+        assert_eq!(entry.message.len(), 1_000_000, "message of a 1 MB line");
+        assert_eq!(entry.fields.get("n"), Some(&Value::from(7)));
+        assert_eq!(LogParser::detect_format(&line), LogFormat::Json);
+    }
+
+    #[test]
+    fn test_detect_format_answers_for_each_shape() {
+        let rows: &[(&str, LogFormat)] = &[
+            (r#"{"a":1}"#, LogFormat::Json),
+            (r#"  {"a":1}  "#, LogFormat::Json),
+            ("{not json", LogFormat::PlainText),
+            ("<34>Oct 11 22:14:15 host su: x", LogFormat::Syslog),
+            ("  <34>Oct 11 22:14:15 host su: x", LogFormat::Syslog),
+            ("Mar 15 03:00:00 host sshd[1]: x", LogFormat::Syslog),
+            (
+                r#"127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET / HTTP/1.0" 200 2326"#,
+                LogFormat::CommonLog,
+            ),
+            ("a=1 b=2", LogFormat::Logfmt),
+            ("a=1", LogFormat::PlainText),
+            ("[x] no equals", LogFormat::PlainText),
+            ("Mar 15 03:00:00 host x", LogFormat::PlainText),
+            ("", LogFormat::PlainText),
+        ];
+        for (line, format) in rows {
+            assert_eq!(LogParser::detect_format(line), *format, "format of {line}");
+            let entry = LogParser::new("test.log").parse_line(1, line).unwrap();
+            assert_eq!(entry.format, *format, "parsed format of {line}");
         }
     }
 }
