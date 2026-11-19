@@ -124,7 +124,7 @@ class HierarchyNode(TypedDict, total=False):
     name: str
     parent_id: str | None
     children: list[HierarchyNode]
-    entry_ids: list[int]
+    entry_ids: list[str]
     start_time: str | None
     end_time: str | None
     duration_ms: int | None

@@ -12,7 +12,7 @@ Example:
     from logler.models import SearchResults, LogEntry
 
     # Type-safe access to search results
-    results: SearchResults = investigate.search(files=["app.log"], validated=True)
+    results = SearchResults.model_validate(investigate.search(files=["app.log"]))
     for result in results.results:
         entry: LogEntry = result.entry
         print(f"{entry.timestamp} [{entry.level}] {entry.message}")
@@ -79,6 +79,7 @@ class DetectionMethod(str, Enum):  # noqa: UP042 - StrEnum changes str() and for
 class LogEntry(BaseModel):
     """A single parsed log entry."""
 
+    id: str | None = Field(None, description="Entry identifier")
     line_number: int = Field(description="Line number in source file")
     timestamp: str | None = Field(None, description="ISO8601 timestamp")
     level: str | None = Field(None, description="Log level (ERROR, WARN, INFO, etc.)")
@@ -143,6 +144,10 @@ class SearchSummary(BaseModel):
     total_matches: int = Field(0, description="Total number of matches")
     unique_messages: int = Field(0, description="Number of unique message patterns")
     log_levels: dict[str, int] = Field(default_factory=dict, description="Counts by level")
+    by_file: dict[str, int] = Field(default_factory=dict, description="Counts by file")
+    full_results_available: bool | None = Field(
+        None, description="Whether the full results can be asked for"
+    )
     top_messages: list[dict[str, Any]] = Field(
         default_factory=list, description="Most common messages with counts"
     )
@@ -184,6 +189,7 @@ class BottleneckInfo(BaseModel):
     """Information about a performance bottleneck."""
 
     node_id: str = Field(description="ID of the bottleneck node")
+    node_name: str | None = Field(None, description="Name of the bottleneck node")
     duration_ms: int = Field(0, description="Duration in milliseconds")
     percentage: float = Field(0.0, description="Percentage of total time")
     depth: int = Field(0, description="Depth in hierarchy")
@@ -199,7 +205,7 @@ class SpanNode(BaseModel):
     children: list[SpanNode] = Field(default_factory=list, description="Child nodes")
 
     # Entry references
-    entry_ids: list[int] = Field(default_factory=list, description="Line numbers of entries")
+    entry_ids: list[str] = Field(default_factory=list, description="Identifiers of entries")
     entry_count: int = Field(0, description="Number of log entries in this node")
 
     # Timing
@@ -250,8 +256,10 @@ class PatternMatch(BaseModel):
     """A detected log pattern."""
 
     pattern: str = Field(description="Regex pattern or template")
+    pattern_type: str | None = Field(None, description="Kind of pattern, such as RepeatedError")
     template: str | None = Field(None, description="Human-readable template")
-    count: int = Field(0, description="Number of occurrences")
+    occurrences: int = Field(0, description="Number of occurrences")
+    affected_threads: list[str] = Field(default_factory=list, description="Threads it occurs in")
     first_seen: str | None = Field(None, description="First occurrence timestamp")
     last_seen: str | None = Field(None, description="Last occurrence timestamp")
     examples: list[LogEntry] = Field(default_factory=list, description="Example entries")
@@ -276,7 +284,8 @@ class PatternResults(BaseModel):
 class SamplingResult(BaseModel):
     """Results from log sampling."""
 
-    entries: list[LogEntry] = Field(default_factory=list, description="Sampled entries")
+    samples: list[LogEntry] = Field(default_factory=list, description="Sampled entries")
+    coverage: dict[str, Any] = Field(default_factory=dict, description="What the sample covers")
     total_population: int = Field(0, description="Total entries in source")
     sample_size: int = Field(0, description="Number of sampled entries")
     strategy: str = Field("random", description="Sampling strategy used")
@@ -348,13 +357,14 @@ class FileMetadata(BaseModel):
 
     path: str = Field(description="File path")
     size_bytes: int = Field(0, description="File size in bytes")
-    line_count: int = Field(0, description="Total line count")
+    lines: int = Field(0, description="Total line count")
     entry_count: int = Field(0, description="Parsed entry count")
     format: str = Field("Unknown", description="Detected log format")
     time_range: dict[str, str] | None = Field(None, description="Time range of entries")
-    level_distribution: dict[str, int] = Field(
-        default_factory=dict, description="Distribution by level"
-    )
+    log_levels: dict[str, int] = Field(default_factory=dict, description="Counts by level")
+    available_fields: list[str] = Field(default_factory=list, description="Fields the entries have")
+    unique_threads: int = Field(0, description="Number of distinct threads")
+    unique_correlation_ids: int = Field(0, description="Number of distinct correlation IDs")
 
 
 class ContextResult(BaseModel):
@@ -365,6 +375,7 @@ class ContextResult(BaseModel):
         default_factory=list, description="Entries before target"
     )
     context_after: list[LogEntry] = Field(default_factory=list, description="Entries after target")
+    related_threads: list[Any] = Field(default_factory=list, description="Threads related to it")
 
 
 # =============================================================================
@@ -417,6 +428,8 @@ class CorrelationChains(BaseModel):
         default_factory=dict, description="Parent to children mapping"
     )
     total_unique_ids: int = Field(0, description="Total unique correlation IDs")
+    total_chains: int = Field(0, description="Number of chains")
+    total_correlation_ids: int = Field(0, description="Number of correlation IDs seen")
 
 
 # =============================================================================
