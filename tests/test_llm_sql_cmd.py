@@ -165,6 +165,16 @@ class TestSqlOneLogsTable:
         inv.load_files([path])
         return inv.sql_query(query)
 
+    def test_a_time_with_a_zone_is_a_result_value(self, four_line_log):
+        """DuckDB imports pytz to hand back a time that carries a zone: `now()` is one."""
+        result = self._command("SELECT now() AS t", four_line_log)
+
+        assert result["columns"] == ["t"]
+        assert len(result["results"]) == 1
+        value = result["results"][0]["t"]
+        assert isinstance(value, str)
+        assert value.endswith("Z")
+
     def test_select_star_is_the_same_through_both_doors(self, four_line_log):
         query = "SELECT * FROM logs ORDER BY line_number"
 
