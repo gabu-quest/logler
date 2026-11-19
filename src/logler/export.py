@@ -4,13 +4,13 @@ Jaeger and Zipkin trace export from hierarchy data.
 Public API surface is re-exported by :mod:`logler.investigate`.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 
 def export_to_jaeger(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     service_name: str = "logler-export",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Export hierarchy to Jaeger-compatible JSON format.
 
     The output follows the Jaeger JSON format and can be imported into the
@@ -37,7 +37,7 @@ def export_to_jaeger(
     trace_id = uuid.uuid4().hex[:32]
     spans = []
 
-    def convert_node(node: Dict[str, Any], parent_span_id: Optional[str] = None):
+    def convert_node(node: dict[str, Any], parent_span_id: str | None = None):
         span_id = uuid.uuid4().hex[:16]
 
         # Parse timestamps
@@ -115,9 +115,9 @@ def export_to_jaeger(
 
 
 def export_to_zipkin(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     service_name: str = "logler-export",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Export hierarchy to Zipkin V2 JSON format.
 
     Args:
@@ -138,19 +138,18 @@ def export_to_zipkin(
     trace_id = uuid.uuid4().hex[:32]
     spans = []
 
-    def convert_node(node: Dict[str, Any], parent_id: Optional[str] = None):
+    def convert_node(node: dict[str, Any], parent_id: str | None = None):
         span_id = uuid.uuid4().hex[:16]
 
         # Parse timestamp
         start_time = node.get("start_time")
         timestamp_us = 0
-        if start_time:
-            if isinstance(start_time, str):
-                try:
-                    dt = datetime.fromisoformat(start_time)
-                    timestamp_us = int(dt.timestamp() * 1_000_000)
-                except Exception:
-                    pass
+        if start_time and isinstance(start_time, str):
+            try:
+                dt = datetime.fromisoformat(start_time)
+                timestamp_us = int(dt.timestamp() * 1_000_000)
+            except Exception:
+                pass
 
         duration_us = int((node.get("duration_ms", 0) or 0) * 1000)
 

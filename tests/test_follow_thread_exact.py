@@ -14,7 +14,7 @@ Fixture: deterministic_log_file
 import pytest
 
 try:
-    from logler.investigate import follow_thread, RUST_AVAILABLE
+    from logler.investigate import RUST_AVAILABLE, follow_thread
 except ImportError as e:
     if "logler_rs" in str(e):
         RUST_AVAILABLE = False
@@ -49,21 +49,21 @@ class TestFollowThreadById:
         entries = result.get("entries", result.get("timeline", []))
 
         # MUST have exact count
-        assert (
-            len(entries) == expected_count
-        ), f"Thread {thread_id} should have exactly {expected_count} entries, got {len(entries)}"
+        assert len(entries) == expected_count, (
+            f"Thread {thread_id} should have exactly {expected_count} entries, got {len(entries)}"
+        )
 
         # ALL entries must be from this thread
         for entry in entries:
-            assert (
-                entry["thread_id"] == thread_id
-            ), f"Entry thread_id {entry['thread_id']} doesn't match {thread_id}"
+            assert entry["thread_id"] == thread_id, (
+                f"Entry thread_id {entry['thread_id']} doesn't match {thread_id}"
+            )
 
         # ALL entries should have the expected level
         for entry in entries:
-            assert (
-                entry["level"].upper() == expected_level
-            ), f"Thread {thread_id} should have level {expected_level}, got {entry['level']}"
+            assert entry["level"].upper() == expected_level, (
+                f"Thread {thread_id} should have level {expected_level}, got {entry['level']}"
+            )
 
     def test_nonexistent_thread_returns_empty(self, deterministic_log_file):
         """Non-existent thread should return exactly 0 entries."""
@@ -204,9 +204,9 @@ class TestFollowThreadLevelCounts:
             level = entry["level"].upper()
             level_counts[level] = level_counts.get(level, 0) + 1
 
-        assert (
-            level_counts == expected_levels
-        ), f"Thread {thread_id} level distribution should be {expected_levels}, got {level_counts}"
+        assert level_counts == expected_levels, (
+            f"Thread {thread_id} level distribution should be {expected_levels}, got {level_counts}"
+        )
 
 
 class TestFollowThreadNoIdentifier:
@@ -230,9 +230,9 @@ class TestFollowThreadResultStructure:
         """Result should have 'entries' or 'timeline' key."""
         result = follow_thread(files=[deterministic_log_file], thread_id="worker-0")
 
-        assert (
-            "entries" in result or "timeline" in result
-        ), "Result should have 'entries' or 'timeline' key"
+        assert "entries" in result or "timeline" in result, (
+            "Result should have 'entries' or 'timeline' key"
+        )
 
     def test_entries_have_required_fields(self, deterministic_log_file):
         """Each entry must have timestamp, level, message, thread_id."""

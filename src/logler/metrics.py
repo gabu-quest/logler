@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any, Dict, Iterator, List, Optional, Sequence
+from typing import Any
 
 from .parser import format_time, to_utc
 
@@ -21,18 +22,18 @@ from .parser import format_time, to_utc
 class DataPoint:
     """A single numeric observation extracted from a log entry."""
 
-    timestamp: Optional[str]
+    timestamp: str | None
     value: float
     file: str
     line_number: int
-    unit: Optional[str] = None
+    unit: str | None = None
 
 
 @dataclass
 class Anomaly:
     """A value that deviates significantly from the series mean."""
 
-    timestamp: Optional[str]
+    timestamp: str | None
     value: float
     z_score: float
     file: str
@@ -63,9 +64,9 @@ class SeriesStats:
     stddev: float
     p95: float
     p99: float
-    first_timestamp: Optional[str]
-    last_timestamp: Optional[str]
-    anomalies: List[Anomaly] = field(default_factory=list)
+    first_timestamp: str | None
+    last_timestamp: str | None
+    anomalies: list[Anomaly] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -108,8 +109,8 @@ _DURATION_PATTERN = re.compile(
 
 
 def extract_numeric_fields(
-    entries: Sequence[Dict[str, Any]],
-) -> Dict[str, List[DataPoint]]:
+    entries: Sequence[dict[str, Any]],
+) -> dict[str, list[DataPoint]]:
     """Extract all numeric fields from a sequence of log entries.
 
     Sources (checked in order):
@@ -123,7 +124,7 @@ def extract_numeric_fields(
     Returns:
         Mapping of field_name -> list of DataPoints, sorted by timestamp.
     """
-    series: Dict[str, List[DataPoint]] = {}
+    series: dict[str, list[DataPoint]] = {}
 
     for entry in entries:
         file_path = entry.get("file", "")
@@ -169,7 +170,7 @@ def extract_numeric_fields(
     return series
 
 
-def _add_point(series: Dict[str, List[DataPoint]], field_name: str, point: DataPoint) -> None:
+def _add_point(series: dict[str, list[DataPoint]], field_name: str, point: DataPoint) -> None:
     if field_name not in series:
         series[field_name] = []
     series[field_name].append(point)
@@ -177,10 +178,10 @@ def _add_point(series: Dict[str, List[DataPoint]], field_name: str, point: DataP
 
 def _extract_from_message(
     message: str,
-    timestamp: Optional[str],
+    timestamp: str | None,
     file_path: str,
     line_number: int,
-    series: Dict[str, List[DataPoint]],
+    series: dict[str, list[DataPoint]],
 ) -> None:
     """Extract numeric values from a log message string using regex patterns."""
     seen_fields: set = set()
@@ -274,7 +275,7 @@ def compute_series_stats(
     last_ts = ts_sorted[-1].timestamp if ts_sorted else None
 
     # Anomalies: z-score > threshold
-    anomalies: List[Anomaly] = []
+    anomalies: list[Anomaly] = []
     if stddev > 0:
         for p in points:
             z = abs(p.value - mean) / stddev
@@ -304,7 +305,7 @@ def compute_series_stats(
     )
 
 
-def _percentile(sorted_values: List[float], pct: float) -> float:
+def _percentile(sorted_values: list[float], pct: float) -> float:
     """Compute percentile using linear interpolation (same as numpy default)."""
     n = len(sorted_values)
     if n == 1:
@@ -321,7 +322,7 @@ def _percentile(sorted_values: List[float], pct: float) -> float:
 def aggregate_time_buckets(
     points: Sequence[DataPoint],
     bucket_size: str = "1s",
-) -> List[Bucket]:
+) -> list[Bucket]:
     """Aggregate data points into fixed-size time buckets.
 
     Args:
@@ -344,7 +345,7 @@ def aggregate_time_buckets(
 
     # Build buckets
     first_ts = timestamped[0][1]
-    buckets: Dict[int, List[float]] = {}
+    buckets: dict[int, list[float]] = {}
 
     for point, ts in timestamped:
         bucket_idx = int((ts - first_ts).total_seconds() / delta.total_seconds())
@@ -353,7 +354,7 @@ def aggregate_time_buckets(
         buckets[bucket_idx].append(point.value)
 
     # Convert to Bucket objects
-    result: List[Bucket] = []
+    result: list[Bucket] = []
     for idx in sorted(buckets.keys()):
         values = buckets[idx]
         start = first_ts + delta * idx
@@ -397,11 +398,11 @@ def _parse_bucket_duration(duration: str) -> timedelta:
 
 
 def extract_metrics(
-    entries: Sequence[Dict[str, Any]],
-    fields: Optional[List[str]] = None,
-    bucket_size: Optional[str] = None,
+    entries: Sequence[dict[str, Any]],
+    fields: list[str] | None = None,
+    bucket_size: str | None = None,
     anomaly_threshold: float = 2.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Full metrics pipeline: extract → stats → buckets.
 
     Args:
@@ -419,7 +420,7 @@ def extract_metrics(
     if fields:
         all_series = {k: v for k, v in all_series.items() if k in fields}
 
-    result_fields: Dict[str, Any] = {}
+    result_fields: dict[str, Any] = {}
 
     for field_name, points in all_series.items():
         if not points:
@@ -427,7 +428,7 @@ def extract_metrics(
 
         stats = compute_series_stats(points, anomaly_threshold)
 
-        field_data: Dict[str, Any] = {
+        field_data: dict[str, Any] = {
             "count": stats.count,
             "stats": {
                 "min": stats.min,

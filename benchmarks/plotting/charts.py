@@ -104,7 +104,7 @@ def plot_scaling_lines(
     for i, (label, data) in enumerate(sorted(series.items())):
         c = color(i)
         # Sort by x value
-        paired = sorted(zip(data["x"], data["median"], data["p95"], data["min"]))
+        paired = sorted(zip(data["x"], data["median"], data["p95"], data["min"], strict=False))
         xs = [p[0] for p in paired]
         medians = [p[1] for p in paired]
         p95s = [p[2] for p in paired]
@@ -194,7 +194,7 @@ def plot_comparison_bars(
     )
 
     # p95 error caps
-    errors = [p - m for p, m in zip(p95s, medians)]
+    errors = [p - m for p, m in zip(p95s, medians, strict=False)]
     ax.errorbar(
         x,
         medians,
@@ -210,7 +210,7 @@ def plot_comparison_bars(
 
     # Throughput annotations if requested
     if show_throughput and any(t > 0 for t in throughputs):
-        for i, (bar, tp) in enumerate(zip(bars, throughputs)):
+        for bar, tp in zip(bars, throughputs, strict=False):
             if tp > 0:
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
@@ -339,7 +339,7 @@ def plot_throughput_comparison(
     )
 
     # Value labels
-    for bar, tp in zip(bars, throughputs):
+    for bar, tp in zip(bars, throughputs, strict=False):
         if tp > 0:
             ax.text(
                 bar.get_width() + max(throughputs) * 0.02,

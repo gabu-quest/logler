@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+from typing import ClassVar
 
 import pytest
 
@@ -115,7 +116,7 @@ class TestSqlCommandBatching:
 class TestSqlOneLogsTable:
     """`logler llm sql` and `Investigator.sql_query` read one `logs` table and one `metrics`."""
 
-    LOGS_COLUMNS = [
+    LOGS_COLUMNS: ClassVar[list[str]] = [
         "file",
         "line_number",
         "timestamp",

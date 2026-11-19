@@ -5,10 +5,10 @@ File watching with regex pattern matching.
 import asyncio
 import fnmatch
 from pathlib import Path
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 
 from rich.console import Console
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 
 class LogFileHandler(FileSystemEventHandler):
@@ -47,7 +47,7 @@ class FileWatcher:
         observer.start()
 
         try:
-            while True:
+            while True:  # noqa: ASYNC110 - waits for KeyboardInterrupt; no event ends it
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
             observer.stop()

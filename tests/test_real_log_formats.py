@@ -16,14 +16,15 @@ Fixtures:
 """
 
 import re
-import pytest
 from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 from tests.conftest import PYTHON
 
 try:
-    from logler.investigate import search, extract_ids, follow_thread, RUST_AVAILABLE
+    from logler.investigate import RUST_AVAILABLE, extract_ids, follow_thread, search
 except ImportError as e:
     if "logler_rs" in str(e):
         RUST_AVAILABLE = False
@@ -108,9 +109,9 @@ class TestApacheCLF:
         assert len(result["results"]) == 500
         for item in result["results"]:
             msg = item["entry"]["message"]
-            assert (
-                msg is not None and len(msg.strip()) > 0
-            ), f"Empty message at line {item.get('line_number')}"
+            assert msg is not None and len(msg.strip()) > 0, (
+                f"Empty message at line {item.get('line_number')}"
+            )
 
 
 class TestRealisticMicroservice:
@@ -171,9 +172,9 @@ class TestRealisticMicroservice:
         }
         # Remove None if present
         services_found.discard(None)
-        assert (
-            len(services_found) >= 3
-        ), f"Expected entries from multiple services, got: {services_found}"
+        assert len(services_found) >= 3, (
+            f"Expected entries from multiple services, got: {services_found}"
+        )
 
     def test_search_compact_reduces_size(self, microservice_file):
         """Compact output must be < 60% of normal output size."""
@@ -198,7 +199,7 @@ class TestRealisticMicroservice:
             cwd=str(Path(__file__).parent.parent),
         )
         compact = subprocess.run(
-            cmd_base + ["--compact"],
+            [*cmd_base, "--compact"],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).parent.parent),
@@ -207,9 +208,9 @@ class TestRealisticMicroservice:
         assert compact.returncode == 0
         normal_size = len(normal.stdout.encode())
         compact_size = len(compact.stdout.encode())
-        assert (
-            compact_size < normal_size * 0.75
-        ), f"Compact ({compact_size}B) should be < 75% of normal ({normal_size}B)"
+        assert compact_size < normal_size * 0.75, (
+            f"Compact ({compact_size}B) should be < 75% of normal ({normal_size}B)"
+        )
 
 
 class TestRealisticSyslog:
@@ -242,9 +243,9 @@ class TestRealisticSyslog:
         levels = [item["entry"]["level"] for item in result["results"]]
         known_levels = [lv for lv in levels if lv is not None and lv != "UNKNOWN"]
         # At least 20% of 150 entries should have meaningful levels
-        assert (
-            len(known_levels) >= 30
-        ), f"Expected >=30 entries with known levels, got {len(known_levels)}"
+        assert len(known_levels) >= 30, (
+            f"Expected >=30 entries with known levels, got {len(known_levels)}"
+        )
 
     def test_syslog_auth_failures_are_error(self, syslog_file):
         """Authentication failures should be classified as ERROR."""
@@ -285,9 +286,9 @@ class TestRealisticSyslog:
         assert len(result["results"]) == 150
         null_count = sum(1 for item in result["results"] if item["entry"]["timestamp"] is None)
         # All 150 BSD syslog entries should have null timestamps
-        assert (
-            null_count == 150
-        ), f"Expected all 150 timestamps to be null, got {150 - null_count} non-null"
+        assert null_count == 150, (
+            f"Expected all 150 timestamps to be null, got {150 - null_count} non-null"
+        )
 
     def test_search_output_size_proportional(self, syslog_file):
         """40 syslog errors should produce < 20KB of search output."""
@@ -401,9 +402,9 @@ class TestCrossFormatConsistency:
             for item in result["results"]:
                 entry = item["entry"]
                 for key in required_keys:
-                    assert (
-                        key in entry
-                    ), f"{name}: missing key '{key}' in entry keys: {list(entry.keys())}"
+                    assert key in entry, (
+                        f"{name}: missing key '{key}' in entry keys: {list(entry.keys())}"
+                    )
 
     def test_all_formats_have_messages(self, all_fixtures):
         """No empty message fields across any format."""
@@ -412,9 +413,9 @@ class TestCrossFormatConsistency:
             assert len(result["results"]) == 10, f"{name}: expected 10 results"
             for item in result["results"]:
                 msg = item["entry"]["message"]
-                assert (
-                    msg is not None and len(msg.strip()) > 0
-                ), f"{name}: empty message at line {item.get('line_number')}"
+                assert msg is not None and len(msg.strip()) > 0, (
+                    f"{name}: empty message at line {item.get('line_number')}"
+                )
 
     def test_level_filter_works_on_formats_with_errors(self, all_fixtures):
         """ERROR filter returns >0 results on fixtures with errors."""

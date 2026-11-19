@@ -11,13 +11,14 @@ Uses a deterministic fixture with known ID counts:
 
 import json
 import tempfile
-import pytest
 from pathlib import Path
+
+import pytest
 
 from tests.conftest import PYTHON
 
 try:
-    from logler.investigate import extract_ids, RUST_AVAILABLE
+    from logler.investigate import RUST_AVAILABLE, extract_ids
 except ImportError as e:
     if "logler_rs" in str(e):
         RUST_AVAILABLE = False

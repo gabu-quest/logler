@@ -31,8 +31,9 @@ Example Usage::
 
 # Re-export everything so ``from logler.investigate import X`` keeps working.
 
+import contextlib
 import json
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Core search / navigation (private module)
@@ -40,41 +41,40 @@ from typing import List, Optional, Dict, Any
 from ._loading import load_files
 from ._search_core import (  # noqa: F401
     RUST_AVAILABLE,
-    search,
+    _build_filters,
+    _format_as_compact,
+    _format_as_count,
+    _format_as_summary,
+    _normalize_context_payload,
+    _normalize_entries,
+    # Private helpers re-exported for Investigator class & tests
+    _normalize_entry,
+    _normalize_pattern_examples,
+    _normalize_search_result_levels,
+    _parse_levels,
+    _select_diverse_samples,
     extract_ids,
+    find_patterns,
     follow_thread,
     get_context,
     get_metadata,
-    find_patterns,
-    # Private helpers re-exported for Investigator class & tests
-    _normalize_entry,
-    _normalize_entries,
-    _normalize_search_result_levels,
-    _normalize_pattern_examples,
-    _build_filters,
-    _normalize_context_payload,
-    _parse_levels,
-    _format_as_summary,
-    _format_as_count,
-    _format_as_compact,
-    _select_diverse_samples,
+    search,
 )
 
 # ---------------------------------------------------------------------------
-# Hierarchy, error flow, bottleneck, correlation chains
+# Comparison (threads, periods, cross-service)
 # ---------------------------------------------------------------------------
-from .hierarchy import (  # noqa: F401
-    follow_thread_hierarchy,
-    get_hierarchy_summary,
-    analyze_error_flow,
-    format_error_flow,
-    detect_correlation_chains,
-    build_hierarchy_with_correlation_chains,
-    analyze_bottlenecks,
-    diff_hierarchies,
-    format_hierarchy_diff,
-    _format_detection_method,
-    _append_tree_preview,
+from .comparison import (  # noqa: F401
+    _analyze_period,
+    _analyze_thread,
+    _compute_differences,
+    _compute_period_changes,
+    _generate_comparison_summary,
+    _generate_period_summary,
+    _in_time_range,
+    compare_threads,
+    compare_time_periods,
+    cross_service_timeline,
 )
 
 # ---------------------------------------------------------------------------
@@ -86,19 +86,20 @@ from .export import (  # noqa: F401
 )
 
 # ---------------------------------------------------------------------------
-# Comparison (threads, periods, cross-service)
+# Hierarchy, error flow, bottleneck, correlation chains
 # ---------------------------------------------------------------------------
-from .comparison import (  # noqa: F401
-    cross_service_timeline,
-    compare_threads,
-    compare_time_periods,
-    _analyze_thread,
-    _compute_differences,
-    _generate_comparison_summary,
-    _analyze_period,
-    _compute_period_changes,
-    _generate_period_summary,
-    _in_time_range,
+from .hierarchy import (  # noqa: F401
+    _append_tree_preview,
+    _format_detection_method,
+    analyze_bottlenecks,
+    analyze_error_flow,
+    build_hierarchy_with_correlation_chains,
+    detect_correlation_chains,
+    diff_hierarchies,
+    follow_thread_hierarchy,
+    format_error_flow,
+    format_hierarchy_diff,
+    get_hierarchy_summary,
 )
 
 # ---------------------------------------------------------------------------
@@ -112,7 +113,6 @@ from .sampling import (  # noqa: F401
 # Session
 # ---------------------------------------------------------------------------
 from .session import InvestigationSession  # noqa: F401
-
 
 # ============================================================================
 # Investigator class — kept here to avoid circular imports
@@ -146,22 +146,22 @@ class Investigator:
         results = investigator.sql_query("SELECT level, COUNT(*) FROM logs GROUP BY level")
     """
 
-    def __init__(self, sql_db_path: Optional[str] = None):
+    def __init__(self, sql_db_path: str | None = None):
         if not RUST_AVAILABLE:
             raise RuntimeError("Rust backend not available")
         import logler_rs
 
         self._investigator = logler_rs.PyInvestigator()
-        self._files: List[str] = []
-        self._db_temp_files: List[str] = []
+        self._files: list[str] = []
+        self._db_temp_files: list[str] = []
         self._sql_engine = None
         self._sql_db_path = sql_db_path
 
     def load_files(
         self,
-        files: List[str],
-        parser_format: Optional[str] = None,
-        custom_regex: Optional[str] = None,
+        files: list[str],
+        parser_format: str | None = None,
+        custom_regex: str | None = None,
     ):
         """Load log files and build index."""
         load_files(self._investigator, files, parser_format, custom_regex)
@@ -171,17 +171,17 @@ class Investigator:
             self._sql_engine.close()
             self._sql_engine = None
 
-    def get_metadata(self) -> List[Dict[str, Any]]:  # noqa: F811
+    def get_metadata(self) -> list[dict[str, Any]]:
         """Get metadata about loaded log files."""
         return json.loads(self._investigator.get_metadata(self._files))
 
-    def get_context(  # noqa: F811
+    def get_context(
         self,
         file: str,
         line_number: int,
         lines_before: int = 10,
         lines_after: int = 10,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get context around a specific log line."""
         result_json = self._investigator.get_context(
             file, line_number, lines_before, lines_after, False
@@ -190,12 +190,12 @@ class Investigator:
         _normalize_context_payload(result)
         return result
 
-    def follow_thread(  # noqa: F811
+    def follow_thread(
         self,
-        thread_id: Optional[str] = None,
-        correlation_id: Optional[str] = None,
-        trace_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        thread_id: str | None = None,
+        correlation_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
         """Follow a thread/correlation/trace through loaded files."""
         result_json = self._investigator.follow_thread(
             self._files, thread_id, correlation_id, trace_id
@@ -206,22 +206,22 @@ class Investigator:
 
     def search(
         self,
-        query: Optional[str] = None,
-        level: Optional[str] = None,
-        exclude_level: Optional[str] = None,
-        exclude_query: Optional[str] = None,
-        thread_id: Optional[str] = None,
-        correlation_id: Optional[str] = None,
-        trace_id: Optional[str] = None,
-        service_name: Optional[str] = None,
-        limit: Optional[int] = None,
-        tail: Optional[int] = None,
-        time_start: Optional[str] = None,
-        time_end: Optional[str] = None,
+        query: str | None = None,
+        level: str | None = None,
+        exclude_level: str | None = None,
+        exclude_query: str | None = None,
+        thread_id: str | None = None,
+        correlation_id: str | None = None,
+        trace_id: str | None = None,
+        service_name: str | None = None,
+        limit: int | None = None,
+        tail: int | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
         context_lines: int = 3,
         count_only: bool = False,
         offset: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Search loaded files.
 
         Args:
@@ -242,7 +242,7 @@ class Investigator:
             time_end=time_end,
         )
 
-        query_dict: Dict[str, Any] = {
+        query_dict: dict[str, Any] = {
             "files": self._files,
             "query": query,
             "filters": filters,
@@ -261,7 +261,7 @@ class Investigator:
         _normalize_search_result_levels(result)
         return result
 
-    def sql_query(self, query: str) -> List[Dict[str, Any]]:
+    def sql_query(self, query: str) -> list[dict[str, Any]]:
         """Execute SQL query on loaded logs.
 
         Args:
@@ -281,12 +281,12 @@ class Investigator:
         """
         return self._get_sql_engine().execute(query)[1]
 
-    def sql_tables(self) -> List[str]:
+    def sql_tables(self) -> list[str]:
         """Get list of available SQL tables."""
         engine = self._get_sql_engine()
         return engine.get_tables()
 
-    def sql_schema(self, table: str) -> List[Dict[str, Any]]:
+    def sql_schema(self, table: str) -> list[dict[str, Any]]:
         """Get schema for a SQL table."""
         engine = self._get_sql_engine()
         result_json = engine.get_schema(table)
@@ -330,11 +330,11 @@ class Investigator:
     def build_hierarchy(
         self,
         root_identifier: str,
-        max_depth: Optional[int] = None,
+        max_depth: int | None = None,
         use_naming_patterns: bool = True,
         use_temporal_inference: bool = True,
         min_confidence: float = 0.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build hierarchical tree of threads/spans from loaded files.
 
         Args:
@@ -368,7 +368,7 @@ class Investigator:
     def load_from_db(
         self,
         db_path: str,
-        mappings: Optional[List] = None,
+        mappings: list | None = None,
     ) -> None:
         """Load a sqler database as a log source.
 
@@ -400,10 +400,8 @@ class Investigator:
         import os
 
         for path in self._db_temp_files:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(path)
-            except OSError:
-                pass
         self._db_temp_files.clear()
 
     def __enter__(self):
@@ -420,17 +418,17 @@ class Investigator:
 
 
 def extract_metrics(
-    files: List[str],
-    fields: Optional[List[str]] = None,
-    bucket_size: Optional[str] = None,
+    files: list[str],
+    fields: list[str] | None = None,
+    bucket_size: str | None = None,
     anomaly_threshold: float = 2.0,
-    query: Optional[str] = None,
-    level: Optional[str] = None,
-    time_start: Optional[str] = None,
-    time_end: Optional[str] = None,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    query: str | None = None,
+    level: str | None = None,
+    time_start: str | None = None,
+    time_end: str | None = None,
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Extract numeric metrics from log files.
 
     Loads files via :func:`search`, extracts numeric values from entries,
@@ -492,9 +490,9 @@ def extract_metrics(
 
 
 def detect_formats(
-    files: List[str],
+    files: list[str],
     sample_size: int = 50,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Detect log format for each file.
 
     Args:
@@ -512,9 +510,8 @@ def detect_formats(
         >>> for path, info in detection["files"].items():
         ...     print(f"{path}: {info['format']} ({info['confidence']:.0%})")
     """
-    from .format_detector import detect_format as _detect
-
     from .config import config_for_file
+    from .format_detector import detect_format as _detect
 
     config = config_for_file(files[0]) if files else None
     custom_formats = (
@@ -541,12 +538,12 @@ def detect_formats(
 
 
 def mine_log_templates(
-    files: List[str],
+    files: list[str],
     max_clusters: int = 200,
     sim_threshold: float = 0.5,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Mine log templates from files using the Drain algorithm.
 
     Args:
@@ -608,19 +605,19 @@ def mine_log_templates(
 # Re-export for convenience: ``from logler.investigate import DbTableMapping``
 from .db_source import (  # noqa: E402, F401
     DbTableMapping,
-    qler_job_mapping,
     qler_attempt_mapping,
+    qler_job_mapping,
 )
 
 
 def search_db(
     db_path: str,
-    mappings: Optional[List] = None,
-    query: Optional[str] = None,
-    level: Optional[str] = None,
-    correlation_id: Optional[str] = None,
-    limit: Optional[int] = None,
-) -> Dict[str, Any]:
+    mappings: list | None = None,
+    query: str | None = None,
+    level: str | None = None,
+    correlation_id: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
     """One-shot convenience: load a sqler DB and search it.
 
     Creates a temporary :class:`Investigator`, loads the database,

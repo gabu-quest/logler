@@ -11,7 +11,6 @@ from logler.builtin_formats import (
     list_builtin_format_names,
 )
 
-
 # Sample log lines for each format (at least 3 per format where possible)
 SAMPLE_LINES = {
     "nginx_access": [
@@ -104,9 +103,9 @@ class TestBuiltinFormatsParseSampleLines:
 
             for i, line in enumerate(samples):
                 match = compiled.match(line)
-                assert (
-                    match is not None
-                ), f"Format {name!r} failed to match sample line {i}: {line!r}"
+                assert match is not None, (
+                    f"Format {name!r} failed to match sample line {i}: {line!r}"
+                )
                 # Verify at least one named group captured something
                 groups = match.groupdict()
                 non_empty = {k: v for k, v in groups.items() if v is not None}
@@ -123,9 +122,9 @@ class TestBuiltinFormatsParseSampleLines:
                 match = compiled.match(line)
                 if match:
                     msg = match.group("message")
-                    assert (
-                        msg is not None and len(msg) > 0
-                    ), f"Format {name!r} has empty message for: {line!r}"
+                    assert msg is not None and len(msg) > 0, (
+                        f"Format {name!r} has empty message for: {line!r}"
+                    )
 
 
 class TestBuiltinFormatRegistry:

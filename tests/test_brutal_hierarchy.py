@@ -6,24 +6,24 @@ and tree formatting with edge cases that break naive implementations.
 """
 
 import json
-import pytest
 import tempfile
 from pathlib import Path
 
+import pytest
 
 # Imports with graceful fallback
 try:
     from logler.investigate import (
-        follow_thread_hierarchy,
-        analyze_error_flow,
-        get_hierarchy_summary,
-        format_error_flow,
         RUST_AVAILABLE,
+        analyze_error_flow,
+        follow_thread_hierarchy,
+        format_error_flow,
+        get_hierarchy_summary,
     )
     from logler.tree_formatter import (
+        format_flamegraph,
         format_tree,
         format_waterfall,
-        format_flamegraph,
     )
 except ImportError as e:
     if "logler_rs" in str(e):

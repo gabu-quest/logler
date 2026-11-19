@@ -22,7 +22,6 @@ from logler.db_source import (
     qler_job_mapping,
 )
 
-
 # ---------------------------------------------------------------------------
 # Shared fixture: temp SQLite with sqler schema matching qler's actual tables
 # ---------------------------------------------------------------------------
@@ -494,14 +493,14 @@ class TestDbToJsonl:
 
             seen_tables: dict[str, list] = {}
             for table_name, group in groupby(entries, key=lambda e: e["thread_id"]):
-                assert (
-                    table_name not in seen_tables
-                ), f"table '{table_name}' appears non-contiguously in output"
+                assert table_name not in seen_tables, (
+                    f"table '{table_name}' appears non-contiguously in output"
+                )
                 table_entries = list(group)
                 timestamps = [e["timestamp"] for e in table_entries]
-                assert timestamps == sorted(
-                    timestamps
-                ), f"entries within '{table_name}' must be in timestamp order"
+                assert timestamps == sorted(timestamps), (
+                    f"entries within '{table_name}' must be in timestamp order"
+                )
                 seen_tables[table_name] = table_entries
         finally:
             os.unlink(path)
@@ -776,7 +775,7 @@ class TestTempFileCleanup:
             )
 
         # Patch NamedTemporaryFile to return a file at our controlled path
-        mock_file = open(controlled_path, "w", encoding="utf-8")
+        mock_file = open(controlled_path, "w", encoding="utf-8")  # noqa: SIM115 - closed on the next line
         mock_file.close()
 
         call_count = 0
@@ -793,7 +792,7 @@ class TestTempFileCleanup:
 
         class FakeTemp:
             def __init__(self, **kwargs):
-                self._f = open(controlled_path, "w", encoding="utf-8")
+                self._f = open(controlled_path, "w", encoding="utf-8")  # noqa: SIM115 - the fake closes it
                 self.name = controlled_path
 
             def write(self, data):
@@ -826,11 +825,10 @@ class TestTempFileCleanup:
         """Temp files cleaned up even when exception inside context."""
         from logler.investigate import Investigator
 
-        with pytest.raises(RuntimeError, match="boom"):
-            with Investigator() as inv:
-                inv.load_from_db(qler_test_db)
-                temp_files = list(inv._db_temp_files)
-                raise RuntimeError("boom")
+        with pytest.raises(RuntimeError, match="boom"), Investigator() as inv:
+            inv.load_from_db(qler_test_db)
+            temp_files = list(inv._db_temp_files)
+            raise RuntimeError("boom")
 
         assert not os.path.exists(temp_files[0])
 
@@ -984,9 +982,9 @@ class TestNonSqlerTableHandling:
         import types as _types
 
         raw = _read_sqler_table(conn, mapping)
-        assert isinstance(
-            raw, _types.GeneratorType
-        ), "_read_sqler_table must return a generator for streaming memory"
+        assert isinstance(raw, _types.GeneratorType), (
+            "_read_sqler_table must return a generator for streaming memory"
+        )
         rows = list(raw)
         conn.close()
 
@@ -1287,9 +1285,9 @@ class TestFetchmanyStreaming:
 
             tables = {}
             for table_name, group in groupby(entries, key=lambda e: e["thread_id"]):
-                assert (
-                    table_name not in tables
-                ), f"table '{table_name}' appears non-contiguously in output"
+                assert table_name not in tables, (
+                    f"table '{table_name}' appears non-contiguously in output"
+                )
                 tables[table_name] = list(group)
 
             assert set(tables.keys()) == {"qler_jobs", "qler_job_attempts"}
@@ -1394,9 +1392,9 @@ class TestFetchmanyStreaming:
             import types as _types
 
             raw = _read_sqler_table(spy_conn, qler_job_mapping())
-            assert isinstance(
-                raw, _types.GeneratorType
-            ), "_read_sqler_table must return a generator for streaming memory"
+            assert isinstance(raw, _types.GeneratorType), (
+                "_read_sqler_table must return a generator for streaming memory"
+            )
             rows = list(raw)
             assert len(rows) == self.TOTAL_JOBS
             # ceil(2500/1000) = 3 data batches + 1 empty sentinel = 4 calls

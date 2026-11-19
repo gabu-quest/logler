@@ -21,11 +21,13 @@ Entry i:
 
 import json
 import tempfile
-import pytest
 from pathlib import Path
+from typing import ClassVar
+
+import pytest
 
 try:
-    from logler.investigate import search, RUST_AVAILABLE
+    from logler.investigate import RUST_AVAILABLE, search
 except ImportError as e:
     if "logler_rs" in str(e):
         RUST_AVAILABLE = False
@@ -358,7 +360,7 @@ class TestCombinedFilters:
 class TestOneFilterBuilder:
     """``search`` and ``Investigator.search`` send the engine the same filter dict."""
 
-    ARGS = dict(
+    ARGS: ClassVar[dict[str, str]] = dict(
         level="ERROR,warn,crit",
         exclude_level="debug",
         exclude_query="health",

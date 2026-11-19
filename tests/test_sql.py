@@ -31,7 +31,7 @@ import duckdb
 import pytest
 
 try:
-    from logler.investigate import Investigator, RUST_AVAILABLE
+    from logler.investigate import RUST_AVAILABLE, Investigator
 except ImportError as e:
     if "logler_rs" in str(e):
         RUST_AVAILABLE = False
@@ -39,8 +39,8 @@ except ImportError as e:
         raise
 
 try:
-    from logler.sql import SqlEngine
     from logler.parser import LogParser, read_lines
+    from logler.sql import SqlEngine
 
     SQL_AVAILABLE = True
 except ImportError:
@@ -149,7 +149,7 @@ class TestSqlEngineLoadEntries:
     def test_level_distribution(self, loaded_engine):
         result = json.loads(
             loaded_engine.query(
-                "SELECT level, COUNT(*) AS cnt FROM logs " "GROUP BY level ORDER BY level"
+                "SELECT level, COUNT(*) AS cnt FROM logs GROUP BY level ORDER BY level"
             )
         )
         level_counts = {row["level"]: row["cnt"] for row in result}
@@ -160,8 +160,7 @@ class TestSqlEngineLoadEntries:
     def test_thread_distribution(self, loaded_engine):
         result = json.loads(
             loaded_engine.query(
-                "SELECT thread_id, COUNT(*) AS cnt FROM logs "
-                "GROUP BY thread_id ORDER BY thread_id"
+                "SELECT thread_id, COUNT(*) AS cnt FROM logs GROUP BY thread_id ORDER BY thread_id"
             )
         )
         thread_counts = {row["thread_id"]: row["cnt"] for row in result}
@@ -381,7 +380,6 @@ class TestSqlEdgeCases:
             temp_path = f.name
 
         try:
-
             engine = SqlEngine()
             assert engine.load_entries([]) == 0
 
@@ -553,7 +551,7 @@ class TestInvestigatorSqlEngineCaching:
             inv.sql_query("SELECT 1")
             inv.sql_query("SELECT 1")
             assert mock_cls.call_count == 0, (
-                f"SqlEngine constructed {mock_cls.call_count} time(s) " "while cache was warm"
+                f"SqlEngine constructed {mock_cls.call_count} time(s) while cache was warm"
             )
 
         # load_files invalidates — next query must rebuild exactly once
@@ -562,9 +560,9 @@ class TestInvestigatorSqlEngineCaching:
 
         with patch("logler.sql.SqlEngine", wraps=SqlEngine) as mock_cls:
             inv.sql_query("SELECT 1")
-            assert (
-                mock_cls.call_count == 1
-            ), f"Expected exactly 1 rebuild after load_files, got {mock_cls.call_count}"
+            assert mock_cls.call_count == 1, (
+                f"Expected exactly 1 rebuild after load_files, got {mock_cls.call_count}"
+            )
 
     def test_load_files_closes_old_engine(self, sql_log_file, tmp_path):
         """load_files() must call close() on the old cached engine."""

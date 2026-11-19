@@ -1,24 +1,24 @@
 """Session management commands: create, list, query, note, conclude."""
 
-import click
 import json
 import os
 import sys
-from typing import Optional
 from datetime import datetime
 
+import click
+
 from ._core import (
-    llm,
-    command,
-    _check_level_words,
-    EXIT_SUCCESS,
     EXIT_NO_RESULTS,
+    EXIT_SUCCESS,
     EXIT_USER_ERROR,
-    _output_json,
+    _check_level_words,
+    _db_file_source,
     _error_json,
     _expand_globs,
+    _output_json,
+    command,
     db_source_option,
-    _db_file_source,
+    llm,
 )
 
 
@@ -37,7 +37,7 @@ def session():
 @click.option("--files", "-f", multiple=True, help="Files to include")
 @db_source_option
 @click.option("--name", help="Session name")
-def session_create(files: tuple, db_path: Optional[str], name: Optional[str], pretty: bool):
+def session_create(files: tuple, db_path: str | None, name: str | None, pretty: bool):
     """Create a new investigation session."""
     import uuid
     from pathlib import Path
@@ -137,14 +137,15 @@ def session_list(pretty: bool):
 @click.option("--limit", type=int, help="Limit results")
 def session_query(
     session_id: str,
-    db_path: Optional[str],
-    level: Optional[str],
-    query: Optional[str],
-    limit: Optional[int],
+    db_path: str | None,
+    level: str | None,
+    query: str | None,
+    limit: int | None,
     pretty: bool,
 ):
     """Query logs within a session context."""
     from pathlib import Path
+
     from .. import investigate
 
     sessions_dir = Path.home() / ".logler" / "sessions"
@@ -224,7 +225,7 @@ def session_note(session_id: str, text: str, pretty: bool):
 @click.option("--root-cause", help="Root cause description")
 @click.option("--confidence", type=float, default=0.8, help="Confidence level (0.0-1.0)")
 def session_conclude(
-    session_id: str, summary: str, root_cause: Optional[str], confidence: float, pretty: bool
+    session_id: str, summary: str, root_cause: str | None, confidence: float, pretty: bool
 ):
     """Conclude a session with findings."""
     from pathlib import Path

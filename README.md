@@ -285,7 +285,7 @@ Run locally: `uv run marimo edit examples/tours/tour_01_fundamentals.py`
 
 ```bash
 cargo build --release --all    # Build Rust backend
-uv sync --all-groups           # Install Python deps
+uv sync --extra dev            # Install Python deps
 uv run pytest                  # 1250+ Python tests
 cargo test --workspace         # 42 Rust tests
 ```

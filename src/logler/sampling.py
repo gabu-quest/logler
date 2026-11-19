@@ -4,19 +4,19 @@ Smart sampling strategies for log entries.
 Public API surface is re-exported by :mod:`logler.investigate`.
 """
 
-from typing import List, Optional, Dict, Any
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+from typing import Any
 
 from ._search_core import level_text, search
 
 
 def smart_sample(
-    files: List[str],
-    level: Optional[str] = None,
+    files: list[str],
+    level: str | None = None,
     strategy: str = "representative",
     sample_size: int = 50,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get a smart sample of log entries that represents the full dataset.
 
     Instead of random sampling, this uses intelligent strategies to ensure
@@ -117,7 +117,7 @@ def smart_sample(
 # ---------------------------------------------------------------------------
 
 
-def _sample_representative(entries: List[Dict], size: int) -> List[Dict]:
+def _sample_representative(entries: list[dict], size: int) -> list[dict]:
     """Sample to represent overall distribution."""
     if len(entries) <= size:
         return entries
@@ -131,7 +131,7 @@ def _sample_representative(entries: List[Dict], size: int) -> List[Dict]:
         by_level[level].append(entry)
 
     # Calculate proportional samples per level
-    for level, level_entries in by_level.items():
+    for level_entries in by_level.values():
         proportion = len(level_entries) / len(entries)
         level_sample_size = max(1, int(size * proportion))
 
@@ -152,7 +152,7 @@ def _sample_representative(entries: List[Dict], size: int) -> List[Dict]:
     return samples[:size]
 
 
-def _sample_diverse(entries: List[Dict], size: int) -> List[Dict]:
+def _sample_diverse(entries: list[dict], size: int) -> list[dict]:
     """Sample for maximum diversity."""
     if len(entries) <= size:
         return entries
@@ -197,7 +197,7 @@ def _sample_diverse(entries: List[Dict], size: int) -> List[Dict]:
     return samples[:size]
 
 
-def _sample_chronological(entries: List[Dict], size: int) -> List[Dict]:
+def _sample_chronological(entries: list[dict], size: int) -> list[dict]:
     """Sample evenly across time."""
     if len(entries) <= size:
         return entries
@@ -211,7 +211,7 @@ def _sample_chronological(entries: List[Dict], size: int) -> List[Dict]:
     return [sorted_entries[i] for i in indices]
 
 
-def _sample_errors_focused(entries: List[Dict], size: int) -> List[Dict]:
+def _sample_errors_focused(entries: list[dict], size: int) -> list[dict]:
     """Sample focusing on errors with context."""
     if len(entries) <= size:
         return entries
@@ -267,7 +267,7 @@ def _sample_errors_focused(entries: List[Dict], size: int) -> List[Dict]:
 # ---------------------------------------------------------------------------
 
 
-def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str, Any]:
+def _calculate_coverage(population: list[dict], sample: list[dict]) -> dict[str, Any]:
     """Calculate how well the sample covers the population."""
     # Time coverage
     pop_times = [e.get("timestamp") for e in population if e.get("timestamp")]

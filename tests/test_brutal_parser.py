@@ -5,8 +5,10 @@ These tests exist to break the parser in every conceivable way.
 If your parser survives this gauntlet, it might be production-ready.
 """
 
-import pytest
 import json
+
+import pytest
+
 from logler.parser import LogParser
 
 

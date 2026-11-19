@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from ._loading import load_files
 from .config import formats_stamp
@@ -21,14 +21,14 @@ from .config import formats_stamp
 _investigator_lock = threading.Lock()
 
 # Cache entry: (investigator, {path: mtime}, formats stamp)
-_CacheEntry = Tuple[Any, Dict[str, float], tuple]  # Any = logler_rs.PyInvestigator
-_investigator_cache: Dict[tuple, _CacheEntry] = {}
+_CacheEntry = tuple[Any, dict[str, float], tuple]  # Any = logler_rs.PyInvestigator
+_investigator_cache: dict[tuple, _CacheEntry] = {}
 _cache_max_size = 10  # Keep up to 10 file sets in cache
 
 
-def _collect_mtimes(files: tuple) -> Dict[str, float]:
+def _collect_mtimes(files: tuple) -> dict[str, float]:
     """Snapshot mtime for each file (0.0 if stat fails)."""
-    mtimes: Dict[str, float] = {}
+    mtimes: dict[str, float] = {}
     for f in files:
         try:
             mtimes[f] = os.path.getmtime(f)
@@ -43,7 +43,7 @@ def _collect_format_stamps(files: tuple) -> tuple:
     Files in one directory share a stamp, except a link: its format is found from the
     directory of the file it points to, so it gets a stamp of its own.
     """
-    stamps: Dict[str, Any] = {}
+    stamps: dict[str, Any] = {}
     for f in files:
         key = f if os.path.islink(f) else os.path.dirname(f)
         if key not in stamps:
@@ -51,7 +51,7 @@ def _collect_format_stamps(files: tuple) -> tuple:
     return tuple(sorted(stamps.items(), key=lambda item: item[0]))
 
 
-def _mtimes_fresh(cached: Dict[str, float], current: Dict[str, float]) -> bool:
+def _mtimes_fresh(cached: dict[str, float], current: dict[str, float]) -> bool:
     """Return True if every file's mtime matches the cached snapshot."""
     if cached.keys() != current.keys():
         return False

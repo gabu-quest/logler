@@ -12,11 +12,11 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
 from logler.llm_cli import llm
-
 from tests.conftest import EXIT_NO_RESULTS, EXIT_SUCCESS, EXIT_USER_ERROR, invoke, run_llm_command
 
 
@@ -487,7 +487,7 @@ class TestMaxBytesAdditionalCommands:
 class TestLevelWords:
     """A level word names a level, or it is the user's error; every command reads it alike."""
 
-    LEVEL_COMMANDS = [
+    LEVEL_COMMANDS: ClassVar[list[list[str]]] = [
         ["search", "{f}", "--level", "bogus"],
         ["search", "{f}", "--exclude-level", "bogus"],
         ["sample", "{f}", "--level", "bogus"],
@@ -534,9 +534,9 @@ class TestCommandShell:
 
         for name, cmd in sorted(group.commands.items()):
             if isinstance(cmd, click.Group):
-                yield from TestCommandShell._commands(cmd, prefix + (name,))
+                yield from TestCommandShell._commands(cmd, (*prefix, name))
             else:
-                yield prefix + (name,), cmd
+                yield (*prefix, name), cmd
 
     def test_every_command_has_pretty_but_the_one_that_streams_lines(self):
         commands = list(self._commands(llm))

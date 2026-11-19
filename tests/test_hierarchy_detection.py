@@ -9,9 +9,10 @@ Tests cover:
 - Tree and waterfall formatting
 """
 
-import pytest
-import sys
 import os
+import sys
+
+import pytest
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -25,7 +26,6 @@ from logler.tree_formatter import (
     format_tree,
     format_waterfall,
 )
-
 
 # =============================================================================
 # Test Fixtures

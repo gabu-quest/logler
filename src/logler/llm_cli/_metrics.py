@@ -1,29 +1,30 @@
 """Metrics, detection, templates, verify-pattern, and emit commands."""
 
-import click
+import contextlib
 import json
 import re
 import sys
-from pathlib import Path
-from typing import Optional
 from collections import defaultdict
+from pathlib import Path
 
+import click
+
+from ..safe_regex import RegexPatternTooLongError, RegexTimeoutError, safe_compile
 from ._core import (
-    command,
-    EXIT_SUCCESS,
     EXIT_NO_RESULTS,
-    _output_json,
-    _error_json,
+    EXIT_SUCCESS,
     _apply_max_bytes,
     _check_level_words,
+    _db_file_source,
+    _error_json,
     _level_texts,
+    _output_json,
     _outside_bounds,
     _resolve_time_bounds,
-    time_filter_options,
+    command,
     db_source_option,
-    _db_file_source,
+    time_filter_options,
 )
-from ..safe_regex import safe_compile, RegexTimeoutError, RegexPatternTooLongError
 
 
 @command("verify-pattern")
@@ -34,10 +35,10 @@ from ..safe_regex import safe_compile, RegexTimeoutError, RegexPatternTooLongErr
 @click.option("--hypothesis", help="Natural language hypothesis (for documentation)")
 def verify_pattern(
     files: tuple,
-    db_path: Optional[str],
+    db_path: str | None,
     pattern: str,
     extract_groups: bool,
-    hypothesis: Optional[str],
+    hypothesis: str | None,
     pretty: bool,
 ):
     """
@@ -125,11 +126,9 @@ def verify_pattern(
             for group_name, values in group_values.items():
                 # Get numeric stats if all values are numeric
                 numeric_vals = []
-                for v in values.keys():
-                    try:
+                for v in values:
+                    with contextlib.suppress(ValueError, TypeError):
                         numeric_vals.append(float(v))
-                    except (ValueError, TypeError):
-                        pass
 
                 group_data = {"values": dict(values), "unique_count": len(values)}
 
@@ -174,19 +173,19 @@ def verify_pattern(
 @time_filter_options
 def emit(
     files: tuple,
-    db_path: Optional[str],
-    level: Optional[str],
-    exclude_level: Optional[str],
-    query: Optional[str],
-    exclude_query: Optional[str],
-    service: Optional[str],
-    fields: Optional[str],
+    db_path: str | None,
+    level: str | None,
+    exclude_level: str | None,
+    query: str | None,
+    exclude_query: str | None,
+    service: str | None,
+    fields: str | None,
     compact: bool,
-    limit: Optional[int],
-    tail_n: Optional[int],
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
+    limit: int | None,
+    tail_n: int | None,
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
 ):
     """
     Stream parsed entries as JSONL for processing.
@@ -254,15 +253,18 @@ def emit(
                         continue
 
                     # Apply query filter
-                    if query_regex:
-                        if not query_regex.search(entry.message or ""):
-                            if not query_regex.search(line):
-                                continue
+                    if (
+                        query_regex
+                        and not query_regex.search(entry.message or "")
+                        and not query_regex.search(line)
+                    ):
+                        continue
 
                     # Apply exclude query filter
-                    if exclude_regex:
-                        if exclude_regex.search(entry.message or "") or exclude_regex.search(line):
-                            continue
+                    if exclude_regex and (
+                        exclude_regex.search(entry.message or "") or exclude_regex.search(line)
+                    ):
+                        continue
 
                     # Build output
                     entry_time = entry.timestamp_text
@@ -342,12 +344,12 @@ def emit(
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes")
 def metrics(
     files: tuple,
-    db_path: Optional[str],
-    fields: Optional[str],
-    bucket: Optional[str],
+    db_path: str | None,
+    fields: str | None,
+    bucket: str | None,
     anomaly_threshold: float,
     compact: bool,
-    max_bytes: Optional[int],
+    max_bytes: int | None,
     pretty: bool,
 ):
     """Extract numeric values from log files and compute time-series statistics.
@@ -406,7 +408,7 @@ def metrics(
 @click.option("--sample", type=int, default=50, help="Lines to sample per file (default: 50)")
 def detect(
     files: tuple,
-    db_path: Optional[str],
+    db_path: str | None,
     sample: int,
     pretty: bool,
 ):
@@ -445,10 +447,10 @@ def detect(
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes")
 def templates(
     files: tuple,
-    db_path: Optional[str],
+    db_path: str | None,
     max_clusters: int,
     similarity: float,
-    max_bytes: Optional[int],
+    max_bytes: int | None,
     pretty: bool,
 ):
     """Mine recurring log templates using the Drain algorithm.

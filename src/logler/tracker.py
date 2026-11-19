@@ -2,7 +2,6 @@
 Thread and trace tracking for log correlation.
 """
 
-from typing import Dict, List, Optional
 from collections import defaultdict
 
 from .parser import LogEntry
@@ -12,9 +11,9 @@ class ThreadTracker:
     """Track threads and correlate log entries."""
 
     def __init__(self):
-        self.threads: Dict[str, dict] = {}
-        self.traces: Dict[str, dict] = {}
-        self.correlations: Dict[str, List[LogEntry]] = defaultdict(list)
+        self.threads: dict[str, dict] = {}
+        self.traces: dict[str, dict] = {}
+        self.correlations: dict[str, list[LogEntry]] = defaultdict(list)
 
     def track(self, entry: LogEntry):
         """Track a log entry."""
@@ -92,14 +91,14 @@ class ThreadTracker:
             if not trace["end_time"] or entry.timestamp > trace["end_time"]:
                 trace["end_time"] = entry.timestamp
 
-    def get_thread(self, thread_id: str) -> Optional[dict]:
+    def get_thread(self, thread_id: str) -> dict | None:
         """Get thread information."""
         thread = self.threads.get(thread_id)
         if thread:
             thread["correlation_ids"] = list(thread["correlation_ids"])
         return thread
 
-    def get_all_threads(self) -> List[dict]:
+    def get_all_threads(self) -> list[dict]:
         """Get all tracked threads."""
         result = []
         for thread in self.threads.values():
@@ -108,7 +107,7 @@ class ThreadTracker:
             result.append(thread_copy)
         return sorted(result, key=lambda x: x["log_count"], reverse=True)
 
-    def get_trace(self, trace_id: str) -> Optional[dict]:
+    def get_trace(self, trace_id: str) -> dict | None:
         """Get trace information."""
         trace = self.traces.get(trace_id)
         if trace:
@@ -120,7 +119,7 @@ class ThreadTracker:
             return trace_copy
         return None
 
-    def get_all_traces(self) -> List[dict]:
+    def get_all_traces(self) -> list[dict]:
         """Get all tracked traces."""
         result = []
         for trace_id in self.traces:
@@ -129,10 +128,10 @@ class ThreadTracker:
                 result.append(trace)
         return result
 
-    def get_by_correlation(self, correlation_id: str) -> List[LogEntry]:
+    def get_by_correlation(self, correlation_id: str) -> list[LogEntry]:
         """Get logs by correlation ID."""
         return self.correlations.get(correlation_id, [])
 
-    def get_all_correlations(self) -> List[str]:
+    def get_all_correlations(self) -> list[str]:
         """Get all correlation IDs."""
         return list(self.correlations.keys())

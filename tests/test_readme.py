@@ -11,7 +11,7 @@ Pattern:
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -42,7 +42,7 @@ pytestmark = pytest.mark.skipif(
 # Helpers
 # ---------------------------------------------------------------------------
 
-BASE_TIME = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+BASE_TIME = datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
 
 
 def _entry(
@@ -222,9 +222,9 @@ def test_C02_search_summary_returns_exact_error_count(app_log):
 
     # Contract: summary mode returns dict with total_matches at top level
     assert "total_matches" in result, f"Missing 'total_matches'. Keys: {sorted(result.keys())}"
-    assert (
-        result["total_matches"] == 3
-    ), f"Expected 3 ERROR matches (2 in req-failed-456 + 1 standalone), got {result['total_matches']}"
+    assert result["total_matches"] == 3, (
+        f"Expected 3 ERROR matches (2 in req-failed-456 + 1 standalone), got {result['total_matches']}"
+    )
 
 
 def test_C02_summary_is_more_compact_than_full(app_log):
@@ -234,9 +234,9 @@ def test_C02_summary_is_more_compact_than_full(app_log):
 
     full_size = len(json.dumps(full))
     summary_size = len(json.dumps(summary))
-    assert (
-        summary_size < full_size
-    ), f"Summary ({summary_size} bytes) should be smaller than full ({full_size} bytes)"
+    assert summary_size < full_size, (
+        f"Summary ({summary_size} bytes) should be smaller than full ({full_size} bytes)"
+    )
 
 
 # ---------------- [C03] Compare threads ----------------
@@ -257,9 +257,9 @@ def test_C03_compare_threads_has_both_sides(app_log):
     # Summary should describe the actual differences found
     summary = diff["summary"]
     assert len(summary) > 10, f"Summary too short: {summary!r}"
-    assert (
-        "error" in summary.lower()
-    ), f"Summary should describe the error difference between threads. Got:\n{summary}"
+    assert "error" in summary.lower(), (
+        f"Summary should describe the error difference between threads. Got:\n{summary}"
+    )
 
 
 def test_C03_compare_threads_captures_error_difference(app_log):
@@ -271,19 +271,19 @@ def test_C03_compare_threads_captures_error_difference(app_log):
     )
 
     # Enforce exact field name — the API contract must be stable
-    assert (
-        "entry_count" in diff["thread_a"]
-    ), f"thread_a missing 'entry_count'. Keys: {sorted(diff['thread_a'].keys())}"
-    assert (
-        diff["thread_a"]["entry_count"] == 4
-    ), f"req-success-123 should have 4 entries, got {diff['thread_a']['entry_count']}"
+    assert "entry_count" in diff["thread_a"], (
+        f"thread_a missing 'entry_count'. Keys: {sorted(diff['thread_a'].keys())}"
+    )
+    assert diff["thread_a"]["entry_count"] == 4, (
+        f"req-success-123 should have 4 entries, got {diff['thread_a']['entry_count']}"
+    )
 
-    assert (
-        "entry_count" in diff["thread_b"]
-    ), f"thread_b missing 'entry_count'. Keys: {sorted(diff['thread_b'].keys())}"
-    assert (
-        diff["thread_b"]["entry_count"] == 4
-    ), f"req-failed-456 should have 4 entries, got {diff['thread_b']['entry_count']}"
+    assert "entry_count" in diff["thread_b"], (
+        f"thread_b missing 'entry_count'. Keys: {sorted(diff['thread_b'].keys())}"
+    )
+    assert diff["thread_b"]["entry_count"] == 4, (
+        f"req-failed-456 should have 4 entries, got {diff['thread_b']['entry_count']}"
+    )
 
 
 # ---------------- [C04] Cross-service timeline ----------------
@@ -336,9 +336,9 @@ def test_C05_session_search_finds_errors(app_log):
     session = InvestigationSession(files=[app_log], name="incident_2024")
 
     result = session.search(level="ERROR")
-    assert (
-        result["total_matches"] == 3
-    ), f"Session search should find 3 ERRORs, got {result.get('total_matches')}"
+    assert result["total_matches"] == 3, (
+        f"Session search should find 3 ERRORs, got {result.get('total_matches')}"
+    )
 
 
 def test_C05_session_report_includes_note(app_log):
@@ -348,9 +348,9 @@ def test_C05_session_report_includes_note(app_log):
     session.add_note("Database connection pool exhausted")
 
     report = session.generate_report(format="markdown")
-    assert (
-        "Database connection pool" in report
-    ), f"Report should include note text. First 300 chars:\n{report[:300]}"
+    assert "Database connection pool" in report, (
+        f"Report should include note text. First 300 chars:\n{report[:300]}"
+    )
     # Report should also reference the session name and search results
     assert "incident_2024" in report, f"Report should include session name. Got:\n{report[:300]}"
 
@@ -387,32 +387,32 @@ def test_C06_errors_focused_includes_majority_errors(huge_log):
 
     entries = sample["samples"]
     assert len(entries) == 50, f"Expected exactly 50 samples, got {len(entries)}"
-    assert (
-        sample["total_population"] == 500
-    ), f"Expected 500 total, got {sample['total_population']}"
+    assert sample["total_population"] == 500, (
+        f"Expected 500 total, got {sample['total_population']}"
+    )
     assert sample["strategy"] == "errors_focused"
 
     error_count = sum(1 for e in entries if e.get("level") == "ERROR")
     # errors_focused should include significantly more errors than 10% (population rate)
-    assert (
-        error_count >= 10
-    ), f"errors_focused should over-represent errors (pop rate=10%), got {error_count}/50"
+    assert error_count >= 10, (
+        f"errors_focused should over-represent errors (pop rate=10%), got {error_count}/50"
+    )
 
 
 def test_C06_diverse_strategy_returns_requested_size(huge_log):
     """diverse strategy returns exactly the requested sample size."""
     sample = smart_sample(files=[huge_log], strategy="diverse", sample_size=20)
-    assert (
-        len(sample["samples"]) == 20
-    ), f"Expected 20 diverse samples, got {len(sample['samples'])}"
+    assert len(sample["samples"]) == 20, (
+        f"Expected 20 diverse samples, got {len(sample['samples'])}"
+    )
 
 
 def test_C06_chronological_strategy_returns_requested_size(huge_log):
     """chronological strategy returns exactly the requested sample size."""
     sample = smart_sample(files=[huge_log], strategy="chronological", sample_size=20)
-    assert (
-        len(sample["samples"]) == 20
-    ), f"Expected 20 chronological samples, got {len(sample['samples'])}"
+    assert len(sample["samples"]) == 20, (
+        f"Expected 20 chronological samples, got {len(sample['samples'])}"
+    )
 
 
 # ---------------- [C08] Thread hierarchy ----------------
@@ -426,9 +426,9 @@ def test_C08_hierarchy_builds_correct_structure(hierarchy_log):
         min_confidence=0.8,
     )
 
-    assert (
-        hierarchy["total_nodes"] == 3
-    ), f"Expected 3 nodes (root + auth + db), got {hierarchy['total_nodes']}"
+    assert hierarchy["total_nodes"] == 3, (
+        f"Expected 3 nodes (root + auth + db), got {hierarchy['total_nodes']}"
+    )
 
     roots = hierarchy["roots"]
     assert len(roots) == 1, f"Expected 1 root node, got {len(roots)}"
@@ -447,9 +447,9 @@ def test_C08_bottleneck_is_db_span(hierarchy_log):
 
     bottleneck = hierarchy["bottleneck"]
     assert bottleneck is not None, "Bottleneck should be detected"
-    assert (
-        bottleneck["node_id"] == "span-db"
-    ), f"Bottleneck should be span-db, got {bottleneck['node_id']}"
+    assert bottleneck["node_id"] == "span-db", (
+        f"Bottleneck should be span-db, got {bottleneck['node_id']}"
+    )
     assert bottleneck["duration_ms"] > 0, "Bottleneck duration should be positive"
     assert bottleneck["depth"] == 1, f"Bottleneck depth should be 1, got {bottleneck['depth']}"
 
@@ -487,9 +487,9 @@ def test_C10_format_tree_has_header_and_content(hierarchy_log):
 
     assert "THREAD HIERARCHY" in tree, f"Missing header. Got:\n{tree}"
     # Tree should show the hierarchy structure with node labels from log messages
-    assert (
-        "Request" in tree or "Auth" in tree or "DB" in tree
-    ), f"Tree should contain node labels from log messages. Got:\n{tree}"
+    assert "Request" in tree or "Auth" in tree or "DB" in tree, (
+        f"Tree should contain node labels from log messages. Got:\n{tree}"
+    )
 
 
 def test_C10_format_waterfall_produces_multiline_output(hierarchy_log):
@@ -518,9 +518,9 @@ def test_C10_print_tree_writes_to_stdout(hierarchy_log, capsys):
     print_tree(hierarchy, mode="detailed", show_duration=True)
     captured = capsys.readouterr()
     # print_tree uses human-readable labels from log messages
-    assert (
-        "Request" in captured.out or "Auth" in captured.out or "DB" in captured.out
-    ), f"print_tree should show node labels. Got:\n{captured.out}"
+    assert "Request" in captured.out or "Auth" in captured.out or "DB" in captured.out, (
+        f"print_tree should show node labels. Got:\n{captured.out}"
+    )
 
 
 def test_C10_print_waterfall_writes_to_stdout(hierarchy_log, capsys):
@@ -533,6 +533,6 @@ def test_C10_print_waterfall_writes_to_stdout(hierarchy_log, capsys):
     print_waterfall(hierarchy, width=100)
     captured = capsys.readouterr()
     lines = captured.out.strip().split("\n")
-    assert (
-        len(lines) >= 3
-    ), f"print_waterfall should show >= 3 lines for 3 spans. Got:\n{captured.out}"
+    assert len(lines) >= 3, (
+        f"print_waterfall should show >= 3 lines for 3 spans. Got:\n{captured.out}"
+    )

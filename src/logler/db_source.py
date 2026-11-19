@@ -20,6 +20,7 @@ Example::
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
@@ -27,9 +28,8 @@ import sqlite3
 import string
 import tempfile
 import urllib.parse
-from datetime import datetime, timezone
 from collections.abc import Iterator
-from typing import Optional
+from datetime import UTC, datetime
 
 
 def _safe_identifier(name: str) -> str:
@@ -62,13 +62,13 @@ class DbTableMapping:
     table: str
     timestamp_field: str = "created_at"
     timestamp_format: str = "epoch"
-    level_field: Optional[str] = "status"
-    level_map: Optional[dict[str, str]] = None
+    level_field: str | None = "status"
+    level_map: dict[str, str] | None = None
     message_template: str = "{table_name} row {_id}"
-    correlation_id_field: Optional[str] = "correlation_id"
-    extra_fields: Optional[list[str]] = None
-    service_name: Optional[str] = None
-    id_field: Optional[str] = "ulid"
+    correlation_id_field: str | None = "correlation_id"
+    extra_fields: list[str] | None = None
+    service_name: str | None = None
+    id_field: str | None = "ulid"
 
 
 def qler_job_mapping() -> DbTableMapping:
@@ -123,7 +123,7 @@ def qler_attempt_mapping() -> DbTableMapping:
 
 def db_to_jsonl(
     db_path: str,
-    mappings: Optional[list[DbTableMapping]] = None,
+    mappings: list[DbTableMapping] | None = None,
 ) -> str:
     """Convert a sqler database to a temporary JSONL file.
 
@@ -157,7 +157,7 @@ def db_to_jsonl(
         # Stream entries per-table directly to temp file.
         # Each table is already ordered by _id (roughly chronological).
         # No cross-table accumulation or sort — saves ~80 MB at 80K rows.
-        tmp = tempfile.NamedTemporaryFile(
+        tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 - closed in the finally below; the file outlives the block (delete=False)
             mode="w",
             suffix=".jsonl",
             delete=False,
@@ -172,19 +172,15 @@ def db_to_jsonl(
                     row_count += 1
         except Exception:
             tmp.close()
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp.name)
-            except OSError:
-                pass
             raise
         finally:
             tmp.close()
 
         if row_count == 0:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp.name)
-            except OSError:
-                pass
             raise ValueError(f"No rows found in database: {db_path}")
 
         return tmp.name
@@ -279,7 +275,7 @@ def _build_entry(
     if ts_raw is not None:
         entry["timestamp"] = _normalize_timestamp(ts_raw, mapping.timestamp_format)
     else:
-        entry["timestamp"] = datetime.now(tz=timezone.utc).isoformat()
+        entry["timestamp"] = datetime.now(tz=UTC).isoformat()
 
     # Level
     if mapping.level_field:
@@ -331,7 +327,7 @@ def _normalize_timestamp(raw, fmt: str) -> str:
             # Auto-detect milliseconds vs seconds
             if ts > 1e12:
                 ts = ts / 1000.0
-            return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+            return datetime.fromtimestamp(ts, tz=UTC).isoformat()
         except (ValueError, TypeError, OSError):
             return str(raw)
     return str(raw)

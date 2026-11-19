@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from logler.llm_cli import llm, EXIT_SUCCESS, EXIT_NO_RESULTS
+from logler.llm_cli import EXIT_NO_RESULTS, EXIT_SUCCESS, llm
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -32,7 +32,7 @@ def sensor_log():
 @pytest.fixture
 def plain_text_log():
     """Log file with no numeric values."""
-    f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")
+    f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")  # noqa: SIM115 - delete=False; closed before the path is used
     for i in range(10):
         f.write(
             f'{{"timestamp": "2024-01-15T10:00:{i:02d}Z", '
@@ -136,13 +136,13 @@ class TestMetricsBuckets:
     @pytest.fixture
     def json_log_with_metrics(self):
         """JSON log with timestamps that Rust parser can definitely extract."""
-        f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".jsonl")
+        f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".jsonl")  # noqa: SIM115 - delete=False; closed before the path is used
         for i in range(10):
             entry = json.dumps(
                 {
                     "timestamp": f"2024-01-15T10:00:{i:02d}Z",
                     "level": "INFO",
-                    "message": f"temperature={22.0+i*0.1:.1f}°C",
+                    "message": f"temperature={22.0 + i * 0.1:.1f}°C",
                 }
             )
             f.write(entry + "\n")

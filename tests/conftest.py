@@ -90,9 +90,9 @@ def investigate_module(rust_backend):
     import logler.investigate as investigate
 
     investigate = importlib.reload(investigate)
-    assert getattr(
-        investigate, "RUST_AVAILABLE", False
-    ), "logler.investigate reports RUST_AVAILABLE=False"
+    assert getattr(investigate, "RUST_AVAILABLE", False), (
+        "logler.investigate reports RUST_AVAILABLE=False"
+    )
     return investigate
 
 
@@ -377,7 +377,7 @@ EXIT_USER_ERROR = 2
 
 def run_llm_command(args, timeout=60):
     """Run a logler llm command and return result."""
-    cmd = [PYTHON, "-m", "logler.cli", "llm"] + args
+    cmd = [PYTHON, "-m", "logler.cli", "llm", *args]
     result = subprocess.run(
         cmd, capture_output=True, text=True, timeout=timeout, cwd=str(Path(__file__).parent.parent)
     )

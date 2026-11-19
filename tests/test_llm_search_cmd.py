@@ -1,9 +1,9 @@
 """Tests for the `logler llm search` command and its filtering options."""
 
 import json
+from typing import ClassVar
 
 import pytest
-
 
 from tests.conftest import EXIT_NO_RESULTS, EXIT_SUCCESS, invoke, run_llm_command
 
@@ -254,7 +254,13 @@ class TestCountsByLevelAddUp:
         )
         return str(path)
 
-    EXPECTED = {"INFO": 3, "ERROR": 2, "WARN": 1, "DEBUG": 1, "UNKNOWN": 3}
+    EXPECTED: ClassVar[dict[str, int]] = {
+        "INFO": 3,
+        "ERROR": 2,
+        "WARN": 1,
+        "DEBUG": 1,
+        "UNKNOWN": 3,
+    }
 
     def test_search(self, ten_lines_three_without_a_level):
         _, stdout, _ = invoke(["search", ten_lines_three_without_a_level])

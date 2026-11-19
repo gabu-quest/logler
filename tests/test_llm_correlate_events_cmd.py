@@ -103,9 +103,8 @@ def _make_mock_search(log_files_dict):
                     except ValueError:
                         continue
                 level_filter = kwargs.get("level")
-                if level_filter:
-                    if entry.get("level", "").upper() != level_filter.upper():
-                        continue
+                if level_filter and entry.get("level", "").upper() != level_filter.upper():
+                    continue
                 query = kwargs.get("query")
                 if query:
                     msg = entry.get("message", "") + entry.get("raw", "")

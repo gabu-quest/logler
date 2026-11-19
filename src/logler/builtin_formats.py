@@ -7,15 +7,13 @@ in their .logler/formats.yaml config files.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 from .config import FormatConfig
 
 
 def _fmt(
     regex: str,
-    timestamp_format: Optional[str] = None,
-    file_patterns: Optional[list[str]] = None,
+    timestamp_format: str | None = None,
+    file_patterns: list[str] | None = None,
 ) -> FormatConfig:
     """Shorthand to create a FormatConfig."""
     return FormatConfig(
@@ -29,7 +27,7 @@ def _fmt(
 # Built-in Format Definitions
 # =============================================================================
 
-BUILTIN_FORMATS: Dict[str, FormatConfig] = {
+BUILTIN_FORMATS: dict[str, FormatConfig] = {
     # ---- Web Servers ----
     "nginx_access": _fmt(
         regex=(
@@ -170,7 +168,7 @@ BUILTIN_FORMATS: Dict[str, FormatConfig] = {
 }
 
 
-def get_builtin_formats() -> Dict[str, FormatConfig]:
+def get_builtin_formats() -> dict[str, FormatConfig]:
     """Return all built-in format definitions."""
     return dict(BUILTIN_FORMATS)
 

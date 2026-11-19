@@ -11,20 +11,20 @@ import json
 import tempfile
 from pathlib import Path
 
-
 from logler.format_detector import (
     DrainParser,
     detect_format,
     mine_templates,
 )
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 
 def _write_temp_file(lines: list[str], suffix: str = ".log") -> str:
     """Write lines to a temp file and return path."""
-    f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=suffix, prefix="test_detect_")
+    f = tempfile.NamedTemporaryFile(  # noqa: SIM115 - delete=False; closed before the path is used
+        mode="w", delete=False, suffix=suffix, prefix="test_detect_"
+    )
     for line in lines:
         f.write(line + "\n")
     f.close()
@@ -80,7 +80,8 @@ class TestDetectSyslogFormat:
 
     def test_synthetic_bsd_syslog(self):
         lines = [
-            f"Mar 15 03:{i:02d}:00 web-prod-01 nginx[{1000+i}]: GET /api/{i} 200" for i in range(20)
+            f"Mar 15 03:{i:02d}:00 web-prod-01 nginx[{1000 + i}]: GET /api/{i} 200"
+            for i in range(20)
         ]
         path = _write_temp_file(lines)
         try:
@@ -104,7 +105,7 @@ class TestDetectApacheCLF:
     def test_synthetic_clf(self):
         lines = [
             f"192.168.1.{i} - user{i} [17/May/2015:10:05:{i:02d} +0000] "
-            f'"GET /page/{i} HTTP/1.1" 200 {1000+i}'
+            f'"GET /page/{i} HTTP/1.1" 200 {1000 + i}'
             for i in range(20)
         ]
         path = _write_temp_file(lines)
@@ -145,7 +146,9 @@ class TestDetectCustomFormat:
                 "regex": r"(?P<timestamp>\d{4}-\d{2}-\d{2}T[\d:]+Z)\s+(?P<level>\w+)\s+(?P<field>\w+)=(?P<value>[\d.]+)"
             }
         }
-        lines = [f"2024-01-15T10:00:{i:02d}Z INFO temperature={22.0+i*0.1:.1f}" for i in range(20)]
+        lines = [
+            f"2024-01-15T10:00:{i:02d}Z INFO temperature={22.0 + i * 0.1:.1f}" for i in range(20)
+        ]
         path = _write_temp_file(lines)
         try:
             result = detect_format(path, custom_formats=custom_formats)
@@ -251,8 +254,8 @@ class TestDrainKnownTemplates:
         """100 messages from 3 templates → exactly 3 clusters with known counts."""
         messages = (
             [f"User user_{i} logged in from 192.168.1.{i}" for i in range(40)]
-            + [f"Request to /api/endpoint_{i} took {100+i}ms" for i in range(35)]
-            + [f"Database query SELECT * FROM table_{i} returned {i*10} rows" for i in range(25)]
+            + [f"Request to /api/endpoint_{i} took {100 + i}ms" for i in range(35)]
+            + [f"Database query SELECT * FROM table_{i} returned {i * 10} rows" for i in range(25)]
         )
         result = mine_templates(messages, max_clusters=100)
         assert result.total_lines == 100
@@ -361,7 +364,7 @@ class TestDrainKnownTemplates:
 
     def test_max_clusters_respected(self):
         """When max_clusters is hit, excess messages are dropped (not crash)."""
-        messages = [f"Unique message type {i} with content {i*100}" for i in range(50)]
+        messages = [f"Unique message type {i} with content {i * 100}" for i in range(50)]
         result = mine_templates(messages, max_clusters=5)
         assert result.unique_templates <= 5
 

@@ -7,9 +7,10 @@ over it, so a line reads the same here as it does in search and the index.
 
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterator, Optional, Tuple
+from datetime import UTC, datetime
+from typing import Any
 
 from ._search_core import level_text
 
@@ -25,18 +26,18 @@ class LogEntry:
 
     line_number: int
     raw: str
-    timestamp: Optional[datetime] = None
-    timestamp_text: Optional[str] = None
+    timestamp: datetime | None = None
+    timestamp_text: str | None = None
     level: str = "UNKNOWN"
     message: str = ""
-    thread_id: Optional[str] = None
-    correlation_id: Optional[str] = None
-    trace_id: Optional[str] = None
-    span_id: Optional[str] = None
-    parent_span_id: Optional[str] = None
-    service_name: Optional[str] = None
-    format: Optional[str] = None
-    fields: Dict[str, Any] = field(default_factory=dict)
+    thread_id: str | None = None
+    correlation_id: str | None = None
+    trace_id: str | None = None
+    span_id: str | None = None
+    parent_span_id: str | None = None
+    service_name: str | None = None
+    format: str | None = None
+    fields: dict[str, Any] = field(default_factory=dict)
 
 
 def cut_newline(line: str) -> str:
@@ -47,7 +48,7 @@ def cut_newline(line: str) -> str:
     return line
 
 
-def read_lines(path: str) -> Iterator[Tuple[int, str]]:
+def read_lines(path: str) -> Iterator[tuple[int, str]]:
     """A log file's lines, numbered from 1, cut the way the Rust index cuts them: a line ends
     at "\\n" or "\\r\\n", nothing else is trimmed and no line is skipped. So a reader that
     parses line by line gives the line numbers and the text that search gives.
@@ -70,7 +71,7 @@ def without_leap_second(ts: str) -> str:
     return _LEAP_SECOND.sub(r"\1:59", ts, count=1) if ":60" in ts else ts
 
 
-def to_utc(ts: Optional[str]) -> Optional[datetime]:
+def to_utc(ts: str | None) -> datetime | None:
     """An ISO 8601 / RFC 3339 time as an aware UTC datetime: the one reader of a time string.
 
     A time with no zone is UTC, as a log line's is. ``None`` for no text, for text that is
@@ -81,8 +82,8 @@ def to_utc(ts: Optional[str]) -> Optional[datetime]:
     try:
         parsed = datetime.fromisoformat(without_leap_second(ts))
         if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
     except (ValueError, OverflowError, TypeError):
         return None
 
@@ -96,7 +97,7 @@ def format_time(ts: datetime) -> str:
     """
     micro = ts.microsecond
     spec = "seconds" if micro == 0 else "milliseconds" if micro % 1000 == 0 else "microseconds"
-    return ts.astimezone(timezone.utc).isoformat(timespec=spec).removesuffix("+00:00") + "Z"
+    return ts.astimezone(UTC).isoformat(timespec=spec).removesuffix("+00:00") + "Z"
 
 
 class LogParser:
@@ -104,8 +105,8 @@ class LogParser:
 
     def __init__(
         self,
-        force_format: Optional[str] = None,
-        custom_regex: Optional[str] = None,
+        force_format: str | None = None,
+        custom_regex: str | None = None,
     ):
         if logler_rs is None:
             raise RuntimeError("Rust backend not available")
@@ -120,7 +121,7 @@ class LogParser:
         fmt = format_for_file(path)
         return cls(custom_regex=fmt.regex) if fmt is not None else cls()
 
-    def parse_entry(self, line_number: int, raw: str, file: str = "") -> Dict[str, Any]:
+    def parse_entry(self, line_number: int, raw: str, file: str = "") -> dict[str, Any]:
         """One line as the dict the Rust index gives for an entry (``timestamp`` as RFC 3339
         text, ``level`` as the engine gives it, ``fields``), with the caller's file, line
         number and raw text. The one reading of a line: ``parse_line`` builds from it."""

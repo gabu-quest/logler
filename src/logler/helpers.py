@@ -5,12 +5,13 @@ This module provides convenience functions that wrap common investigation
 patterns, making it easier for LLM agents to perform typical tasks.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 import logler.investigate as investigate
 from logler.investigate import Investigator
 
 
-def quick_summary(files: List[str]) -> Dict[str, Any]:
+def quick_summary(files: list[str]) -> dict[str, Any]:
     """
     Get a quick summary of log files.
 
@@ -47,8 +48,8 @@ def quick_summary(files: List[str]) -> Dict[str, Any]:
 
 
 def search_errors(
-    files: List[str], query: Optional[str] = None, limit: int = 100
-) -> List[Dict[str, Any]]:
+    files: list[str], query: str | None = None, limit: int = 100
+) -> list[dict[str, Any]]:
     """
     Search for ERROR and FATAL level logs.
 
@@ -61,7 +62,7 @@ def search_errors(
     return [r["entry"] for r in results["results"]]
 
 
-def trace_request(files: List[str], correlation_id: str) -> Dict[str, Any]:
+def trace_request(files: list[str], correlation_id: str) -> dict[str, Any]:
     """
     Trace a complete request by correlation ID.
 
@@ -96,7 +97,7 @@ def trace_request(files: List[str], correlation_id: str) -> Dict[str, Any]:
     }
 
 
-def get_error_context(file: str, line_number: int, lines: int = 10) -> Dict[str, Any]:
+def get_error_context(file: str, line_number: int, lines: int = 10) -> dict[str, Any]:
     """
     Get context around an error line.
 
@@ -118,7 +119,7 @@ def get_error_context(file: str, line_number: int, lines: int = 10) -> Dict[str,
     }
 
 
-def analyze_thread_health(files: List[str]) -> Dict[str, Dict[str, int]]:
+def analyze_thread_health(files: list[str]) -> dict[str, dict[str, int]]:
     """
     Analyze health of each thread.
 
@@ -143,7 +144,7 @@ def analyze_thread_health(files: List[str]) -> Dict[str, Dict[str, int]]:
     }
 
 
-def get_timeline_summary(files: List[str], correlation_id: str) -> str:
+def get_timeline_summary(files: list[str], correlation_id: str) -> str:
     """
     Get a human-readable timeline summary for a request.
 
@@ -182,16 +183,16 @@ def get_timeline_summary(files: List[str], correlation_id: str) -> str:
 
 
 # Convenience aliases for common operations
-def errors(files: List[str], **kwargs) -> List[Dict[str, Any]]:
+def errors(files: list[str], **kwargs) -> list[dict[str, Any]]:
     """Shorthand for search_errors()"""
     return search_errors(files, **kwargs)
 
 
-def trace(files: List[str], correlation_id: str) -> Dict[str, Any]:
+def trace(files: list[str], correlation_id: str) -> dict[str, Any]:
     """Shorthand for trace_request()"""
     return trace_request(files, correlation_id)
 
 
-def summary(files: List[str]) -> Dict[str, Any]:
+def summary(files: list[str]) -> dict[str, Any]:
     """Shorthand for quick_summary()"""
     return quick_summary(files)

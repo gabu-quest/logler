@@ -8,12 +8,13 @@ from here — never the reverse.
 Public API surface is re-exported by :mod:`logler.investigate`.
 """
 
+import contextlib
 import json
-import warnings
-from typing import List, Optional, Dict, Any
-from datetime import timedelta
 import re
+import warnings
 from collections import defaultdict
+from datetime import timedelta
+from typing import Any
 
 from ._loading import load_files
 from .cache import get_cached_investigator
@@ -52,7 +53,7 @@ def level_text(level: Any) -> str:
     return str(level or "").strip().upper() or "UNKNOWN"
 
 
-def _normalize_entry(entry: Dict[str, Any]) -> None:
+def _normalize_entry(entry: dict[str, Any]) -> None:
     """Normalize a single log entry in-place (level text, numeric fields)."""
     if "level" in entry:
         entry["level"] = level_text(entry["level"])
@@ -60,19 +61,17 @@ def _normalize_entry(entry: Dict[str, Any]) -> None:
     # Convert numeric fields
     for key in ("duration_ms",):
         if key in entry and entry[key] is not None:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 entry[key] = float(entry[key])
-            except (ValueError, TypeError):
-                pass
 
 
-def _normalize_entries(entries: List[Dict[str, Any]]) -> None:
+def _normalize_entries(entries: list[dict[str, Any]]) -> None:
     """Batch-normalize entries."""
     for entry in entries:
         _normalize_entry(entry)
 
 
-def _normalize_search_result_levels(result: Dict[str, Any]) -> None:
+def _normalize_search_result_levels(result: dict[str, Any]) -> None:
     """Normalize search result level casing and map aliases."""
     for item in result.get("results", []):
         entry = item.get("entry", {})
@@ -83,14 +82,14 @@ def _normalize_search_result_levels(result: Dict[str, Any]) -> None:
         _normalize_entry(item)
 
 
-def _normalize_pattern_examples(result: Dict[str, Any]) -> None:
+def _normalize_pattern_examples(result: dict[str, Any]) -> None:
     """Normalize examples inside pattern results."""
     for pattern in result.get("patterns", []):
         for example in pattern.get("examples", []):
             _normalize_entry(example)
 
 
-def _normalize_context_payload(result: Dict[str, Any]) -> None:
+def _normalize_context_payload(result: dict[str, Any]) -> None:
     """Normalize context payload from Rust (rename keys to match API)."""
     target = result.get("target")
     if target:
@@ -131,7 +130,7 @@ def level_name(word: str) -> str:
     return name
 
 
-def _parse_levels(level_str: str) -> List[str]:
+def _parse_levels(level_str: str) -> list[str]:
     """Parse a comma-separated level string into Rust-enum names.
 
     Example::
@@ -143,22 +142,22 @@ def _parse_levels(level_str: str) -> List[str]:
 
 
 def _build_filters(
-    level: Optional[str] = None,
-    exclude_level: Optional[str] = None,
-    exclude_query: Optional[str] = None,
-    thread_id: Optional[str] = None,
-    correlation_id: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    service_name: Optional[str] = None,
-    time_start: Optional[str] = None,
-    time_end: Optional[str] = None,
-) -> Dict[str, Any]:
+    level: str | None = None,
+    exclude_level: str | None = None,
+    exclude_query: str | None = None,
+    thread_id: str | None = None,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+    service_name: str | None = None,
+    time_start: str | None = None,
+    time_end: str | None = None,
+) -> dict[str, Any]:
     """The engine's filter dict for search's keyword arguments (the one builder).
 
     An id argument is a comma list: one value goes under the singular key, several under
     the plural key.  Raises ``ValueError`` for a level word that names no level.
     """
-    filters: Dict[str, Any] = {
+    filters: dict[str, Any] = {
         "levels": _parse_levels(level) if level else [],
         "exclude_levels": _parse_levels(exclude_level) if exclude_level else [],
     }
@@ -176,7 +175,7 @@ def _build_filters(
         elif parts:
             filters[plural] = parts
     if time_start or time_end:
-        time_range: Dict[str, str] = {}
+        time_range: dict[str, str] = {}
         if time_start:
             time_range["start"] = time_start
         if time_end:
@@ -186,9 +185,9 @@ def _build_filters(
 
 
 def _investigator_for(
-    files: List[str],
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
+    files: list[str],
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
 ) -> Any:
     """The investigator for a call: a freshly loaded one when the caller names a format
     (it never reaches the cache), otherwise the cached one for ``files``."""
@@ -205,27 +204,27 @@ def _investigator_for(
 
 
 def search(
-    files: List[str],
-    query: Optional[str] = None,
-    level: Optional[str] = None,
-    exclude_level: Optional[str] = None,
-    exclude_query: Optional[str] = None,
-    thread_id: Optional[str] = None,
-    correlation_id: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    service_name: Optional[str] = None,
-    limit: Optional[int] = None,
-    tail: Optional[int] = None,
-    time_start: Optional[str] = None,
-    time_end: Optional[str] = None,
+    files: list[str],
+    query: str | None = None,
+    level: str | None = None,
+    exclude_level: str | None = None,
+    exclude_query: str | None = None,
+    thread_id: str | None = None,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+    service_name: str | None = None,
+    limit: int | None = None,
+    tail: int | None = None,
+    time_start: str | None = None,
+    time_end: str | None = None,
     context_lines: int = 3,
     output_format: str = "full",
-    fields: Optional[List[str]] = None,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
+    fields: list[str] | None = None,
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
     count_only: bool = False,
     offset: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Search log entries across one or more files.
 
     Performs full-text search with optional filtering by level, thread,
@@ -294,7 +293,7 @@ def search(
         time_end=time_end,
     )
 
-    query_dict: Dict[str, Any] = {
+    query_dict: dict[str, Any] = {
         "files": files,
         "query": query,
         "filters": filters,
@@ -336,10 +335,10 @@ def search(
 
 
 def extract_ids(
-    files: List[str],
-    time_start: Optional[str] = None,
-    time_end: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: list[str],
+    time_start: str | None = None,
+    time_end: str | None = None,
+) -> dict[str, Any]:
     """Extract all unique IDs (thread, correlation, trace, service) from files.
 
     Args:
@@ -376,13 +375,13 @@ def extract_ids(
 
 
 def follow_thread(
-    files: List[str],
-    thread_id: Optional[str] = None,
-    correlation_id: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: list[str],
+    thread_id: str | None = None,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Follow a thread/correlation/trace through log files.
 
     Args:
@@ -424,7 +423,7 @@ def get_context(
     line_number: int,
     lines_before: int = 10,
     lines_after: int = 10,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get context around a specific log line.
 
     Args:
@@ -458,11 +457,11 @@ def get_context(
 
 
 def find_patterns(
-    files: List[str],
+    files: list[str],
     min_occurrences: int = 3,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Find repeated patterns and anomalies in logs.
 
     Args:
@@ -496,7 +495,7 @@ def find_patterns(
     return result
 
 
-def get_metadata(files: List[str]) -> Dict[str, Any]:
+def get_metadata(files: list[str]) -> dict[str, Any]:
     """Get metadata about log files.
 
     Args:
@@ -525,7 +524,7 @@ def get_metadata(files: List[str]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _format_as_summary(result: Dict[str, Any]) -> Dict[str, Any]:
+def _format_as_summary(result: dict[str, Any]) -> dict[str, Any]:
     """Convert full search results to token-efficient summary format.
 
     Instead of returning all log entries, groups them by message and
@@ -618,7 +617,7 @@ def _format_as_summary(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _format_as_count(result: Dict[str, Any]) -> Dict[str, Any]:
+def _format_as_count(result: dict[str, Any]) -> dict[str, Any]:
     """Convert full search results to count-only format (minimal tokens).
 
     Returns only statistics, no actual log content.
@@ -657,7 +656,7 @@ def _format_as_count(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _format_as_compact(result: Dict[str, Any]) -> Dict[str, Any]:
+def _format_as_compact(result: dict[str, Any]) -> dict[str, Any]:
     """Convert full search results to compact format.
 
     Returns only essential fields, removing raw logs and extra context.
@@ -683,7 +682,7 @@ def _format_as_compact(result: Dict[str, Any]) -> Dict[str, Any]:
     return {"matches": compact_matches, "total": len(results)}
 
 
-def _select_diverse_samples(results: List[Dict], max_samples: int = 5) -> List[Dict]:
+def _select_diverse_samples(results: list[dict], max_samples: int = 5) -> list[dict]:
     """Select a diverse set of sample entries.
 
     Tries to include:

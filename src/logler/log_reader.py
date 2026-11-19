@@ -3,8 +3,8 @@
 import os
 import time
 from collections import deque
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator, Optional
 
 
 class CompleteLines:
@@ -59,7 +59,7 @@ class LogReader:
             raise ValueError(f"Not a file: {file_path}")
 
     def read_lines(
-        self, start_line: int = 0, max_lines: Optional[int] = None, reverse: bool = False
+        self, start_line: int = 0, max_lines: int | None = None, reverse: bool = False
     ) -> Iterator[str]:
         """
         Read lines from the log file.
@@ -78,7 +78,7 @@ class LogReader:
             yield from self._read_lines_forward(start_line, max_lines)
 
     def _read_lines_forward(
-        self, start_line: int = 0, max_lines: Optional[int] = None
+        self, start_line: int = 0, max_lines: int | None = None
     ) -> Iterator[str]:
         """Read lines forward from the file, cut and numbered as search cuts them
         (``parser.read_lines``): ``start_line`` counts from 0."""
@@ -94,7 +94,7 @@ class LogReader:
                     break
 
     def _read_lines_reverse(
-        self, start_line: int = 0, max_lines: Optional[int] = None
+        self, start_line: int = 0, max_lines: int | None = None
     ) -> Iterator[str]:
         """
         Read lines in reverse order using an efficient algorithm.
@@ -198,7 +198,7 @@ class LogReader:
         pattern: str,
         case_sensitive: bool = False,
         regex: bool = False,
-        max_lines: Optional[int] = None,
+        max_lines: int | None = None,
     ) -> Iterator[tuple[int, str]]:
         """
         Search for lines matching a pattern.
@@ -234,7 +234,7 @@ class LogReader:
             else:
                 match_func = make_case_sensitive_matcher(pattern)
 
-        with open(self.file_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(self.file_path, encoding="utf-8", errors="replace") as f:
             matches_found = 0
 
             for line_num, line in enumerate(f, 1):

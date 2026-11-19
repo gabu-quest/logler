@@ -6,7 +6,8 @@ Architecture"), so ``_search_core`` and ``cache`` can both load through it.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from .config import format_for_file
 
@@ -14,8 +15,8 @@ from .config import format_for_file
 def load_files(
     inv: Any,
     files: Iterable[Any],
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
 ) -> None:
     """Load ``files`` into ``inv``.
 
@@ -24,13 +25,13 @@ def load_files(
     Otherwise each file is read with ``format_for_file(file)``: files that share a format load
     together with its regex, the rest with the built-in detection.
     """
-    paths: List[str] = [str(f) for f in files]
+    paths: list[str] = [str(f) for f in files]
     if parser_format or custom_regex:
         inv.load_files_with_config(paths, parser_format, custom_regex)
         return
 
-    by_regex: Dict[str, List[str]] = {}
-    rest: List[str] = []
+    by_regex: dict[str, list[str]] = {}
+    rest: list[str] = []
     for path in paths:
         fmt = format_for_file(path)
         if fmt is None:

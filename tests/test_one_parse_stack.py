@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -39,7 +39,7 @@ FIELDS = (
 
 def _non_empty_lines(path: Path) -> list[tuple[int, str]]:
     """(file line number, line) for every non-empty line."""
-    with open(path, "r", errors="replace") as f:
+    with open(path, errors="replace") as f:
         return [(n, line.rstrip()) for n, line in enumerate(f, start=1) if line.rstrip()]
 
 
@@ -57,7 +57,7 @@ def _expected(entry: dict) -> dict:
     level = entry["level"]
     return {
         "level": level.upper() if level else "UNKNOWN",
-        "timestamp": (datetime.fromisoformat(ts).astimezone(timezone.utc) if ts else None),
+        "timestamp": (datetime.fromisoformat(ts).astimezone(UTC) if ts else None),
         "message": entry["message"],
         "thread_id": entry["thread_id"],
         "correlation_id": entry["correlation_id"],
@@ -199,7 +199,7 @@ def test_after_takes_a_time_with_or_without_a_zone(four_levels, lines_of, after,
 def test_epoch_milliseconds_are_the_same_instant_in_every_command(tmp_path):
     path = tmp_path / "pino.jsonl"
     path.write_text('{"time":1705312800123,"level":"info","msg":"listening"}\n')
-    instant = datetime(2024, 1, 15, 10, 0, 0, 123000, tzinfo=timezone.utc)
+    instant = datetime(2024, 1, 15, 10, 0, 0, 123000, tzinfo=UTC)
 
     from logler.parser import LogParser
 
@@ -234,7 +234,7 @@ def test_a_leap_second_is_the_last_second_of_its_minute():
     from logler.parser import LogParser
 
     entry = LogParser().parse_line(1, "2016-12-31T23:59:60Z INFO leap")
-    assert entry.timestamp == datetime(2016, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+    assert entry.timestamp == datetime(2016, 12, 31, 23, 59, 59, tzinfo=UTC)
 
 
 def test_log_parser_without_extension_raises_runtime_error(monkeypatch):

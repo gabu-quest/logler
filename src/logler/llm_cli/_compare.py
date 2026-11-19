@@ -1,21 +1,21 @@
 """Comparison commands: compare and diff."""
 
-import click
 import sys
-from typing import Optional, List, Dict, Any
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Any
+
+import click
 
 from .._search_core import level_text, parse_duration
-
 from ._core import (
-    command,
     EXIT_SUCCESS,
-    _output_json,
-    _error_json,
-    _parse_time_arg,
-    db_source_option,
     _db_file_source,
+    _error_json,
+    _output_json,
+    _parse_time_arg,
+    command,
+    db_source_option,
 )
 
 
@@ -24,7 +24,7 @@ from ._core import (
 @click.argument("id2")
 @click.option("--files", "-f", multiple=True, help="Files to search (supports globs)")
 @db_source_option
-def compare(id1: str, id2: str, files: tuple, pretty: bool, db_path: Optional[str]):
+def compare(id1: str, id2: str, files: tuple, pretty: bool, db_path: str | None):
     """
     Compare two requests/traces side by side.
 
@@ -45,7 +45,7 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool, db_path: Optional[st
         entries2 = result2.get("entries", [])
 
         # Analyze each request
-        def analyze_request(entries: List[Dict[str, Any]], req_id: str) -> Dict[str, Any]:
+        def analyze_request(entries: list[dict[str, Any]], req_id: str) -> dict[str, Any]:
             if not entries:
                 return {"id": req_id, "found": False}
 
@@ -139,7 +139,7 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool, db_path: Optional[st
             steps1 = analysis1.get("steps", [])
             steps2 = analysis2.get("steps", [])
             divergence_point = None
-            for i, (s1, s2) in enumerate(zip(steps1, steps2)):
+            for i, (s1, s2) in enumerate(zip(steps1, steps2, strict=False)):
                 if s1 != s2:
                     divergence_point = {
                         "step": i + 1,
@@ -176,12 +176,15 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool, db_path: Optional[st
                     f"Investigate error in {id1}: "
                     f"{analysis1['errors'][0].get('message', 'Unknown error')}"
                 )
-        elif analysis2.get("outcome") == "error" and analysis1.get("outcome") == "success":
-            if analysis2.get("errors"):
-                output["recommendation"] = (
-                    f"Investigate error in {id2}: "
-                    f"{analysis2['errors'][0].get('message', 'Unknown error')}"
-                )
+        elif (
+            analysis2.get("outcome") == "error"
+            and analysis1.get("outcome") == "success"
+            and analysis2.get("errors")
+        ):
+            output["recommendation"] = (
+                f"Investigate error in {id2}: "
+                f"{analysis2['errors'][0].get('message', 'Unknown error')}"
+            )
 
         _output_json(output, pretty)
         sys.exit(EXIT_SUCCESS)
@@ -197,12 +200,12 @@ def compare(id1: str, id2: str, files: tuple, pretty: bool, db_path: Optional[st
 @click.option("--baseline", help="Use last N as baseline (e.g., 1h)")
 def diff(
     files: tuple,
-    db_path: Optional[str],
-    before_start: Optional[str],
-    before_end: Optional[str],
-    after_start: Optional[str],
-    after_end: Optional[str],
-    baseline: Optional[str],
+    db_path: str | None,
+    before_start: str | None,
+    before_end: str | None,
+    after_start: str | None,
+    after_end: str | None,
+    baseline: str | None,
     pretty: bool,
 ):
     """
@@ -214,11 +217,10 @@ def diff(
         logler llm diff app.log --baseline 1h
     """
     from ..parser import LogParser, format_time, read_lines, to_utc
-    from datetime import timezone
 
     with _db_file_source(files, db_path) as file_list:
         # Parse time periods
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if baseline:
             try:
@@ -260,13 +262,11 @@ def diff(
 
                     ts = entry.timestamp
 
-                    if before_start_ts and before_end_ts:
-                        if before_start_ts <= ts <= before_end_ts:
-                            before_entries.append(entry)
+                    if before_start_ts and before_end_ts and before_start_ts <= ts <= before_end_ts:
+                        before_entries.append(entry)
 
-                    if after_start_ts and after_end_ts:
-                        if after_start_ts <= ts <= after_end_ts:
-                            after_entries.append(entry)
+                    if after_start_ts and after_end_ts and after_start_ts <= ts <= after_end_ts:
+                        after_entries.append(entry)
 
             except (FileNotFoundError, PermissionError):
                 pass

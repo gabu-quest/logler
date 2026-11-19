@@ -6,20 +6,20 @@ real file operations, edge cases, and adversarial inputs.
 """
 
 import json
-import pytest
 import tempfile
 from pathlib import Path
 
+import pytest
 
 # Import with Rust backend check
 try:
     from logler.investigate import (
-        search,
+        RUST_AVAILABLE,
+        InvestigationSession,
+        Investigator,
         follow_thread,
         get_context,
-        Investigator,
-        InvestigationSession,
-        RUST_AVAILABLE,
+        search,
     )
 except ImportError as e:
     if "logler_rs" in str(e):

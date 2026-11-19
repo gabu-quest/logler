@@ -39,12 +39,11 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "black>=25.0.0",
-    "ruff>=0.3.0",
-    "httpx>=0.28.0",
+    "ruff==0.17.5",
     "maturin>=1.10.0",
     "patchelf>=0.17.0",
-    "marimo>=0.10.0",
+    "marimo>=0.17.6",
+    "pre-commit>=4.3.0",
 ]
 bench = [
     "matplotlib>=3.8",
@@ -61,33 +60,33 @@ Homepage = "https://github.com/gabu-quest/logler"
 Documentation = "https://github.com/gabu-quest/logler#readme"
 Repository = "https://github.com/gabu-quest/logler"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["logler*"]
-
-[tool.setuptools.package-data]
-logler = []
-
 [tool.maturin]
 manifest-path = "crates/logler-py/Cargo.toml"
 python-source = "src"
 python-packages = ["logler"]
 include = ["LICENSE", "README.md"]
 
-[tool.black]
-line-length = 100
-target-version = ['py39']
-
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "SIM", "ASYNC", "RUF", "B"]
+ignore = [
+    # ruff format does not wrap strings or comments; the 78 long lines are f-strings in
+    # messages, docstring and test log lines, whose breaking would change the text or
+    # the test data.
+    "E501",
+]
+# The multiplication sign in comments and docstrings, and the information-source emoji
+# in the status icons, are meant.
+allowed-confusables = ["×", "ℹ"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test and benchmark names say what they check, in the words of the thing checked.
+"tests/**/*" = ["N"]
+"benchmarks/**/*" = ["N"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[dependency-groups]
-dev = [
-    "marimo>=0.17.6",
-    "pre-commit>=4.3.0",
-    "tiktoken>=0.12.0",
-]

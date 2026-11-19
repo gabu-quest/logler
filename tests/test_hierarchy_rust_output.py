@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from logler.investigate import follow_thread_hierarchy, RUST_AVAILABLE
+from logler.investigate import RUST_AVAILABLE, follow_thread_hierarchy
 
 
 @pytest.mark.skipif(not RUST_AVAILABLE, reason="Rust backend required for hierarchy tests")

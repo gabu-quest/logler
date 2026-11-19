@@ -136,6 +136,7 @@ class SearchOutputFormats:
 
     def run(self, config: BenchmarkConfig) -> list[BenchmarkResult]:
         import json
+
         from logler.investigate import search
 
         results = []
@@ -146,7 +147,7 @@ class SearchOutputFormats:
 
             def do_search(f=fmt):
                 r = search(files=[self.filepath], level="ERROR", limit=100, output_format=f)
-                response_holder[0] = r
+                response_holder[0] = r  # noqa: B023 - called within the iteration that created the holder
                 return r
 
             stats = timer.measure(do_search)

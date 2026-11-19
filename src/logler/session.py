@@ -4,10 +4,10 @@ InvestigationSession — stateful multi-step investigation with history tracking
 Public API surface is re-exported by :mod:`logler.investigate`.
 """
 
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any
 
-from ._search_core import search, follow_thread, find_patterns
+from ._search_core import find_patterns, follow_thread, search
 from .comparison import compare_threads, cross_service_timeline
 
 
@@ -34,7 +34,7 @@ class InvestigationSession:
         session2 = InvestigationSession.load("incident_2024_01_15.json")
     """
 
-    def __init__(self, files: Optional[List[str]] = None, name: Optional[str] = None):
+    def __init__(self, files: list[str] | None = None, name: str | None = None):
         self.files = files or []
         self.name = name or f"investigation_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.history = []
@@ -46,11 +46,11 @@ class InvestigationSession:
 
     def search(
         self,
-        query: Optional[str] = None,
-        level: Optional[str] = None,
+        query: str | None = None,
+        level: str | None = None,
         output_format: str = "summary",
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Perform search and track in history."""
         params = {"query": query, "level": level, "output_format": output_format, **kwargs}
         result = search(self.files, query=query, level=level, output_format=output_format, **kwargs)
@@ -66,10 +66,10 @@ class InvestigationSession:
 
     def follow_thread(
         self,
-        thread_id: Optional[str] = None,
-        correlation_id: Optional[str] = None,
-        trace_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        thread_id: str | None = None,
+        correlation_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
         """Follow thread and track in history."""
         params = {"thread_id": thread_id, "correlation_id": correlation_id, "trace_id": trace_id}
         result = follow_thread(
@@ -81,7 +81,7 @@ class InvestigationSession:
 
         return result
 
-    def find_patterns(self, min_occurrences: int = 3) -> Dict[str, Any]:
+    def find_patterns(self, min_occurrences: int = 3) -> dict[str, Any]:
         """Find patterns and track in history."""
         params = {"min_occurrences": min_occurrences}
         result = find_patterns(self.files, min_occurrences=min_occurrences)
@@ -92,7 +92,7 @@ class InvestigationSession:
 
         return result
 
-    def compare_threads(self, **kwargs) -> Dict[str, Any]:
+    def compare_threads(self, **kwargs) -> dict[str, Any]:
         """Compare threads and track in history."""
         result = compare_threads(self.files, **kwargs)
 
@@ -102,8 +102,8 @@ class InvestigationSession:
         return result
 
     def cross_service_timeline(
-        self, service_files: Dict[str, List[str]], **kwargs
-    ) -> Dict[str, Any]:
+        self, service_files: dict[str, list[str]], **kwargs
+    ) -> dict[str, Any]:
         """Create cross-service timeline and track in history."""
         result = cross_service_timeline(service_files, **kwargs)
 
@@ -122,8 +122,8 @@ class InvestigationSession:
         self,
         operation_type: str,
         description: str,
-        params: Dict[str, Any],
-        result: Optional[Dict[str, Any]],
+        params: dict[str, Any],
+        result: dict[str, Any] | None,
     ):
         """Add operation to history."""
         # Remove any operations after current index (for undo/redo)
@@ -140,7 +140,7 @@ class InvestigationSession:
         self.history.append(entry)
         self.current_index = len(self.history) - 1
 
-    def _summarize_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+    def _summarize_result(self, result: dict[str, Any]) -> dict[str, Any]:
         """Create a compact summary of operation result."""
         if not result:
             return {}
@@ -167,7 +167,7 @@ class InvestigationSession:
 
         return summary
 
-    def get_history(self, include_results: bool = False) -> List[Dict[str, Any]]:
+    def get_history(self, include_results: bool = False) -> list[dict[str, Any]]:
         """Get investigation history."""
         if include_results:
             return self.history
@@ -197,7 +197,7 @@ class InvestigationSession:
             return True
         return False
 
-    def get_current_focus(self) -> Optional[Dict[str, Any]]:
+    def get_current_focus(self) -> dict[str, Any] | None:
         """Get the current operation being focused on."""
         if 0 <= self.current_index < len(self.history):
             return self.history[self.current_index]
@@ -224,7 +224,7 @@ class InvestigationSession:
         """Load session from file."""
         import json
 
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             data = json.load(f)
 
         session = cls(files=data["files"], name=data["name"])
@@ -385,7 +385,7 @@ class InvestigationSession:
 
         return "\n".join(lines)
 
-    def _generate_json_report(self, include_evidence: bool) -> Dict[str, Any]:
+    def _generate_json_report(self, include_evidence: bool) -> dict[str, Any]:
         """Generate JSON format report."""
         return {
             "name": self.name,

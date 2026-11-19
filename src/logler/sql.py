@@ -12,7 +12,7 @@ import json
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import duckdb
@@ -98,7 +98,7 @@ class _Staged:
 
     def add(self, row: list) -> None:
         if self._out is None:
-            self._out = open(self._path, "w", newline="", encoding="utf-8")
+            self._out = open(self._path, "w", newline="", encoding="utf-8")  # noqa: SIM115 - opened on the first row, closed by abandon()
             self._writerow = csv.writer(self._out, lineterminator="\n").writerow
         # writerow returns what the file's write returns: the row's length in characters.
         written = self._writerow(row)
@@ -131,7 +131,7 @@ def _json_value(value: Any) -> Any:
     a time that carries its zone keeps its instant."""
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
+            value = value.replace(tzinfo=UTC)
         return format_time(value)
     if isinstance(value, (list, tuple)):
         return [_json_value(item) for item in value]
@@ -281,7 +281,7 @@ class SqlEngine:
         result = self.conn.execute(sql)
         columns = [desc[0] for desc in result.description]
         rows = [
-            {col: _json_value(value) for col, value in zip(columns, row)}
+            {col: _json_value(value) for col, value in zip(columns, row, strict=False)}
             for row in result.fetchall()
         ]
         return columns, rows
@@ -305,7 +305,7 @@ class SqlEngine:
         """
         self._lock_external_access()
         result = self.conn.execute(
-            "SELECT table_name FROM information_schema.tables " "WHERE table_schema = 'main'"
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         )
         return [row[0] for row in result.fetchall()]
 

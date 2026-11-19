@@ -1,6 +1,6 @@
 """Tests for the new parser implementation."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from logler.parser import LogEntry, LogParser
 
@@ -13,7 +13,7 @@ def test_parse_json_entry():
 
     assert isinstance(entry, LogEntry)
     assert entry.line_number == 1
-    assert entry.timestamp == datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    assert entry.timestamp == datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
     assert entry.level == "INFO"
     assert entry.message == "Test message"
     assert entry.thread_id == "worker-1"
@@ -31,7 +31,7 @@ def test_parse_plain_entry_extracts_metadata():
     entry = parser.parse_line(5, line)
 
     assert entry.line_number == 5
-    assert entry.timestamp == datetime(2024, 1, 2, 13, 14, 15, tzinfo=timezone.utc)
+    assert entry.timestamp == datetime(2024, 1, 2, 13, 14, 15, tzinfo=UTC)
     assert entry.level == "INFO"
     assert entry.thread_id == "thread-9"
     assert entry.correlation_id == "xyz"

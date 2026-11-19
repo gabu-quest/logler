@@ -5,69 +5,70 @@ Logler - Beautiful local log viewer with thread tracking and real-time updates.
 __version__ = "1.1.2"
 __author__ = "Logler Contributors"
 
-from .parser import LogParser, LogEntry
-from .tracker import ThreadTracker
-from .log_reader import LogReader
-from .tree_formatter import format_tree, format_waterfall, print_tree, print_waterfall
-
 # Correlation context
-from .context import correlation_context, get_correlation_id, CorrelationFilter, JsonHandler
+from .context import CorrelationFilter, JsonHandler, correlation_context, get_correlation_id
+from .log_reader import LogReader
+from .models import (
+    BottleneckInfo,
+    ContextResult,
+    CorrelationChains,
+    # Correlation
+    CorrelationLink,
+    CrossServiceTimeline,
+    DetectionMethod,
+    # Error analysis
+    ErrorAnalysis,
+    # File/context
+    FileMetadata,
+    ImpactSummary,
+    # Insights
+    Insight,
+    InsightsResult,
+    LogFormat,
+    LogLevel,
+    LogSchema,
+    NodeType,
+    # Pattern models
+    PatternMatch,
+    PatternResults,
+    PropagationChain,
+    RootCause,
+    # Sampling
+    SamplingResult,
+    # Schema
+    SchemaField,
+    SearchCount,
+    # Search models
+    SearchResult,
+    SearchResults,
+    SearchSummary,
+    # Hierarchy models
+    SpanNode,
+    ThreadHierarchy,
+    # Timeline models
+    ThreadTimeline,
+    # Cross-service
+    TimelineEntry,
+    TraceExport,
+    # Export
+    TraceSpan,
+    parse_error_analysis,
+    # Helper functions
+    parse_log_entry,
+    parse_search_results,
+    parse_thread_hierarchy,
+)
 
 # Pydantic models for type-safe log analysis
 from .models import (
     # Core entry models
     LogEntry as TypedLogEntry,
-    LogLevel,
-    LogFormat,
-    # Search models
-    SearchResult,
-    SearchResults,
-    SearchSummary,
-    SearchCount,
-    # Timeline models
-    ThreadTimeline,
-    # Hierarchy models
-    SpanNode,
-    ThreadHierarchy,
-    BottleneckInfo,
-    NodeType,
-    DetectionMethod,
-    # Pattern models
-    PatternMatch,
-    PatternResults,
-    # Sampling
-    SamplingResult,
-    # Error analysis
-    ErrorAnalysis,
-    RootCause,
-    PropagationChain,
-    ImpactSummary,
-    # File/context
-    FileMetadata,
-    ContextResult,
-    # Cross-service
-    TimelineEntry,
-    CrossServiceTimeline,
-    # Correlation
-    CorrelationLink,
-    CorrelationChains,
-    # Export
-    TraceSpan,
-    TraceExport,
-    # Insights
-    Insight,
-    InsightsResult,
-    # Schema
-    SchemaField,
-    LogSchema,
-    # Helper functions
-    parse_log_entry,
-    parse_search_results,
-    parse_thread_hierarchy,
-    parse_error_analysis,
 )
+from .parser import LogEntry, LogParser
+from .tracker import ThreadTracker
+from .tree_formatter import format_tree, format_waterfall, print_tree, print_waterfall
 
-__all__ = [
+__all__ = [  # noqa: RUF022 - grouped by topic, not sorted
     # Original exports
     "LogParser",
     "LogEntry",

@@ -107,7 +107,14 @@ testing DuckDB, not logler. Tours demonstrate logler's capabilities, not SQL syn
 
 ```bash
 cargo build --release --all
-uv sync --all-groups
+uv sync --extra dev
+```
+
+Lint and format with ruff (pinned in the `dev` extra and in `.pre-commit-config.yaml`):
+
+```bash
+uv run ruff check src tests benchmarks
+uv run ruff format --check src tests benchmarks
 ```
 
 ### Stale .so gotcha
@@ -289,8 +296,8 @@ including allocations invisible to tracemalloc (e.g., Rust `PyInvestigator` inde
 
 ## Pre-commit Hooks
 
-black, ruff, fix-end-of-files, trim-trailing-whitespace, cargo-fmt.
-First commit attempt often fails (ruff/black auto-fix). Re-stage and commit again.
+ruff (lint and format), fix-end-of-files, trim-trailing-whitespace, cargo-fmt.
+First commit attempt often fails (ruff auto-fixes). Re-stage and commit again.
 
 ## Commit Rules
 

@@ -1,16 +1,14 @@
 """Tests for comparison.py OOM prevention and correctness fixes."""
 
-from unittest.mock import patch, call
-
+from unittest.mock import call, patch
 
 from logler.comparison import (
-    _analyze_thread,
     _DEFAULT_TIMELINE_LIMIT,
+    _analyze_thread,
     compare_threads,
     compare_time_periods,
     cross_service_timeline,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fix 1: compare_time_periods pushes time filters to Rust

@@ -12,7 +12,6 @@ import pytest
 
 from tests.conftest import LOGLER, PYTHON
 
-
 EXAMPLE_LOGS = Path(__file__).parent.parent / "examples" / "logs"
 
 

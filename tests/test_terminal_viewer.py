@@ -63,7 +63,7 @@ async def _follow(path, viewer, capture, actions, expected, **kwargs):
 
 async def _following(capture):
     deadline = time.monotonic() + 3
-    while "Following" not in capture.getvalue() and time.monotonic() < deadline:
+    while "Following" not in capture.getvalue() and time.monotonic() < deadline:  # noqa: ASYNC110 - polls a condition with a deadline, no event to wait on
         await asyncio.sleep(0.01)
 
 
@@ -138,7 +138,7 @@ async def _polled_twice_more(polls):
     """Wait until the follow has read the file twice more: one read began after this call."""
     target = polls[0] + 2
     deadline = time.monotonic() + 3
-    while polls[0] < target and time.monotonic() < deadline:
+    while polls[0] < target and time.monotonic() < deadline:  # noqa: ASYNC110 - polls a condition with a deadline, no event to wait on
         await asyncio.sleep(0.01)
     assert polls[0] >= target
 

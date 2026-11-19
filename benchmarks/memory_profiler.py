@@ -141,7 +141,7 @@ def profile_db_to_jsonl(scales: tuple[int, ...] = (10_000, 50_000, 100_000)) -> 
 
             def do_convert(p=str(db_path)):
                 jsonl_path = db_to_jsonl(p)
-                path_holder[0] = jsonl_path
+                path_holder[0] = jsonl_path  # noqa: B023 - called within the iteration that created the holder
                 return jsonl_path
 
             elapsed_ms, peak_kb, current_kb, vmrss_before, vmrss_after = _measure_peak_kb(

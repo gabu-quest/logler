@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from logler.llm_cli import llm, EXIT_SUCCESS
+from logler.llm_cli import EXIT_SUCCESS, llm
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -55,7 +55,7 @@ class TestDetectJsonOutput:
     def test_per_file_keys(self, runner, json_log):
         result = runner.invoke(llm, ["detect", json_log])
         data = json.loads(result.output)
-        for file_path, detection in data["files"].items():
+        for detection in data["files"].values():
             assert "format" in detection
             assert "confidence" in detection
             assert "match_rate" in detection
@@ -173,8 +173,7 @@ class TestTemplatesCountAccuracy:
             for t in data["templates"]:
                 expected_pct = round(100.0 * t["count"] / total, 2)
                 assert t["percentage"] == expected_pct, (
-                    f"Template '{t['template']}': expected {expected_pct}%, "
-                    f"got {t['percentage']}%"
+                    f"Template '{t['template']}': expected {expected_pct}%, got {t['percentage']}%"
                 )
 
 

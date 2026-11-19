@@ -1,25 +1,26 @@
 """Format management commands (M1.3): list, test, validate."""
 
-import click
 import re
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
-from ._core import (
-    llm,
-    command,
-    EXIT_SUCCESS,
-    EXIT_NO_RESULTS,
-    EXIT_USER_ERROR,
-    _output_json,
-    _error_json,
-    _expand_globs,
-)
-from ..safe_regex import safe_compile, RegexTimeoutError, RegexPatternTooLongError
+import click
+
+from ..builtin_formats import get_builtin_format, get_builtin_formats
 from ..config import FormatFileError, config_for_file, find_config, load_usable_config
 from ..parser import read_lines
-from ..builtin_formats import get_builtin_formats, get_builtin_format
+from ..safe_regex import RegexPatternTooLongError, RegexTimeoutError, safe_compile
+from ._core import (
+    EXIT_NO_RESULTS,
+    EXIT_SUCCESS,
+    EXIT_USER_ERROR,
+    _error_json,
+    _expand_globs,
+    _output_json,
+    command,
+    llm,
+)
 
 
 @llm.group()
@@ -36,13 +37,13 @@ def format():
 @command("list", group=format)
 @click.option("--builtin/--no-builtin", default=True, help="Include built-in formats")
 @click.option("--config-dir", help="Directory to search for .logler/formats.yaml")
-def format_list(builtin: bool, config_dir: Optional[str], pretty: bool):
+def format_list(builtin: bool, config_dir: str | None, pretty: bool):
     """List available log format definitions.
 
     Shows built-in formats and any user-defined formats from
     .logler/formats.yaml config files.
     """
-    output: Dict[str, Any] = {
+    output: dict[str, Any] = {
         "builtin_formats": {},
         "user_formats": {},
         "config_path": None,
@@ -85,8 +86,8 @@ def format_list(builtin: bool, config_dir: Optional[str], pretty: bool):
 @click.option("--limit", default=20, help="Max lines to show")
 def format_test(
     files: tuple,
-    regex: Optional[str],
-    name: Optional[str],
+    regex: str | None,
+    name: str | None,
     limit: int,
     pretty: bool,
 ):
@@ -115,10 +116,9 @@ def format_test(
         else:
             # Try user config
             config = config_for_file(file_list[0])
-            if config:
-                if name in config.formats:
-                    test_regex = config.formats[name].regex
-                    format_source = "user_config"
+            if config and name in config.formats:
+                test_regex = config.formats[name].regex
+                format_source = "user_config"
 
         if not test_regex:
             _error_json(f"Format '{name}' not found in built-in or user config")
@@ -197,8 +197,8 @@ def format_test(
 @click.option("--config-dir", help="Directory to search for .logler/formats.yaml")
 @click.option("--regex", "-r", help="Validate a single regex pattern")
 def format_validate(
-    config_dir: Optional[str],
-    regex: Optional[str],
+    config_dir: str | None,
+    regex: str | None,
     pretty: bool,
 ):
     """Validate format definitions.

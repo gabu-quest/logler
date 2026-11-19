@@ -13,24 +13,25 @@ If these pass, the library WORKS.
 """
 
 import json
-import pytest
-import tempfile
 import random
 import string
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+import tempfile
 from collections import defaultdict
-from typing import List, Dict, Any
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import pytest
 
 # Import with Rust backend check
 try:
     from logler.investigate import (
-        search,
+        RUST_AVAILABLE,
+        InvestigationSession,
+        Investigator,
         follow_thread,
         get_metadata,
-        Investigator,
-        InvestigationSession,
-        RUST_AVAILABLE,
+        search,
     )
     from logler.tree_formatter import format_tree, format_waterfall
 except ImportError as e:
@@ -50,11 +51,11 @@ pytestmark = pytest.mark.skipif(not RUST_AVAILABLE, reason="Rust backend require
 
 def generate_realistic_microservice_logs(
     num_requests: int = 500,
-    services: List[str] = None,
+    services: list[str] | None = None,
     error_rate: float = 0.05,
     avg_logs_per_request: int = 15,
     seed: int = 42,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Generate realistic microservice logs that mirror production patterns.
 
@@ -77,7 +78,7 @@ def generate_realistic_microservice_logs(
         ]
 
     logs = []
-    base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
 
     for req_num in range(num_requests):
         correlation_id = f"req-{req_num:06d}"
@@ -429,14 +430,14 @@ def generate_chaotic_concurrent_logs(
     logs_per_thread: int = 50,
     overlap_factor: float = 0.8,
     seed: int = 42,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Generate logs from many concurrent threads with overlapping time ranges.
     This tests the ability to correctly separate and follow threads.
     """
     random.seed(seed)
     logs = []
-    base_time = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
 
     thread_starts = {}
     for t in range(num_threads):
@@ -495,14 +496,14 @@ def generate_deep_call_hierarchy(
     branching_factor: int = 3,
     logs_per_node: int = 5,
     seed: int = 42,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Generate logs representing a deep call hierarchy with parent-child relationships.
     Tests hierarchy building and visualization.
     """
     random.seed(seed)
     logs = []
-    base_time = datetime(2024, 1, 15, 14, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2024, 1, 15, 14, 0, 0, tzinfo=UTC)
     current_time = base_time
 
     trace_id = f"deep-trace-{''.join(random.choices(string.hexdigits, k=16))}"
@@ -637,9 +638,9 @@ class TestLargeScaleSearch:
         # Search for errors
         result = search(files=[file_path], level="ERROR", limit=10000)
 
-        assert (
-            result["total_matches"] == expected_count
-        ), f"Expected {expected_count} errors, found {result['total_matches']}"
+        assert result["total_matches"] == expected_count, (
+            f"Expected {expected_count} errors, found {result['total_matches']}"
+        )
 
     def test_search_by_correlation_id_groups_correctly(self, large_microservice_logs):
         """Following a correlation ID must return all related logs"""
@@ -659,9 +660,9 @@ class TestLargeScaleSearch:
         result = follow_thread(files=[file_path], correlation_id=test_corr_id)
 
         # Should find exactly the expected count
-        assert (
-            result["total_entries"] == expected_count
-        ), f"Expected {expected_count} logs for {test_corr_id}, found {result['total_entries']}"
+        assert result["total_entries"] == expected_count, (
+            f"Expected {expected_count} logs for {test_corr_id}, found {result['total_entries']}"
+        )
 
     def test_search_performance_under_5_seconds(self, large_microservice_logs):
         """Search on 5000+ logs must complete in under 5 seconds"""
@@ -698,15 +699,15 @@ class TestConcurrentThreadTracking:
         # Follow thread
         result = follow_thread(files=[file_path], thread_id=test_thread_id)
 
-        assert (
-            result["total_entries"] == expected_count
-        ), f"Expected {expected_count} logs for {test_thread_id}, found {result['total_entries']}"
+        assert result["total_entries"] == expected_count, (
+            f"Expected {expected_count} logs for {test_thread_id}, found {result['total_entries']}"
+        )
 
         # Verify all entries are from correct thread
         for entry in result["entries"]:
-            assert (
-                entry.get("thread_id") == test_thread_id
-            ), f"Found log from wrong thread: {entry.get('thread_id')}"
+            assert entry.get("thread_id") == test_thread_id, (
+                f"Found log from wrong thread: {entry.get('thread_id')}"
+            )
 
     def test_all_50_threads_tracked_independently(self, concurrent_chaos_logs):
         """Each of 50 threads must be tracked correctly"""
@@ -728,9 +729,9 @@ class TestConcurrentThreadTracking:
             expected_count = thread_counts[thread_id]
             result = follow_thread(files=[file_path], thread_id=thread_id)
 
-            assert (
-                result["total_entries"] == expected_count
-            ), f"Thread {thread_id}: expected {expected_count}, got {result['total_entries']}"
+            assert result["total_entries"] == expected_count, (
+                f"Thread {thread_id}: expected {expected_count}, got {result['total_entries']}"
+            )
 
     def test_thread_timeline_is_chronological(self, concurrent_chaos_logs):
         """Thread timeline must be in chronological order"""
@@ -756,9 +757,9 @@ class TestConcurrentThreadTracking:
         ]
 
         for i in range(1, len(timestamps)):
-            assert (
-                timestamps[i] >= timestamps[i - 1]
-            ), f"Timeline not chronological at index {i}: {timestamps[i - 1]} > {timestamps[i]}"
+            assert timestamps[i] >= timestamps[i - 1], (
+                f"Timeline not chronological at index {i}: {timestamps[i - 1]} > {timestamps[i]}"
+            )
 
 
 class TestHierarchyBuilding:
@@ -877,9 +878,9 @@ class TestMicroserviceTracing:
                 found_services.add(svc)
 
         # Should find at least some services (exact match depends on indexing)
-        assert (
-            len(found_services) > 0 or result["total_entries"] > 0
-        ), f"Should find entries for trace. Got: {result['total_entries']} entries"
+        assert len(found_services) > 0 or result["total_entries"] > 0, (
+            f"Should find entries for trace. Got: {result['total_entries']} entries"
+        )
 
     def test_error_traces_identified_correctly(self, large_microservice_logs):
         """Traces with errors must be identifiable"""
@@ -940,13 +941,13 @@ class TestInvestigationSession:
             session.search(f"test{i}")
 
         # Undo all
-        for i in range(10):
+        for _ in range(10):
             result = session.undo()
             # undo returns bool
             assert result is True or result is False
 
         # Redo some
-        for i in range(5):
+        for _ in range(5):
             session.redo()
 
 
@@ -961,9 +962,9 @@ class TestDataIntegrity:
         result = search(files=[file_path], query=None, limit=100000)
 
         # Should have all logs
-        assert result["total_matches"] == len(
-            original_logs
-        ), f"Expected {len(original_logs)} logs, found {result['total_matches']}"
+        assert result["total_matches"] == len(original_logs), (
+            f"Expected {len(original_logs)} logs, found {result['total_matches']}"
+        )
 
     def test_log_content_preserved(self, large_microservice_logs):
         """Log content must not be corrupted"""
@@ -978,9 +979,9 @@ class TestDataIntegrity:
 
             # Should find our message
             found_messages = [r["entry"].get("message", "") for r in result["results"]]
-            assert any(
-                test_message in msg for msg in found_messages
-            ), f"Could not find original message: {test_message[:50]}..."
+            assert any(test_message in msg for msg in found_messages), (
+                f"Could not find original message: {test_message[:50]}..."
+            )
 
     def test_timestamps_preserved_and_parseable(self, concurrent_chaos_logs):
         """All timestamps must be preserved and parseable"""
@@ -1129,7 +1130,7 @@ class TestCruelDataIntegrity:
             expected = corr_counts[cid]
             result = follow_thread(files=[file_path], correlation_id=cid)
             assert result["total_entries"] == expected, (
-                f"Correlation {cid}: expected {expected} entries, " f"got {result['total_entries']}"
+                f"Correlation {cid}: expected {expected} entries, got {result['total_entries']}"
             )
 
     def test_trace_id_groups_are_complete(self, large_microservice_logs):
@@ -1149,7 +1150,7 @@ class TestCruelDataIntegrity:
             expected = trace_counts[tid]
             result = follow_thread(files=[file_path], trace_id=tid)
             assert result["total_entries"] == expected, (
-                f"Trace {tid}: expected {expected} entries, " f"got {result['total_entries']}"
+                f"Trace {tid}: expected {expected} entries, got {result['total_entries']}"
             )
 
     def test_interleaved_timestamps_sorted_after_follow(self, large_microservice_logs):
@@ -1178,8 +1179,7 @@ class TestCruelDataIntegrity:
 
         for i in range(1, len(timestamps)):
             assert timestamps[i] >= timestamps[i - 1], (
-                f"Timeline not chronological at index {i}: "
-                f"{timestamps[i - 1]} > {timestamps[i]}"
+                f"Timeline not chronological at index {i}: {timestamps[i - 1]} > {timestamps[i]}"
             )
 
     def test_error_entries_have_error_codes(self, large_microservice_logs):
@@ -1203,9 +1203,9 @@ class TestCruelDataIntegrity:
             if raw and "error_code" in raw:
                 found_error_codes += 1
 
-        assert (
-            found_error_codes > 0
-        ), "No error_code fields found in parsed error entries' raw content"
+        assert found_error_codes > 0, (
+            "No error_code fields found in parsed error entries' raw content"
+        )
 
     def test_no_data_corruption_on_special_characters(self):
         """Messages with Unicode, quotes, and special chars survive round-trip."""
@@ -1220,7 +1220,7 @@ class TestCruelDataIntegrity:
         ]
 
         logs = []
-        base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+        base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
         for i, msg in enumerate(special_messages):
             logs.append(
                 {
@@ -1238,15 +1238,15 @@ class TestCruelDataIntegrity:
 
         try:
             result = search(files=[temp_path], limit=100)
-            assert result["total_matches"] == len(
-                special_messages
-            ), f"Expected {len(special_messages)} entries, got {result['total_matches']}"
+            assert result["total_matches"] == len(special_messages), (
+                f"Expected {len(special_messages)} entries, got {result['total_matches']}"
+            )
 
             # Verify messages survived the round-trip
             found_messages = [item["entry"]["message"] for item in result["results"]]
             for original_msg in special_messages:
-                assert any(
-                    original_msg in fm for fm in found_messages
-                ), f"Message lost in round-trip: {original_msg[:60]}"
+                assert any(original_msg in fm for fm in found_messages), (
+                    f"Message lost in round-trip: {original_msg[:60]}"
+                )
         finally:
             Path(temp_path).unlink()

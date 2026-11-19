@@ -15,7 +15,7 @@ Fixture: deterministic_log_file
 import pytest
 
 try:
-    from logler.investigate import search, RUST_AVAILABLE
+    from logler.investigate import RUST_AVAILABLE, search
 except ImportError as e:
     if "logler_rs" in str(e):
         RUST_AVAILABLE = False
@@ -55,9 +55,9 @@ class TestSearchLevelFilter:
         # ALL results must match the filter
         for item in result["results"]:
             entry = item.get("entry", item)
-            assert (
-                entry["level"].upper() == level
-            ), f"Entry level {entry['level']} doesn't match filter {level}"
+            assert entry["level"].upper() == level, (
+                f"Entry level {entry['level']} doesn't match filter {level}"
+            )
 
 
 class TestSearchThreadFilter:
@@ -106,9 +106,9 @@ class TestSearchCorrelationFilter:
         """Each correlation ID appears exactly 10 times (100 entries / 10 IDs)."""
         result = search(files=[deterministic_log_file], correlation_id=correlation_id, limit=100)
 
-        assert (
-            result["total_matches"] == expected_count
-        ), f"Correlation {correlation_id} should have exactly {expected_count} matches"
+        assert result["total_matches"] == expected_count, (
+            f"Correlation {correlation_id} should have exactly {expected_count} matches"
+        )
 
         for item in result["results"]:
             entry = item.get("entry", item)

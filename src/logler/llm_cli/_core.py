@@ -5,16 +5,17 @@ glob expansion, the time filter options and how they resolve to bounds, and the 
 truncation.
 """
 
-import click
 import functools
 import json
 import os
-import sys
 import re
-from contextlib import contextmanager
+import sys
+from contextlib import contextmanager, suppress
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set, Tuple
-from datetime import datetime, timezone
+from typing import Any
+
+import click
 
 from .._search_core import _parse_levels, level_text, parse_duration
 from ..config import FormatFileError
@@ -45,7 +46,7 @@ EXIT_USER_ERROR = 2  # Invalid arguments, file not found
 EXIT_INTERNAL_ERROR = 3  # Unexpected exception
 
 
-def _output_json(data: Dict[str, Any], pretty: bool = False, err: bool = False) -> None:
+def _output_json(data: dict[str, Any], pretty: bool = False, err: bool = False) -> None:
     """Output JSON to stdout (or to stderr, for a command whose stdout is its data stream)."""
     if pretty:
         click.echo(json.dumps(data, indent=2, default=str), err=err)
@@ -60,9 +61,9 @@ def _error_json(message: str, code: int = EXIT_USER_ERROR, err: bool = False) ->
 
 
 def command(
-    name: Optional[str] = None,
+    name: str | None = None,
     *,
-    group: Optional[click.Group] = None,
+    group: click.Group | None = None,
     stream: bool = False,
 ):
     """Declare an llm command: the one owner of what every command shares.
@@ -112,12 +113,12 @@ def _check_level_words(ctx, param, value):
     return value
 
 
-def _level_texts(value: Optional[str]) -> Optional[Set[str]]:
+def _level_texts(value: str | None) -> set[str] | None:
     """The texts of an entry's level (``WARN``) that a comma list of level words names."""
     return {level_text(name) for name in _parse_levels(value)} if value else None
 
 
-def _expand_globs(patterns: List[str]) -> List[str]:
+def _expand_globs(patterns: list[str]) -> list[str]:
     """The files the patterns name. A folder a pattern matches is not a log file."""
     import glob
 
@@ -131,7 +132,7 @@ def _expand_globs(patterns: List[str]) -> List[str]:
     return sorted(set(files))
 
 
-def _apply_max_bytes(data: Dict[str, Any], max_bytes: int) -> Dict[str, Any]:
+def _apply_max_bytes(data: dict[str, Any], max_bytes: int) -> dict[str, Any]:
     """Truncate results list to fit within max_bytes budget."""
     serialized = json.dumps(data, default=str)
     if len(serialized.encode("utf-8")) <= max_bytes:
@@ -199,15 +200,15 @@ def time_filter_options(f):
 
 
 def _resolve_time_filters(
-    last_duration: Optional[str], after: Optional[str], before: Optional[str]
-) -> Tuple[Optional[str], Optional[str]]:
+    last_duration: str | None, after: str | None, before: str | None
+) -> tuple[str | None, str | None]:
     """Resolve time filter options into (time_start, time_end) ISO strings.
 
     Supports relative time with '-' prefix: --after=-1h --before=-30m
     means "between 1 hour ago and 30 minutes ago".
     """
     if last_duration:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return (format_time(_before(now, last_duration, "--last")), format_time(now))
 
     time_start = None
@@ -220,14 +221,14 @@ def _resolve_time_filters(
 
 
 def _resolve_time_bounds(
-    last_duration: Optional[str], after: Optional[str], before: Optional[str]
-) -> Tuple[Optional[datetime], Optional[datetime]]:
+    last_duration: str | None, after: str | None, before: str | None
+) -> tuple[datetime | None, datetime | None]:
     """The same bounds as aware datetimes, for a command that compares entry times itself."""
     start, end = _resolve_time_filters(last_duration, after, before)
     return (to_utc(start), to_utc(end))
 
 
-def _outside_bounds(ts: Optional[datetime], start: Optional[datetime], end: Optional[datetime]):
+def _outside_bounds(ts: datetime | None, start: datetime | None, end: datetime | None):
     """Whether an entry's time lies outside the (inclusive) bounds.
 
     An entry with no time is inside any bounds, as it is for the search engine: nothing
@@ -236,9 +237,7 @@ def _outside_bounds(ts: Optional[datetime], start: Optional[datetime], end: Opti
     return ts is not None and ((start is not None and ts < start) or (end is not None and ts > end))
 
 
-def _time_text_outside_bounds(
-    ts: Optional[str], start: Optional[datetime], end: Optional[datetime]
-):
+def _time_text_outside_bounds(ts: str | None, start: datetime | None, end: datetime | None):
     """``_outside_bounds`` for an engine entry, whose time is text."""
     return _outside_bounds(to_utc(ts), start, end)
 
@@ -260,7 +259,7 @@ def _parse_time_arg(value: str, flag_name: str) -> str:
     Relative format: -30m, -2h, -1d (dash prefix + duration)
     """
     if value.startswith("-"):
-        return format_time(_before(datetime.now(timezone.utc), value[1:], flag_name))
+        return format_time(_before(datetime.now(UTC), value[1:], flag_name))
     else:
         # Absolute ISO8601 timestamp. Without a zone it is UTC, as a log timestamp without
         # one is; every entry's time is zone-aware, so the bound must be too.
@@ -270,7 +269,7 @@ def _parse_time_arg(value: str, flag_name: str) -> str:
         return format_time(parsed)
 
 
-def _extract_patterns(values: List[str]) -> List[str]:
+def _extract_patterns(values: list[str]) -> list[str]:
     """Extract regex-like patterns from a list of values."""
     if not values:
         return []
@@ -336,7 +335,5 @@ def _db_file_source(files, db_path, default_glob=None):
         yield file_list
     finally:
         if db_jsonl_path:
-            try:
+            with suppress(OSError):
                 os.unlink(db_jsonl_path)
-            except OSError:
-                pass

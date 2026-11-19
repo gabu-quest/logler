@@ -25,10 +25,9 @@ import logging
 import traceback
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-_correlation_id: ContextVar[Optional[str]] = ContextVar("_correlation_id", default=None)
+_correlation_id: ContextVar[str | None] = ContextVar("_correlation_id", default=None)
 
 
 @contextmanager
@@ -75,7 +74,7 @@ def correlation_context(correlation_id: str, otel_bridge: bool = False):
         _correlation_id.reset(token)
 
 
-def get_correlation_id() -> Optional[str]:
+def get_correlation_id() -> str | None:
     """Return the current correlation ID, or None if not set."""
     return _correlation_id.get()
 
@@ -151,7 +150,7 @@ class JsonHandler(logging.Handler):
 
     def __init__(
         self,
-        filename: Optional[str] = None,
+        filename: str | None = None,
         stream=None,
         level: int = logging.NOTSET,
     ):
@@ -159,7 +158,7 @@ class JsonHandler(logging.Handler):
         if filename and stream:
             raise ValueError("Cannot specify both filename and stream")
         if filename:
-            self._stream = open(filename, "a", encoding="utf-8")
+            self._stream = open(filename, "a", encoding="utf-8")  # noqa: SIM115 - the handler owns it and close() closes it
             self._owns_stream = True
         elif stream:
             self._stream = stream
@@ -176,7 +175,7 @@ class JsonHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             entry = {
-                "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+                "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
                 "level": record.levelname,
                 "message": record.getMessage(),
                 "thread_id": record.threadName,

@@ -6,10 +6,12 @@ large files, corruption, and adversarial inputs.
 """
 
 import os
-import pytest
 import tempfile
 import threading
 from pathlib import Path
+
+import pytest
+
 from logler.log_reader import LogReader
 
 
@@ -134,10 +136,12 @@ class TestFileEdgeCases:
 
     def test_directory_instead_of_file(self):
         """Directory path instead of file"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with pytest.raises((IsADirectoryError, PermissionError, OSError, ValueError)):
-                reader = LogReader(tmpdir)
-                list(reader.read_lines())
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            pytest.raises((IsADirectoryError, PermissionError, OSError, ValueError)),
+        ):
+            reader = LogReader(tmpdir)
+            list(reader.read_lines())
 
 
 class TestLargeFileHandling:

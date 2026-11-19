@@ -19,8 +19,9 @@ import os
 import sqlite3
 import textwrap
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -57,7 +58,7 @@ FILE_TEXT = {
 }
 
 # file -> [(line, level, message, fields, has_timestamp)]
-GROUND: Dict[str, List[Tuple[int, str, str, Dict[str, str], bool]]] = {
+GROUND: dict[str, list[tuple[int, str, str, dict[str, str], bool]]] = {
     "plc_1.log": [
         (1, "WARN", "pressure low", {"station": "ST-07"}, True),
         (2, "ERROR", "valve stuck", {"station": "ST-07"}, True),
@@ -91,7 +92,7 @@ def logdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _expected_entries(files: List[str]) -> List[Tuple[str, int, str, str]]:
+def _expected_entries(files: list[str]) -> list[tuple[str, int, str, str]]:
     return sorted(
         (name, line, level, message)
         for name in files
@@ -99,11 +100,11 @@ def _expected_entries(files: List[str]) -> List[Tuple[str, int, str, str]]:
     )
 
 
-def _expected_fields(files: List[str]) -> Dict[Tuple[str, int], Dict[str, str]]:
+def _expected_fields(files: list[str]) -> dict[tuple[str, int], dict[str, str]]:
     return {(name, row[0]): row[3] for name in files for row in GROUND[name]}
 
 
-def _expected_levels(files: List[str], timestamped_only: bool = False) -> Dict[str, int]:
+def _expected_levels(files: list[str], timestamped_only: bool = False) -> dict[str, int]:
     return dict(
         Counter(row[1] for name in files for row in GROUND[name] if row[4] or not timestamped_only)
     )
@@ -115,7 +116,7 @@ def _llm(*args: str) -> Any:
     return result
 
 
-def _json_docs(text: str) -> List[Any]:
+def _json_docs(text: str) -> list[Any]:
     """Every JSON document in a text, one after the other."""
     decoder = json.JSONDecoder()
     docs, pos = [], 0
@@ -133,10 +134,10 @@ def _json_docs(text: str) -> List[Any]:
 # Doors that give entries: (file, line, level, message) and maybe the fields
 # ---------------------------------------------------------------------------
 
-Observed = Tuple[List[Tuple[str, int, str, str]], Optional[Dict[Tuple[str, int], Dict[str, str]]]]
+Observed = tuple[list[tuple[str, int, str, str]], dict[tuple[str, int], dict[str, str]] | None]
 
 
-def _entries_from_search_results(results: List[Dict[str, Any]], nested: bool) -> Observed:
+def _entries_from_search_results(results: list[dict[str, Any]], nested: bool) -> Observed:
     rows, fields = [], {}
     for item in results:
         e = item["entry"] if nested else item
@@ -147,35 +148,35 @@ def _entries_from_search_results(results: List[Dict[str, Any]], nested: bool) ->
     return sorted(rows), (fields or None)
 
 
-def door_search_function(files: List[str]) -> Observed:
+def door_search_function(files: list[str]) -> Observed:
     return _entries_from_search_results(search(files, limit=100)["results"], True)
 
 
-def door_investigator(files: List[str]) -> Observed:
+def door_investigator(files: list[str]) -> Observed:
     inv = Investigator()
     inv.load_files(files)
     return _entries_from_search_results(inv.search(limit=100)["results"], True)
 
 
-def door_llm_search(files: List[str]) -> Observed:
+def door_llm_search(files: list[str]) -> Observed:
     out = json.loads(_llm("search", *files).output)
     return _entries_from_search_results(out["results"], False)
 
 
-def door_emit(files: List[str]) -> Observed:
+def door_emit(files: list[str]) -> Observed:
     lines = _llm("emit", *files).output.strip().splitlines()
     return _entries_from_search_results([json.loads(line) for line in lines], False)
 
 
-def door_viewer(files: List[str]) -> Observed:
-    rows: List[Tuple[str, int, str, str]] = []
-    fields: Dict[Tuple[str, int], Dict[str, str]] = {}
+def door_viewer(files: list[str]) -> Observed:
+    rows: list[tuple[str, int, str, str]] = []
+    fields: dict[tuple[str, int], dict[str, str]] = {}
     for name in files:
         viewer = TerminalViewer(use_colors=False)
         viewer.console.width = 400
         with viewer.console.capture() as capture:
             asyncio.run(viewer.view_file(name))
-        current: Optional[Tuple[str, int]] = None
+        current: tuple[str, int] | None = None
         for text in capture.get().splitlines():
             parts = text.split()
             if parts and parts[0].isdigit() and "UNKNOWN" not in parts[:4]:
@@ -192,7 +193,7 @@ def door_viewer(files: List[str]) -> Observed:
     return sorted(rows), fields
 
 
-ENTRY_DOORS: Dict[str, Callable[[List[str]], Observed]] = {
+ENTRY_DOORS: dict[str, Callable[[list[str]], Observed]] = {
     "search()": door_search_function,
     "Investigator.load_files": door_investigator,
     "llm search": door_llm_search,
@@ -217,14 +218,14 @@ def test_entry_doors_read_each_file_with_its_format(logdir: Path, door: str, set
 # ---------------------------------------------------------------------------
 
 
-def door_get_metadata(files: List[str]) -> Dict[str, int]:
+def door_get_metadata(files: list[str]) -> dict[str, int]:
     total: Counter = Counter()
     for item in get_metadata(files):
         total.update(item["log_levels"])
     return dict(total)
 
 
-def door_stats(files: List[str]) -> Dict[str, int]:
+def door_stats(files: list[str]) -> dict[str, int]:
     result = CliRunner().invoke(main, ["stats", *files, "--json"])
     assert result.exit_code == 0, result.output
     total: Counter = Counter()
@@ -233,7 +234,7 @@ def door_stats(files: List[str]) -> Dict[str, int]:
     return dict(total)
 
 
-def door_schema(files: List[str]) -> Dict[str, int]:
+def door_schema(files: list[str]) -> dict[str, int]:
     out = json.loads(_llm("schema", *files).output)
     # schema gives the level values and the format shares, not counts
     return {
@@ -242,12 +243,12 @@ def door_schema(files: List[str]) -> Dict[str, int]:
     }
 
 
-def door_summarize(files: List[str]) -> Dict[str, int]:
+def door_summarize(files: list[str]) -> dict[str, int]:
     return json.loads(_llm("summarize", *files).output)["stats"]["by_level"]
 
 
-def door_sql(files: List[str]) -> Dict[str, int]:
-    args: List[str] = []
+def door_sql(files: list[str]) -> dict[str, int]:
+    args: list[str] = []
     for name in files:
         args += ["--files", name]
     out = json.loads(
@@ -256,7 +257,7 @@ def door_sql(files: List[str]) -> Dict[str, int]:
     return {row["level"]: row["c"] for row in out["results"]}
 
 
-def door_diff(files: List[str]) -> Dict[str, int]:
+def door_diff(files: list[str]) -> dict[str, int]:
     out = json.loads(
         _llm(
             "diff",
@@ -274,7 +275,7 @@ def door_diff(files: List[str]) -> Dict[str, int]:
     return out["comparison"]["after"]["by_level"]
 
 
-COUNT_DOORS: Dict[str, Callable[[List[str]], Any]] = {
+COUNT_DOORS: dict[str, Callable[[list[str]], Any]] = {
     "get_metadata": door_get_metadata,
     "stats": door_stats,
     "summarize": door_summarize,
@@ -318,7 +319,7 @@ formats:
     ],
 )
 def test_schema_reports_the_formats_the_files_read_with(
-    logdir: Path, set_name: str, levels: List[str], formats: Dict[str, float]
+    logdir: Path, set_name: str, levels: list[str], formats: dict[str, float]
 ) -> None:
     observed = door_schema(FILE_SETS[set_name])
     assert observed["levels"] == levels
@@ -369,7 +370,7 @@ formats:
 # ---------------------------------------------------------------------------
 
 
-def _robot_levels(path: str) -> Dict[str, int]:
+def _robot_levels(path: str) -> dict[str, int]:
     return dict(Counter(item["entry"]["level"] for item in search([path], limit=10)["results"]))
 
 
@@ -536,7 +537,7 @@ def test_rewriting_the_formats_yaml_behind_one_of_two_links_gives_the_new_readin
     clear_cache()
     files = [str(links / "robot_a.log"), str(links / "robot_b.log")]
 
-    def levels() -> List[Tuple[str, str]]:
+    def levels() -> list[tuple[str, str]]:
         found = search(files, limit=10)["results"]
         return sorted((os.path.basename(i["entry"]["file"]), i["entry"]["level"]) for i in found)
 

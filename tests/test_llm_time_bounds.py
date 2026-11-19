@@ -1,6 +1,7 @@
 """Tests for relative and absolute --after/--before time bounds."""
 
 import json
+from datetime import UTC
 
 import pytest
 
@@ -59,8 +60,9 @@ class TestRelativeTime:
 
     def test_relative_time_parse_units(self):
         """Verify _parse_time_arg produces valid ISO timestamps for various units."""
-        from logler.llm_cli import _parse_time_arg
         from datetime import datetime
+
+        from logler.llm_cli import _parse_time_arg
 
         for duration in ["-30m", "-2h", "-1d", "-30s"]:
             result = _parse_time_arg(duration, "--after")
@@ -71,23 +73,25 @@ class TestRelativeTime:
 
     def test_relative_time_is_in_past(self):
         """Relative time arguments should produce timestamps before now."""
-        from logler.llm_cli import _parse_time_arg
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(timezone.utc)
+        from logler.llm_cli import _parse_time_arg
+
+        now = datetime.now(UTC)
         one_hour_ago = _parse_time_arg("-1h", "--after")
         parsed = datetime.fromisoformat(one_hour_ago)
         # Make both tz-aware for comparison
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         # Should be approximately 1 hour before now (within 5 sec tolerance)
         diff = (now - parsed).total_seconds()
         assert 3595 < diff < 3605
 
     def test_resolve_time_filters_relative(self):
         """_resolve_time_filters handles relative --after/--before."""
-        from logler.llm_cli import _resolve_time_filters
         from datetime import datetime
+
+        from logler.llm_cli import _resolve_time_filters
 
         time_start, time_end = _resolve_time_filters(None, "-2h", "-30m")
         assert time_start is not None
@@ -193,7 +197,7 @@ class TestTimeBoundsCompareTimes:
         self, log_with_an_untimed_line, args, lines
     ):
         args = [a.replace("{f}", log_with_an_untimed_line) for a in args]
-        _, stdout, _ = invoke(args + ["--after", "2024-01-15T09:00:00Z"])
+        _, stdout, _ = invoke([*args, "--after", "2024-01-15T09:00:00Z"])
         assert lines(stdout) == [2, 3, 4]
 
 
@@ -334,9 +338,9 @@ class TestRelativeDurations:
     @pytest.fixture
     def recent_log(self, tmp_path):
         """Lines 3 hours, 45 minutes and 10 minutes old (lines 1, 2, 3)."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stamps = [
             (now - timedelta(minutes=m)).strftime("%Y-%m-%dT%H:%M:%SZ") for m in (180, 45, 10)
         ]
@@ -359,7 +363,7 @@ class TestRelativeDurations:
     )
     def test_the_lines_kept(self, recent_log, args, expected):
         for command in (["summarize"], ["emit"]):
-            _, stdout, _ = invoke(command + [recent_log] + args)
+            _, stdout, _ = invoke([*command, recent_log, *args])
             lines = _lines_summarize(stdout) if command == ["summarize"] else _lines_emit(stdout)
             assert lines == expected
 
@@ -380,7 +384,7 @@ class TestRelativeDurations:
         ],
     )
     def test_a_bad_duration_or_time_is_the_users_error(self, recent_log, args):
-        code, stdout, _ = invoke(["summarize", recent_log] + args)
+        code, stdout, _ = invoke(["summarize", recent_log, *args])
         assert code == 2
         assert json.loads(stdout)["code"] == 2
 

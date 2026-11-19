@@ -5,11 +5,11 @@ Public API surface is re-exported by :mod:`logler.investigate`.
 """
 
 import warnings
-from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+from typing import Any
 
-from ._search_core import level_text, search, follow_thread
+from ._search_core import follow_thread, level_text, search
 
 _DEFAULT_TIMELINE_LIMIT = 10_000
 
@@ -19,14 +19,14 @@ _DEFAULT_TIMELINE_LIMIT = 10_000
 
 
 def cross_service_timeline(
-    files: Dict[str, List[str]],
-    time_window: Optional[Tuple[str, str]] = None,
-    correlation_id: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    limit: Optional[int] = None,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: dict[str, list[str]],
+    time_window: tuple[str, str] | None = None,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+    limit: int | None = None,
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Create a unified timeline across multiple services/log files.
 
     Perfect for investigating distributed systems where a single request
@@ -184,14 +184,14 @@ def cross_service_timeline(
 
 
 def compare_threads(
-    files: List[str],
-    thread_a: Optional[str] = None,
-    thread_b: Optional[str] = None,
-    correlation_a: Optional[str] = None,
-    correlation_b: Optional[str] = None,
-    trace_a: Optional[str] = None,
-    trace_b: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: list[str],
+    thread_a: str | None = None,
+    thread_b: str | None = None,
+    correlation_a: str | None = None,
+    correlation_b: str | None = None,
+    trace_a: str | None = None,
+    trace_b: str | None = None,
+) -> dict[str, Any]:
     """Compare two threads/requests to find differences.
 
     Perfect for root cause analysis: *"What's different between the successful
@@ -262,12 +262,12 @@ def compare_threads(
 
 
 def compare_time_periods(
-    files: List[str],
+    files: list[str],
     period_a_start: str,
     period_a_end: str,
     period_b_start: str,
     period_b_end: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compare two time periods to find what changed.
 
     Perfect for questions like *"What changed after the deployment?"* or
@@ -326,7 +326,7 @@ def compare_time_periods(
 # ---------------------------------------------------------------------------
 
 
-def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
+def _analyze_thread(entries: list[dict], thread_id: str) -> dict[str, Any]:
     """Analyse a single thread's entries."""
     if not entries:
         return {
@@ -387,7 +387,7 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
     }
 
 
-def _compute_differences(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
+def _compute_differences(analysis_a: dict, analysis_b: dict) -> dict[str, Any]:
     """Compute differences between two thread analyses."""
     # Duration difference
     duration_diff_ms = analysis_b["duration_ms"] - analysis_a["duration_ms"]
@@ -420,7 +420,7 @@ def _compute_differences(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
     }
 
 
-def _generate_comparison_summary(analysis_a: Dict, analysis_b: Dict, differences: Dict) -> str:
+def _generate_comparison_summary(analysis_a: dict, analysis_b: dict, differences: dict) -> str:
     """Generate human-readable summary of comparison."""
     parts = []
 
@@ -452,7 +452,7 @@ def _generate_comparison_summary(analysis_a: Dict, analysis_b: Dict, differences
     return ". ".join(parts)
 
 
-def _analyze_period(entries: List[Dict], start: str, end: str) -> Dict[str, Any]:
+def _analyze_period(entries: list[dict], start: str, end: str) -> dict[str, Any]:
     """Analyse a time period's entries."""
     level_counts = defaultdict(int)
     error_messages = []
@@ -485,7 +485,7 @@ def _analyze_period(entries: List[Dict], start: str, end: str) -> Dict[str, Any]
     }
 
 
-def _compute_period_changes(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
+def _compute_period_changes(analysis_a: dict, analysis_b: dict) -> dict[str, Any]:
     """Compute changes between two time periods."""
     # Volume change
     if analysis_a["total_logs"] > 0:
@@ -517,7 +517,7 @@ def _compute_period_changes(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any
     }
 
 
-def _generate_period_summary(analysis_a: Dict, analysis_b: Dict, changes: Dict) -> str:
+def _generate_period_summary(analysis_a: dict, analysis_b: dict, changes: dict) -> str:
     """Generate human-readable summary of period comparison."""
     parts = []
 
@@ -545,7 +545,7 @@ def _generate_period_summary(analysis_a: Dict, analysis_b: Dict, changes: Dict) 
     return ". ".join(parts)
 
 
-def _in_time_range(entry: Dict, start: str, end: str) -> bool:
+def _in_time_range(entry: dict, start: str, end: str) -> bool:
     """Check if entry timestamp is within range."""
     timestamp_str = entry.get("timestamp")
     if not timestamp_str:

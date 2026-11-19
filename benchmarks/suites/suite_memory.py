@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import tracemalloc
 import tempfile
+import tracemalloc
 from pathlib import Path
 
 from benchmarks.core.base import BenchmarkResult

@@ -1,9 +1,11 @@
 """Tests for log reader."""
 
 import json
-import pytest
 import tempfile
 from pathlib import Path
+
+import pytest
+
 from logler.log_reader import LogReader
 
 

@@ -6,11 +6,10 @@ Public API surface is re-exported by :mod:`logler.investigate`.
 
 import json
 import re
-from typing import List, Optional, Dict, Any
 from collections import defaultdict
+from typing import Any
 
 from ._search_core import RUST_AVAILABLE, _investigator_for
-
 
 # ---------------------------------------------------------------------------
 # Hierarchy construction
@@ -18,15 +17,15 @@ from ._search_core import RUST_AVAILABLE, _investigator_for
 
 
 def follow_thread_hierarchy(
-    files: List[str],
+    files: list[str],
     root_identifier: str,
-    max_depth: Optional[int] = None,
+    max_depth: int | None = None,
     use_naming_patterns: bool = True,
     use_temporal_inference: bool = True,
     min_confidence: float = 0.0,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Build hierarchical tree of threads/spans showing parent-child relationships.
 
     This detects sub-threads and nested operations using:
@@ -85,7 +84,7 @@ def follow_thread_hierarchy(
 # ---------------------------------------------------------------------------
 
 
-def _format_detection_method(hierarchy: Dict[str, Any]) -> str:
+def _format_detection_method(hierarchy: dict[str, Any]) -> str:
     method = hierarchy.get("detection_method", "Unknown")
     methods = hierarchy.get("detection_methods") or []
     method_str = str(method)
@@ -95,7 +94,7 @@ def _format_detection_method(hierarchy: Dict[str, Any]) -> str:
     return method_str
 
 
-def get_hierarchy_summary(hierarchy: Dict[str, Any]) -> str:
+def get_hierarchy_summary(hierarchy: dict[str, Any]) -> str:
     """Generate a human-readable summary of a thread hierarchy.
 
     Args:
@@ -164,7 +163,7 @@ def get_hierarchy_summary(hierarchy: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _append_tree_preview(node: Dict[str, Any], lines: List[str], depth: int, max_depth: int):
+def _append_tree_preview(node: dict[str, Any], lines: list[str], depth: int, max_depth: int):
     """Helper to append tree preview to lines."""
     if depth >= max_depth:
         return
@@ -194,9 +193,9 @@ def _append_tree_preview(node: Dict[str, Any], lines: List[str], depth: int, max
 
 
 def analyze_error_flow(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     include_context: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Analyse error propagation through a hierarchy to identify root causes.
 
     Traces errors through parent-child relationships to find root causes,
@@ -249,7 +248,7 @@ def analyze_error_flow(
     all_nodes = {}
     parent_map = {}  # child_id -> parent_id
 
-    def collect_nodes(node: Dict[str, Any], parent_id: Optional[str] = None):
+    def collect_nodes(node: dict[str, Any], parent_id: str | None = None):
         node_id = node.get("id")
         if node_id:
             all_nodes[node_id] = node
@@ -406,7 +405,7 @@ def analyze_error_flow(
 
 
 def format_error_flow(
-    error_analysis: Dict[str, Any],
+    error_analysis: dict[str, Any],
     show_chains: bool = True,
     show_recommendations: bool = True,
 ) -> str:
@@ -517,11 +516,11 @@ def format_error_flow(
 
 
 def detect_correlation_chains(
-    files: List[str],
-    root_correlation_id: Optional[str] = None,
-    chain_patterns: Optional[List[str]] = None,
-    parser_format: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: list[str],
+    root_correlation_id: str | None = None,
+    chain_patterns: list[str] | None = None,
+    parser_format: str | None = None,
+) -> dict[str, Any]:
     """Detect correlation ID chaining where one request spawns sub-requests.
 
     Identifies parent-child relationships between correlation IDs by analysing
@@ -702,14 +701,14 @@ def detect_correlation_chains(
 
 
 def build_hierarchy_with_correlation_chains(
-    files: List[str],
+    files: list[str],
     root_identifier: str,
     include_correlation_chains: bool = True,
-    max_depth: Optional[int] = None,
+    max_depth: int | None = None,
     use_naming_patterns: bool = True,
     use_temporal_inference: bool = True,
     min_confidence: float = 0.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build hierarchy that includes correlation ID chaining relationships.
 
     Extends :func:`follow_thread_hierarchy` by also detecting when one
@@ -773,9 +772,9 @@ def build_hierarchy_with_correlation_chains(
 
 
 def analyze_bottlenecks(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     threshold_percentage: float = 20.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Detect performance bottlenecks with optimisation suggestions.
 
     Analyses hierarchy to identify primary/secondary bottlenecks,
@@ -826,7 +825,7 @@ def analyze_bottlenecks(
     # Collect all nodes with timing
     all_nodes = []
 
-    def collect_nodes(node: Dict[str, Any]):
+    def collect_nodes(node: dict[str, Any]):
         duration = node.get("duration_ms", 0)
         if duration and duration > 0:
             percentage = (duration / total_duration) * 100
@@ -946,11 +945,11 @@ def analyze_bottlenecks(
 
 
 def diff_hierarchies(
-    hierarchy_a: Dict[str, Any],
-    hierarchy_b: Dict[str, Any],
+    hierarchy_a: dict[str, Any],
+    hierarchy_b: dict[str, Any],
     label_a: str = "Before",
     label_b: str = "After",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compare two hierarchies to identify performance changes.
 
     Useful for before/after deployment comparisons, A/B testing,
@@ -999,10 +998,10 @@ def diff_hierarchies(
     }
 
     # Collect nodes from both hierarchies
-    def collect_nodes(hierarchy: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    def collect_nodes(hierarchy: dict[str, Any]) -> dict[str, dict[str, Any]]:
         nodes = {}
 
-        def walk(node: Dict[str, Any]):
+        def walk(node: dict[str, Any]):
             node_id = node.get("id")
             if node_id:
                 nodes[node_id] = {
@@ -1101,7 +1100,7 @@ def diff_hierarchies(
     return result
 
 
-def format_hierarchy_diff(diff: Dict[str, Any]) -> str:
+def format_hierarchy_diff(diff: dict[str, Any]) -> str:
     """Format hierarchy diff as human-readable text.
 
     Args:
@@ -1124,7 +1123,9 @@ def format_hierarchy_diff(diff: Dict[str, Any]) -> str:
     direction = (
         "\u2b07\ufe0f IMPROVED"
         if change_ms < 0
-        else "\u2b06\ufe0f DEGRADED" if change_ms > 0 else "\u27a1\ufe0f UNCHANGED"
+        else "\u2b06\ufe0f DEGRADED"
+        if change_ms > 0
+        else "\u27a1\ufe0f UNCHANGED"
     )
     lines.append(f"\n{direction}: {abs(change_ms):.0f}ms ({abs(change_pct):.1f}%)")
 

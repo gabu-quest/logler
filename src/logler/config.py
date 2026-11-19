@@ -14,7 +14,7 @@ import re
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Optional, Union
+from typing import Annotated, Literal
 
 import yaml
 from pydantic import (
@@ -35,10 +35,10 @@ class FormatConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     regex: str = Field(description="Regex with named capture groups for parsing log lines")
-    timestamp_format: Optional[str] = Field(
+    timestamp_format: str | None = Field(
         None, description="strftime format for the timestamp capture group"
     )
-    file_patterns: List[str] = Field(
+    file_patterns: list[str] = Field(
         default_factory=list,
         description="Glob patterns to auto-match files",
     )
@@ -64,7 +64,7 @@ class LoglerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    formats: Dict[str, FormatConfig] = Field(
+    formats: dict[str, FormatConfig] = Field(
         default_factory=dict,
         description="Named log format definitions",
     )
@@ -94,7 +94,7 @@ def parse_duration(value: str) -> timedelta:
     match = _DURATION_PATTERN.match(value.strip())
     if not match:
         raise ValueError(
-            f"Invalid duration: {value!r}. " f"Expected format like '500ms', '5s', '1m', '2h'."
+            f"Invalid duration: {value!r}. Expected format like '500ms', '5s', '1m', '2h'."
         )
     amount = float(match.group(1))
     unit = match.group(2)
@@ -113,7 +113,7 @@ class FieldSelector(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    file_pattern: Optional[str] = Field(
+    file_pattern: str | None = Field(
         None, description="Glob pattern to match filenames (e.g. 'mes_*.log')"
     )
     field: str = Field(description="Field name in the log entry (e.g. 'batch_id')")
@@ -124,20 +124,20 @@ class EventCondition(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    file_pattern: Optional[str] = Field(
+    file_pattern: str | None = Field(
         None, description="Glob pattern to restrict which files to search"
     )
-    field: Optional[str] = Field(None, description="Field name to evaluate the condition against")
-    condition: Optional[str] = Field(
+    field: str | None = Field(None, description="Field name to evaluate the condition against")
+    condition: str | None = Field(
         None,
         description="Comparison expression for the field value (e.g. '< 2.0', '> 100')",
     )
-    level: Optional[str] = Field(None, description="Match entries at this log level (e.g. 'ERROR')")
-    pattern: Optional[str] = Field(None, description="Regex to match against the message text")
+    level: str | None = Field(None, description="Match entries at this log level (e.g. 'ERROR')")
+    pattern: str | None = Field(None, description="Regex to match against the message text")
 
     @field_validator("pattern")
     @classmethod
-    def validate_pattern(cls, v: Optional[str]) -> Optional[str]:
+    def validate_pattern(cls, v: str | None) -> str | None:
         if v is not None:
             try:
                 safe_compile(v)
@@ -146,7 +146,7 @@ class EventCondition(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def at_least_one_condition(self) -> "EventCondition":
+    def at_least_one_condition(self) -> EventCondition:
         has_any = self.field is not None or self.level is not None or self.pattern is not None
         if not has_any:
             raise ValueError(
@@ -182,7 +182,7 @@ class TemporalRule(BaseModel):
 
 
 CorrelationRule = Annotated[
-    Union[FieldMatchRule, TemporalRule],
+    FieldMatchRule | TemporalRule,
     Field(discriminator="type"),
 ]
 
@@ -192,8 +192,8 @@ class CorrelationGroup(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: Optional[str] = Field(None, description="Human-readable description")
-    rules: List[CorrelationRule] = Field(
+    description: str | None = Field(None, description="Human-readable description")
+    rules: list[CorrelationRule] = Field(
         ..., min_length=1, description="Correlation rules in this group"
     )
 
@@ -203,7 +203,7 @@ class CorrelationsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    correlations: Dict[str, CorrelationGroup] = Field(
+    correlations: dict[str, CorrelationGroup] = Field(
         default_factory=dict,
         description="Named correlation rule groups",
     )
@@ -343,7 +343,7 @@ def get_format_for_file(config: LoglerConfig, filepath: str | Path) -> FormatCon
 
 # Per formats.yaml: (stamp, config, problem), valid while the file's (mtime, size) is
 # unchanged. One of config and problem is None.
-_config_cache: Dict[str, tuple] = {}
+_config_cache: dict[str, tuple] = {}
 
 
 def _stamp(path: Path) -> tuple:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import platform
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +52,7 @@ class SystemInfo:
             platform_machine=platform.machine(),
             platform_release=platform.release(),
             cpu_count=os.cpu_count() or 1,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
     def to_dict(self) -> dict:

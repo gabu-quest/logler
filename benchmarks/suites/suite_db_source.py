@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-import tracemalloc
 import tempfile
+import tracemalloc
 from pathlib import Path
 
 from benchmarks.core.base import BenchmarkResult
@@ -191,7 +191,7 @@ class DbSourceMemory:
 
             def do_convert(p=db_path):
                 jsonl_path = db_to_jsonl(p)
-                path_holder[0] = jsonl_path
+                path_holder[0] = jsonl_path  # noqa: B023 - called within the iteration that created the holder
                 return jsonl_path
 
             vmrss_before = _get_vmrss_kb()

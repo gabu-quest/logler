@@ -1,24 +1,25 @@
 """Correlation commands (M2.4, M3.4): correlation group + correlate-events."""
 
-import click
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
+import click
+
+from ..config import config_problem, find_correlations_config, load_correlations_config
 from ._core import (
-    llm,
-    command,
-    EXIT_SUCCESS,
     EXIT_NO_RESULTS,
+    EXIT_SUCCESS,
     EXIT_USER_ERROR,
-    _output_json,
-    _error_json,
     _apply_max_bytes,
     _check_level_words,
-    db_source_option,
     _db_file_source,
+    _error_json,
+    _output_json,
+    command,
+    db_source_option,
+    llm,
 )
-from ..config import config_problem, find_correlations_config, load_correlations_config
 
 
 @llm.group()
@@ -34,7 +35,7 @@ def correlation():
 
 @command("list", group=correlation)
 @click.option("--config-dir", help="Directory to search for .logler/correlations.yaml")
-def correlation_list(config_dir: Optional[str], pretty: bool):
+def correlation_list(config_dir: str | None, pretty: bool):
     """List available correlation rule groups.
 
     Shows all correlation groups defined in .logler/correlations.yaml
@@ -43,7 +44,7 @@ def correlation_list(config_dir: Optional[str], pretty: bool):
     search_dir = Path(config_dir) if config_dir else Path.cwd()
     config_path = find_correlations_config(search_dir)
 
-    output: Dict[str, Any] = {
+    output: dict[str, Any] = {
         "config_path": None,
         "groups": {},
     }
@@ -112,11 +113,11 @@ def correlation_list(config_dir: Optional[str], pretty: bool):
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes")
 def correlation_run(
     files: tuple,
-    db_path: Optional[str],
-    rule_name: Optional[str],
-    config_dir: Optional[str],
-    limit: Optional[int],
-    max_bytes: Optional[int],
+    db_path: str | None,
+    rule_name: str | None,
+    config_dir: str | None,
+    limit: int | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """Run correlation rules against log files.
@@ -275,17 +276,17 @@ def correlation_run(
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes")
 def correlate_events_cmd(
     files: tuple,
-    db_path: Optional[str],
-    anchor_timestamp: Optional[str],
-    anchor_file: Optional[str],
-    anchor_line: Optional[int],
-    trigger_level: Optional[str],
-    trigger_pattern: Optional[str],
-    trigger_field: Optional[str],
-    trigger_condition: Optional[str],
+    db_path: str | None,
+    anchor_timestamp: str | None,
+    anchor_file: str | None,
+    anchor_line: int | None,
+    trigger_level: str | None,
+    trigger_pattern: str | None,
+    trigger_field: str | None,
+    trigger_condition: str | None,
     window: str,
-    limit: Optional[int],
-    max_bytes: Optional[int],
+    limit: int | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """Find all events across files within a time window of reference events.

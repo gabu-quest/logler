@@ -10,6 +10,7 @@ import json
 import random
 import sqlite3
 from pathlib import Path
+from typing import ClassVar
 
 
 class DatabaseGenerator:
@@ -19,10 +20,10 @@ class DatabaseGenerator:
     sequential timestamps with jitter, and deterministic ULIDs.
     """
 
-    STATUSES = ["completed", "failed", "pending", "running", "cancelled"]
-    STATUS_WEIGHTS = [0.65, 0.15, 0.10, 0.05, 0.05]
+    STATUSES: ClassVar[list[str]] = ["completed", "failed", "pending", "running", "cancelled"]
+    STATUS_WEIGHTS: ClassVar[list[float]] = [0.65, 0.15, 0.10, 0.05, 0.05]
 
-    TASKS = [
+    TASKS: ClassVar[list[str]] = [
         "send_email",
         "process_payment",
         "generate_report",
@@ -35,7 +36,7 @@ class DatabaseGenerator:
         "aggregate_metrics",
     ]
 
-    QUEUES = ["default", "high", "low", "critical", "bulk"]
+    QUEUES: ClassVar[list[str]] = ["default", "high", "low", "critical", "bulk"]
 
     def __init__(self, seed: int = 42):
         self.rng = random.Random(seed)

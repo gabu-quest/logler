@@ -1,32 +1,32 @@
 """Search, schema, IDs, sample, triage, summarize, and SQL commands."""
 
-import click
 import sys
-from pathlib import Path
-from typing import Optional, Dict, Any
 from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+import click
 
 from .._search_core import BUILD_HINT, level_text
-
 from ._core import (
-    command,
-    EXIT_SUCCESS,
-    EXIT_NO_RESULTS,
-    EXIT_USER_ERROR,
     EXIT_INTERNAL_ERROR,
+    EXIT_NO_RESULTS,
+    EXIT_SUCCESS,
+    EXIT_USER_ERROR,
+    _apply_max_bytes,
     _check_level_words,
+    _db_file_source,
+    _error_json,
+    _extract_patterns,
     _level_texts,
+    _output_json,
     _outside_bounds,
     _resolve_time_bounds,
-    _time_text_outside_bounds,
-    _output_json,
-    _error_json,
-    _apply_max_bytes,
-    _extract_patterns,
     _resolve_time_filters,
-    time_filter_options,
+    _time_text_outside_bounds,
+    command,
     db_source_option,
-    _db_file_source,
+    time_filter_options,
 )
 
 
@@ -35,7 +35,7 @@ from ._core import (
 @db_source_option
 @click.option("--sample-size", default=1000, help="Number of entries to analyze (default: 1000)")
 @click.option("--full", is_flag=True, help="Analyze all entries (slow for large files)")
-def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, pretty: bool):
+def schema(files: tuple, db_path: str | None, sample_size: int, full: bool, pretty: bool):
     """
     Infer the structure/schema of log files.
 
@@ -98,7 +98,7 @@ def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, p
 
                     # Track custom fields from extra
                     if hasattr(entry, "extra") and entry.extra:
-                        for key in entry.extra.keys():
+                        for key in entry.extra:
                             custom_fields.add(key)
 
             except FileNotFoundError:
@@ -202,26 +202,26 @@ def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, p
 @click.option("--metadata-only", is_flag=True, help="Return aggregations only, no results array")
 def search(
     files: tuple,
-    db_path: Optional[str],
-    level: Optional[str],
-    exclude_level: Optional[str],
-    query: Optional[str],
-    exclude_query: Optional[str],
-    thread: Optional[str],
-    correlation: Optional[str],
-    trace: Optional[str],
-    service: Optional[str],
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
-    limit: Optional[int],
-    head_n: Optional[int],
-    tail_n: Optional[int],
+    db_path: str | None,
+    level: str | None,
+    exclude_level: str | None,
+    query: str | None,
+    exclude_query: str | None,
+    thread: str | None,
+    correlation: str | None,
+    trace: str | None,
+    service: str | None,
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
+    limit: int | None,
+    head_n: int | None,
+    tail_n: int | None,
     context: int,
-    fields: Optional[str],
+    fields: str | None,
     include_raw: bool,
     aggregate: bool,
-    max_bytes: Optional[int],
+    max_bytes: int | None,
     count_only: bool,
     offset: int,
     compact: bool,
@@ -281,7 +281,7 @@ def search(
 
             # --count-only: return just the count, no results
             if count_only:
-                output: Dict[str, Any] = {
+                output: dict[str, Any] = {
                     "total_matches": total_matches,
                     "files_searched": len(file_list),
                 }
@@ -295,7 +295,7 @@ def search(
                 entry = item.get("entry", {})
 
                 if compact:
-                    out_entry: Dict[str, Any] = {
+                    out_entry: dict[str, Any] = {
                         "ln": entry.get("line_number"),
                         "ts": entry.get("timestamp"),
                         "lv": entry.get("level"),
@@ -352,9 +352,9 @@ def search(
             has_more = (offset + len(output_results)) < total_matches
 
             # Build aggregations from ALL results (before offset) for metadata-only
-            agg_by_level: Dict[str, int] = defaultdict(int)
-            agg_by_thread: Dict[str, int] = defaultdict(int)
-            agg_by_service: Dict[str, int] = defaultdict(int)
+            agg_by_level: dict[str, int] = defaultdict(int)
+            agg_by_thread: dict[str, int] = defaultdict(int)
+            agg_by_service: dict[str, int] = defaultdict(int)
 
             if aggregate or metadata_only:
                 for item in results:
@@ -453,13 +453,13 @@ def search(
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes")
 def ids(
     files: tuple,
-    db_path: Optional[str],
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
+    db_path: str | None,
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
     id_type: str,
-    limit: Optional[int],
-    max_bytes: Optional[int],
+    limit: int | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """
@@ -531,15 +531,15 @@ def ids(
 @time_filter_options
 def sample(
     files: tuple,
-    db_path: Optional[str],
+    db_path: str | None,
     strategy: str,
     size: int,
-    level: Optional[str],
-    exclude_level: Optional[str],
-    service: Optional[str],
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
+    level: str | None,
+    exclude_level: str | None,
+    service: str | None,
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
     pretty: bool,
 ):
     """
@@ -635,12 +635,12 @@ def sample(
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes")
 def triage(
     files: tuple,
-    db_path: Optional[str],
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
-    service: Optional[str],
-    max_bytes: Optional[int],
+    db_path: str | None,
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
+    service: str | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """
@@ -742,13 +742,13 @@ def triage(
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
 def summarize(
     files: tuple,
-    db_path: Optional[str],
+    db_path: str | None,
     focus: str,
-    service: Optional[str],
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
-    max_bytes: Optional[int],
+    service: str | None,
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """
@@ -822,14 +822,13 @@ def summarize(
                                     "correlation_id": entry.correlation_id,
                                 }
                             )
-                    elif level_val in ["WARN", "WARNING"]:
-                        if len(warnings) < 5:
-                            warnings.append(
-                                {
-                                    "line": number,
-                                    "message": entry.message or line[:100],
-                                }
-                            )
+                    elif level_val in ["WARN", "WARNING"] and len(warnings) < 5:
+                        warnings.append(
+                            {
+                                "line": number,
+                                "message": entry.message or line[:100],
+                            }
+                        )
 
             except (FileNotFoundError, PermissionError):
                 pass
@@ -879,7 +878,7 @@ def summarize(
 @click.option("--files", "-f", multiple=True, help="Files to load (supports globs)")
 @db_source_option
 @click.option("--stdin", is_flag=True, help="Read SQL query from stdin")
-def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool, pretty: bool):
+def sql(query: str | None, files: tuple, db_path: str | None, stdin: bool, pretty: bool):
     """
     Execute SQL queries on log files using DuckDB.
 

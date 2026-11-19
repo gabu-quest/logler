@@ -4,21 +4,22 @@ Beautiful terminal output using Rich.
 
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import ClassVar
+
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
-from .log_reader import CompleteLines
 from ._search_core import level_name, level_text
-from .parser import LogParser, LogEntry, cut_newline
+from .log_reader import CompleteLines
+from .parser import LogEntry, LogParser, cut_newline
 
 
 class TerminalViewer:
     """Beautiful terminal log viewer with Rich."""
 
-    LEVEL_COLORS = {
+    LEVEL_COLORS: ClassVar[dict[str, str]] = {
         "TRACE": "bright_black",
         "DEBUG": "cyan",
         "INFO": "green",
@@ -38,27 +39,27 @@ class TerminalViewer:
     async def view_file(
         self,
         file_path: str,
-        lines: Optional[int] = None,
+        lines: int | None = None,
         follow: bool = False,
-        level_filter: Optional[str] = None,
-        pattern: Optional[str] = None,
-        thread_filter: Optional[str] = None,
+        level_filter: str | None = None,
+        pattern: str | None = None,
+        thread_filter: str | None = None,
     ):
         """View a log file with beautiful formatting."""
         path = Path(file_path)
 
-        if not path.exists():
+        if not path.exists():  # noqa: ASYNC240 - one stat call before the view starts
             self.console.print(f"[red]❌ File not found: {file_path}[/red]")
             return
 
         self.console.print(f"\n[bold cyan]📄 {path.name}[/bold cyan]")
-        self.console.print(f"[dim]{path.absolute()}[/dim]\n")
+        self.console.print(f"[dim]{path.absolute()}[/dim]\n")  # noqa: ASYNC240 - a cwd lookup, no file read
 
         parser = LogParser.for_file(file_path)
 
         # One handle and one reader serve the first read and the follow, so they share the
         # position. Only the follow waits for the newline of a last line still being written.
-        with open(file_path, "rb") as f:
+        with open(file_path, "rb") as f:  # noqa: ASYNC230 - the view reads in this task; moving it to a thread changes the order of output
             if f.read(3) != b"\xef\xbb\xbf":  # a byte-order mark is not part of line 1
                 f.seek(0)
             growing = CompleteLines(f)
@@ -90,9 +91,9 @@ class TerminalViewer:
     def _apply_filters(
         self,
         entries: list,
-        level_filter: Optional[str],
-        pattern: Optional[str],
-        thread_filter: Optional[str],
+        level_filter: str | None,
+        pattern: str | None,
+        thread_filter: str | None,
     ) -> list:
         """Apply filters to log entries."""
         filtered = entries
@@ -169,9 +170,9 @@ class TerminalViewer:
         growing: CompleteLines,
         line_number: int,
         initial_entries: list,
-        level_filter: Optional[str],
-        pattern: Optional[str],
-        thread_filter: Optional[str],
+        level_filter: str | None,
+        pattern: str | None,
+        thread_filter: str | None,
         parser: LogParser,
     ):
         """Follow log file in real-time, from the reader and line number the first read ended at."""

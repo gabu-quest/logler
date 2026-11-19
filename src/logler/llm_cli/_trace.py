@@ -1,22 +1,23 @@
 """Trace-related commands: correlate, hierarchy, bottleneck, context, export."""
 
-import click
 import sys
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
+
+import click
 
 from ._core import (
-    command,
-    EXIT_SUCCESS,
     EXIT_NO_RESULTS,
-    _output_json,
-    _error_json,
+    EXIT_SUCCESS,
     _apply_max_bytes,
+    _db_file_source,
+    _error_json,
+    _output_json,
     _resolve_time_bounds,
     _time_text_outside_bounds,
-    time_filter_options,
+    command,
     db_source_option,
-    _db_file_source,
+    time_filter_options,
 )
 
 
@@ -36,12 +37,12 @@ from ._core import (
 def correlate(
     identifier: str,
     files: tuple,
-    db_path: Optional[str],
+    db_path: str | None,
     id_type: str,
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
-    max_bytes: Optional[int],
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """
@@ -175,13 +176,13 @@ def correlate(
 def hierarchy(
     identifier: str,
     files: tuple,
-    db_path: Optional[str],
-    max_depth: Optional[int],
+    db_path: str | None,
+    max_depth: int | None,
     min_confidence: float,
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
-    max_bytes: Optional[int],
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """
@@ -228,13 +229,13 @@ def hierarchy(
 def bottleneck(
     identifier: str,
     files: tuple,
-    db_path: Optional[str],
+    db_path: str | None,
     threshold_ms: int,
     top_n: int,
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
-    max_bytes: Optional[int],
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """
@@ -267,10 +268,10 @@ def bottleneck(
         # Collect all nodes with durations
         nodes_with_duration = []
 
-        def collect_nodes(node: Dict[str, Any], path: List[str]):
+        def collect_nodes(node: dict[str, Any], path: list[str]):
             node_id = node.get("id", "unknown")
             duration = node.get("duration_ms", 0) or 0
-            current_path = path + [node_id]
+            current_path = [*path, node_id]
 
             if duration >= threshold_ms:
                 nodes_with_duration.append(
@@ -373,7 +374,7 @@ def context(file: str, line: int, before: int, after: int, pretty: bool):
     help="Export format",
 )
 def export_trace(
-    identifier: str, files: tuple, db_path: Optional[str], export_format: str, pretty: bool
+    identifier: str, files: tuple, db_path: str | None, export_format: str, pretty: bool
 ):
     """
     Export traces to Jaeger/Zipkin/OTLP format.
@@ -407,7 +408,7 @@ def export_trace(
         # Convert hierarchy to spans
         spans = []
 
-        def node_to_span(node: Dict[str, Any], parent_span_id: Optional[str] = None):
+        def node_to_span(node: dict[str, Any], parent_span_id: str | None = None):
             node_id = node.get("id", "unknown")
 
             # Generate span ID if not present
