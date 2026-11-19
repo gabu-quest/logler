@@ -39,8 +39,10 @@ All commands use consistent exit codes for automation:
 |------|---------|
 | 0 | Success with results |
 | 1 | Success but no results found |
-| 2 | User error (invalid args, file not found) |
+| 2 | User error (invalid arguments, a file that is missing or cannot be read, a line number the file has no entry for, a formats file that cannot be used) |
 | 3 | Internal error |
+
+`emit` writes a stream and has no code 1: when nothing matches it prints nothing and exits 0.
 
 ---
 
@@ -50,7 +52,7 @@ All commands use consistent exit codes for automation:
 
 **Quick severity assessment for incident response.**
 
-The first command to run when investigating an issue. Provides severity level, top issues, and suggested actions.
+The first command to run when investigating an issue. Provides a severity level, the error counts and suggested actions.
 
 ```bash
 logler llm triage app.log
@@ -72,26 +74,18 @@ logler llm triage app.log --pretty
   "assessment": {
     "severity": "high",
     "confidence": 0.9,
-    "summary": "Error rate: 12.3%, 5 issues detected"
+    "summary": "Error rate: 20.0%, 5 errors in 25 entries"
   },
   "metrics": {
-    "error_rate": 0.123,
-    "error_count": 45,
-    "total_entries": 366,
-    "log_levels": {"INFO": 280, "ERROR": 45, "WARN": 41}
+    "error_rate": 0.2,
+    "error_count": 5,
+    "total_entries": 25,
+    "log_levels": {"INFO": 14, "WARN": 6, "ERROR": 4, "FATAL": 1}
   },
-  "top_issues": [
-    {
-      "type": "error_spike",
-      "severity": "high",
-      "description": "Error rate exceeded 10%",
-      "count": 45
-    }
-  ],
   "suggested_actions": [
-    {"action": "investigate", "reason": "Check database connectivity"}
-  ],
-  "next_steps": ["logler llm search app.log --level ERROR --limit 10"]
+    {"action": "investigate", "reason": "High error rate detected - investigate most common errors"},
+    {"action": "search_errors", "reason": "Run: logler llm search --level ERROR to find error details"}
+  ]
 }
 ```
 
@@ -134,7 +128,7 @@ logler llm search app.log --after=-1h --before=-30m    # Relative time window
 - `--tail N` - Return last N entries by timestamp
 - `--offset N` - Skip first N results (for pagination, use with `--limit`)
 - `--count-only` - Return only match count, no results array
-- `--compact` - Use short field names (`ts`/`lv`/`msg`/`svc`/`th`/`cid`/`trc`)
+- `--compact` - Use short field names (`ln`/`ts`/`lv`/`msg`/`src`/`th`/`cid`/`trc`/`sid`/`svc`)
 - `--metadata-only` - Return aggregations only, no results array
 - `--fields LIST` - Comma-separated fields to include in output (e.g., `timestamp,level,message`)
 - `--context N` - Include N context lines around each match
@@ -377,42 +371,62 @@ logler llm hierarchy span-001 --min-confidence 0.8
 {
   "roots": [
     {
-      "id": "api-gateway",
-      "name": "HTTP POST /checkout",
-      "span_id": "span-001",
-      "depth": 0,
-      "duration_ms": 520,
-      "entry_count": 3,
-      "error_count": 0,
+      "id": "span-gw-1",
+      "node_type": "Span",
+      "name": "Incoming request: GET /api/v1/user/12345/orders",
+      "parent_id": null,
       "children": [
         {
-          "id": "auth-service",
-          "name": "ValidateToken",
+          "id": "span-user-1",
+          "node_type": "Span",
+          "name": "Received request for user 12345",
+          "parent_id": "span-gw-1",
+          "children": [],
+          "entry_ids": ["8469ba9f-6f26-489e-a1ce-68c1d77f4292"],
+          "start_time": "2024-01-15T10:00:00.120Z",
+          "end_time": "2024-01-15T10:00:00.120Z",
+          "duration_ms": 0,
+          "entry_count": 1,
+          "error_count": 0,
+          "level_counts": {"INFO": 1},
           "depth": 1,
-          "duration_ms": 45,
-          "children": []
-        },
-        {
-          "id": "product-service",
-          "name": "CheckInventory",
-          "depth": 1,
-          "duration_ms": 450,
-          "error_count": 1,
-          "children": []
+          "confidence": 1.0,
+          "relationship_evidence": ["explicit_parent_span_id"]
         }
-      ]
+      ],
+      "entry_ids": ["94ac72f9-4e2a-4356-bb34-df0286ab7bb1", "2bc4dc6b-14f2-4f3c-84c4-a43ab96d433a"],
+      "start_time": "2024-01-15T10:00:00.100Z",
+      "end_time": "2024-01-15T10:00:00.295Z",
+      "duration_ms": 195,
+      "entry_count": 2,
+      "error_count": 0,
+      "level_counts": {"INFO": 2},
+      "depth": 0,
+      "confidence": 0.8,
+      "relationship_evidence": ["naming_pattern", "temporal_proximity"]
     }
   ],
-  "total_duration_ms": 520,
-  "total_nodes": 5,
-  "max_depth": 2,
+  "total_nodes": 2,
+  "max_depth": 1,
+  "total_duration_ms": 195,
+  "concurrent_count": 1,
   "bottleneck": {
-    "node_id": "product-service",
-    "duration_ms": 450,
-    "percentage": 86.5
-  }
+    "node_id": "span-gw-1",
+    "node_name": "Incoming request: GET /api/v1/user/12345/orders",
+    "duration_ms": 195,
+    "percentage": 100.0,
+    "depth": 0
+  },
+  "error_nodes": [],
+  "detection_method": "Mixed",
+  "detection_methods": ["ExplicitParentId", "NamingPattern"]
 }
 ```
+
+The example is shortened to two nodes. `id` is the span ID (or the thread ID of a node that has
+no span). `entry_count`, `error_count` and `level_counts` count the node's own log lines, each
+line once. Sibling nodes come in order of start time. `entry_ids` are internal IDs that change
+from run to run.
 
 ---
 
@@ -634,16 +648,18 @@ echo "SELECT * FROM logs LIMIT 5" | logler llm sql --stdin -f app.log
 **Table Schema:**
 | Column | Type | Description |
 |--------|------|-------------|
+| `file` | VARCHAR | Source file path |
 | `line_number` | INTEGER | Line number in file |
-| `timestamp` | VARCHAR | ISO8601 timestamp |
+| `timestamp` | TIMESTAMP | Entry time (empty when the line has none) |
 | `level` | VARCHAR | Log level (INFO, ERROR, etc.) |
 | `message` | VARCHAR | Log message |
 | `thread_id` | VARCHAR | Thread identifier |
 | `correlation_id` | VARCHAR | Request correlation ID |
 | `trace_id` | VARCHAR | Distributed trace ID |
 | `span_id` | VARCHAR | Span ID |
-| `file` | VARCHAR | Source file path |
 | `raw` | VARCHAR | Raw log line |
+
+`logler llm sql "DESCRIBE logs" -f app.log` lists the columns of the build you have.
 
 **Output:**
 ```json
@@ -694,7 +710,7 @@ logler llm schema app.log --full
     "thread_id": {"present": 0.95, "patterns": ["worker-\\d+"]},
     "correlation_id": {"present": 0.85, "patterns": ["req-[a-z0-9]+"]}
   },
-  "detected_formats": {"json": 1.0},
+  "detected_formats": {"Json": 1.0},
   "custom_fields": ["component", "error_code", "user_id"],
   "time_range": {
     "earliest": "2024-01-15T00:00:00Z",
@@ -741,10 +757,7 @@ logler llm sample app.log --strategy head --size 20
   },
   "sample": {
     "size": 50,
-    "strategy": "errors_focused",
-    "coverage": {
-      "levels": {"ERROR": 30, "WARN": 15, "INFO": 5}
-    }
+    "strategy": "errors_focused"
   },
   "entries": [
     {
@@ -752,8 +765,7 @@ logler llm sample app.log --strategy head --size 20
       "timestamp": "2024-01-15T10:05:23Z",
       "level": "ERROR",
       "message": "Database timeout",
-      "thread_id": "worker-1",
-      "selection_reason": "error_entry"
+      "thread_id": "worker-1"
     }
   ]
 }
@@ -830,6 +842,9 @@ logler llm context app.log 1523 --before 20 --after 10
 - `--after/-A N` - Lines after (default: 10)
 - `--pretty` - Pretty-print JSON output
 
+A line number the file has no entry for (0, a negative number, past the end, an empty file)
+is exit code 2: `{"error": "app.log: no entry at line 9999", "code": 2}`.
+
 **Output:**
 ```json
 {
@@ -885,6 +900,8 @@ logler llm emit app.log --exclude-level DEBUG --exclude-query "health"
 ```json
 {"file":"app.log","line_number":1523,"timestamp":"2024-01-15T10:05:23Z","level":"ERROR","message":"Database timeout","thread_id":"worker-1"}
 ```
+
+When nothing matches, `emit` prints nothing and exits 0.
 
 ---
 

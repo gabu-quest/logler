@@ -75,9 +75,10 @@ sample = investigate.smart_sample(
 )
 ```
 
-Returns `{samples, total_population, strategy}`. The `errors_focused` strategy
-over-represents error entries relative to their population rate. All strategies
-return exactly `sample_size` entries.
+Returns `{samples, total_population, sample_size, strategy, coverage}`. The
+`errors_focused` strategy over-represents error entries relative to their population
+rate. Every strategy returns exactly `sample_size` entries, or every entry when the
+files hold fewer.
 
 ### [C08] Thread hierarchy
 
@@ -91,12 +92,16 @@ hierarchy = investigate.follow_thread_hierarchy(
 )
 # Automatic bottleneck detection
 if hierarchy.get('bottleneck'):
-    print(f"Bottleneck: {hierarchy['bottleneck']['node_id']} took {hierarchy['bottleneck']['duration_ms']}ms")
+    print(f"Bottleneck: {hierarchy['bottleneck']['node_id']} spent {hierarchy['bottleneck']['duration_ms']}ms of its own")
 ```
 
-Builds a span tree from `span_id`/`parent_span_id` fields. Returns
-`{roots, total_nodes, bottleneck}`. The bottleneck is the node consuming the most
-wall-clock time.
+Builds a span tree from `span_id`/`parent_span_id` fields, and from naming patterns
+and timing where those are missing. Returns `{roots, total_nodes, max_depth,
+total_duration_ms, concurrent_count, bottleneck, error_nodes, detection_method,
+detection_methods}`. The bottleneck is the node with the most self-time: its duration
+less the durations of its direct children. Its `duration_ms` and `percentage` are that
+self-time, not the node's whole duration. A node counts its own log lines, each once
+(`entry_count`, `error_count`, `level_counts`).
 
 ### [C09] Hierarchy summary
 
@@ -121,8 +126,10 @@ print_tree(hierarchy, mode="detailed", show_duration=True)
 print_waterfall(hierarchy, width=100)  # Waterfall timeline
 ```
 
-`print_tree()` renders an ASCII tree with the `THREAD HIERARCHY` header.
-`print_waterfall()` renders a timeline with duration bars in milliseconds.
+`print_tree()` prints a tree headed `Thread Hierarchy (N nodes, max depth: D, Xms)`.
+`format_tree(hierarchy, use_colors=False)` returns the same tree as plain text under a
+`THREAD HIERARCHY` banner. `print_waterfall()` renders a timeline with duration bars in
+milliseconds.
 
 ## Return Type Reference
 
@@ -131,11 +138,11 @@ All investigation functions return plain dicts with TypedDict definitions in
 
 | Function | Return keys |
 |----------|------------|
-| `search()` | `results`, `total_matches`, `query` |
+| `search()` | `results`, `total_matches`, `search_time_ms` |
 | `compare_threads()` | `summary`, `thread_a`, `thread_b`, `differences` |
-| `cross_service_timeline()` | `timeline`, `total_entries` |
-| `smart_sample()` | `samples`, `total_population`, `strategy` |
-| `follow_thread_hierarchy()` | `roots`, `total_nodes`, `bottleneck` |
+| `cross_service_timeline()` | `timeline`, `services`, `total_entries`, `duration_ms`, `service_breakdown` |
+| `smart_sample()` | `samples`, `total_population`, `sample_size`, `strategy`, `coverage` |
+| `follow_thread_hierarchy()` | `roots`, `total_nodes`, `max_depth`, `total_duration_ms`, `concurrent_count`, `bottleneck`, `error_nodes`, `detection_method`, `detection_methods` |
 | `get_hierarchy_summary()` | plain string |
 
 ## Additional APIs
@@ -146,7 +153,7 @@ These functions are part of the public API but not yet covered by contract tests
 |----------|---------|
 | `extract_ids()` | Find all thread/correlation/trace IDs in log files |
 | `follow_thread()` | Reconstruct a single thread's timeline |
-| `get_context()` | Get surrounding log lines for a specific entry |
+| `get_context()` | Get surrounding log lines for a specific entry; a line number the file has no entry for raises `ValueError` |
 | `find_patterns()` | Detect repeated log patterns with frequency |
 | `get_metadata()` | Extract metadata and field statistics |
 | `analyze_error_flow()` | Trace error propagation through the hierarchy |
