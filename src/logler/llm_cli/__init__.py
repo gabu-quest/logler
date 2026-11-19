@@ -26,8 +26,8 @@ from ._core import (
 )
 
 # Import submodules to register their commands on the `llm` Click group.
-# Each submodule uses `from ._core import llm` and decorates functions
-# with `@llm.command()` or `@llm.group()`.
+# Each submodule decorates its functions with `@command()` (from _core)
+# or registers a group with `@llm.group()`.
 from . import _search  # noqa: F401 — search, schema, ids, sample, triage, summarize, sql
 from . import _trace  # noqa: F401 — correlate, hierarchy, bottleneck, context, export
 from . import _compare  # noqa: F401 — compare, diff

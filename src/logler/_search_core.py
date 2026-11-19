@@ -21,6 +21,9 @@ from .cache import get_cached_investigator
 # Rust backend initialisation
 # ---------------------------------------------------------------------------
 
+# How to build the extension in a source checkout: the one spelling, quoted in every message.
+BUILD_HINT = "maturin develop --release -m crates/logler-py/Cargo.toml"
+
 try:
     import logler_rs
 
@@ -30,8 +33,7 @@ except ImportError as _exc:
     warnings.warn(
         f"logler's compiled extension (logler_rs) could not be imported: {_exc}. "
         "Search, hierarchy, comparison and sampling need it and will raise "
-        "RuntimeError. Reinstall logler; in a source checkout, build it with "
-        "`maturin develop --release -m crates/logler-py/Cargo.toml`.",
+        f"RuntimeError. Reinstall logler; in a source checkout, build it with `{BUILD_HINT}`.",
         stacklevel=2,
     )
 

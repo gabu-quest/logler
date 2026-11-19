@@ -6,14 +6,18 @@ and max-bytes truncation used across all command submodules.
 """
 
 import click
+import functools
 import json
 import os
 import sys
 import re
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set, Tuple
 from datetime import datetime, timedelta, timezone
+
+from .._search_core import _parse_levels, level_text
+from ..parser import _to_utc
 
 
 @click.group()
@@ -40,18 +44,66 @@ EXIT_USER_ERROR = 2  # Invalid arguments, file not found
 EXIT_INTERNAL_ERROR = 3  # Unexpected exception
 
 
-def _output_json(data: Dict[str, Any], pretty: bool = False) -> None:
-    """Output JSON to stdout."""
+def _output_json(data: Dict[str, Any], pretty: bool = False, err: bool = False) -> None:
+    """Output JSON to stdout (or to stderr, for a command whose stdout is its data stream)."""
     if pretty:
-        click.echo(json.dumps(data, indent=2, default=str))
+        click.echo(json.dumps(data, indent=2, default=str), err=err)
     else:
-        click.echo(json.dumps(data, default=str))
+        click.echo(json.dumps(data, default=str), err=err)
 
 
-def _error_json(message: str, code: int = EXIT_USER_ERROR) -> None:
+def _error_json(message: str, code: int = EXIT_USER_ERROR, err: bool = False) -> None:
     """Output error as JSON and exit."""
-    _output_json({"error": message, "code": code})
+    _output_json({"error": message, "code": code}, err=err)
     sys.exit(code)
+
+
+def command(
+    name: Optional[str] = None,
+    *,
+    group: Optional[click.Group] = None,
+    stream: bool = False,
+):
+    """Declare an llm command: the one owner of what every command shares.
+
+    Registers the function on ``group`` (default ``llm``) under ``name``, gives it the
+    ``--pretty`` option (passed to it as ``pretty``) and turns an exception it does not
+    handle into the JSON internal error with exit code 3. ``sys.exit`` passes through.
+    ``stream=True`` is for a command whose stdout is a stream of one JSON object per line:
+    it has no ``--pretty``, and that error goes to stderr.
+    """
+
+    def decorate(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                _error_json(f"Internal error: {e}", EXIT_INTERNAL_ERROR, err=stream)
+
+        if not stream:
+            wrapper = click.option("--pretty", is_flag=True, help="Pretty-print JSON output")(
+                wrapper
+            )
+        return (group or llm).command(name)(wrapper)
+
+    return decorate
+
+
+def _check_level_words(ctx, param, value):
+    """Click callback for an option that takes level words: a word that names no level is
+    the user's error. ``_parse_levels`` is the one reader of a list of level words."""
+    if value:
+        try:
+            _parse_levels(value)
+        except ValueError as e:
+            _error_json(str(e))
+    return value
+
+
+def _level_texts(value: Optional[str]) -> Optional[Set[str]]:
+    """The texts of an entry's level (``WARN``) that a comma list of level words names."""
+    return {level_text(name) for name in _parse_levels(value)} if value else None
 
 
 def _parse_duration(duration: str) -> timedelta:
@@ -179,6 +231,33 @@ def _resolve_time_filters(
     return (time_start, time_end)
 
 
+def _resolve_time_bounds(
+    last_duration: Optional[str], after: Optional[str], before: Optional[str]
+) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """The same bounds as aware datetimes, for a command that compares entry times itself."""
+    start, end = _resolve_time_filters(last_duration, after, before)
+    return (
+        datetime.fromisoformat(start) if start else None,
+        datetime.fromisoformat(end) if end else None,
+    )
+
+
+def _outside_bounds(ts: Optional[datetime], start: Optional[datetime], end: Optional[datetime]):
+    """Whether an entry's time lies outside the (inclusive) bounds.
+
+    An entry with no time is inside any bounds, as it is for the search engine: nothing
+    says it is too early or too late.
+    """
+    return ts is not None and ((start is not None and ts < start) or (end is not None and ts > end))
+
+
+def _time_text_outside_bounds(
+    ts: Optional[str], start: Optional[datetime], end: Optional[datetime]
+):
+    """``_outside_bounds`` for an engine entry, whose time is text."""
+    return _outside_bounds(_to_utc(ts), start, end)
+
+
 def _parse_time_arg(value: str, flag_name: str) -> str:
     """Parse a time argument, supporting both ISO8601 and relative durations.
 
@@ -198,7 +277,7 @@ def _parse_time_arg(value: str, flag_name: str) -> str:
         # Absolute ISO8601 timestamp. Without a zone it is UTC, as a log timestamp without
         # one is; every entry's time is zone-aware, so the bound must be too.
         try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value)
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=timezone.utc)
             return parsed.isoformat()

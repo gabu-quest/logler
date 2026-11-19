@@ -22,6 +22,7 @@ from .config import (
     TemporalRule,
     parse_duration,
 )
+from .parser import format_time
 from .safe_regex import try_compile
 
 
@@ -255,7 +256,7 @@ def _apply_temporal_rule(
                 "group": group_name,
                 "rule_type": "temporal",
                 "rule_index": rule_index,
-                "anchor_timestamp": anchor_ts.isoformat(),
+                "anchor_timestamp": format_time(anchor_ts),
                 "anchor_message": anchor_desc,
                 "window": rule.window,
                 "entry_count": len(cluster_entries),

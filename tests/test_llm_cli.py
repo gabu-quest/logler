@@ -983,3 +983,333 @@ class TestSqlCommandBatching:
             assert rows["INFO"] == 100
         finally:
             os.unlink(log_path)
+
+
+# ---------------------------------------------------------------------------
+# Time bounds, level words, the spelling of a time, and the shared command shell
+# ---------------------------------------------------------------------------
+
+from click.testing import CliRunner  # noqa: E402
+
+from logler.llm_cli import llm  # noqa: E402
+
+
+def invoke(args):
+    """Run an llm command in process: its exit code, stdout and stderr."""
+    result = CliRunner().invoke(llm, args)
+    return result.exit_code, result.stdout, result.stderr
+
+
+@pytest.fixture
+def three_hour_log(tmp_path):
+    """Three ERROR lines at 08:00, 10:00 and 12:00 on 2024-01-15 (lines 1, 2, 3)."""
+    path = tmp_path / "app.log"
+    path.write_text(
+        "2024-01-15 08:00:00 ERROR early\n"
+        "2024-01-15 10:00:00 ERROR middle\n"
+        "2024-01-15 12:00:00 ERROR late\n"
+    )
+    return str(path)
+
+
+@pytest.fixture
+def three_hour_correlated_log(tmp_path):
+    """The same three lines, each carrying correlation_id=req-1."""
+    path = tmp_path / "corr.log"
+    path.write_text(
+        "2024-01-15T08:00:00Z ERROR [w-1] correlation_id=req-1 early\n"
+        "2024-01-15T10:00:00Z ERROR [w-1] correlation_id=req-1 middle\n"
+        "2024-01-15T12:00:00Z ERROR [w-1] correlation_id=req-1 late\n"
+    )
+    return str(path)
+
+
+def _lines_summarize(stdout):
+    return [e["line"] for e in json.loads(stdout)["errors"]]
+
+
+def _lines_emit(stdout):
+    return [json.loads(line)["line_number"] for line in stdout.splitlines()]
+
+
+def _lines_sample(stdout):
+    return [e["line_number"] for e in json.loads(stdout)["entries"]]
+
+
+def _lines_correlate(stdout):
+    return [e["line_number"] for e in json.loads(stdout)["timeline"]]
+
+
+# (flag, bound, line numbers kept): a bound is inclusive; one without a zone is UTC.
+TIME_BOUND_CASES = [
+    ("--after", "2024-01-15T09:00:00Z", [2, 3]),
+    ("--before", "2024-01-15T09:00:00Z", [1]),
+    ("--after", "2024-01-15T09:00:00", [2, 3]),
+    ("--before", "2024-01-15T09:00:00", [1]),
+    ("--after", "2024-01-15T10:00:00Z", [2, 3]),
+    ("--before", "2024-01-15T10:00:00Z", [1, 2]),
+    ("--after", "2024-01-14T00:00:00Z", [1, 2, 3]),
+    ("--before", "2024-01-14T00:00:00Z", []),
+    ("--after", "2024-01-16T00:00:00Z", []),
+    ("--before", "2024-01-16T00:00:00Z", [1, 2, 3]),
+]
+
+
+class TestTimeBoundsCompareTimes:
+    """A bound on a line-reading command is compared as a time, not as text."""
+
+    @pytest.mark.parametrize("flag,bound,expected", TIME_BOUND_CASES)
+    def test_summarize(self, three_hour_log, flag, bound, expected):
+        code, stdout, _ = invoke(["summarize", three_hour_log, flag, bound])
+        assert _lines_summarize(stdout) == expected
+        assert json.loads(stdout)["stats"]["total_entries"] == len(expected)
+        assert code == (0 if expected else 1)
+
+    @pytest.mark.parametrize("flag,bound,expected", TIME_BOUND_CASES)
+    def test_emit(self, three_hour_log, flag, bound, expected):
+        _, stdout, _ = invoke(["emit", three_hour_log, flag, bound])
+        assert _lines_emit(stdout) == expected
+
+    @pytest.mark.parametrize("flag,bound,expected", TIME_BOUND_CASES)
+    def test_sample(self, three_hour_log, flag, bound, expected):
+        _, stdout, _ = invoke(
+            ["sample", three_hour_log, "--strategy", "head", "--size", "10", flag, bound]
+        )
+        assert _lines_sample(stdout) == expected
+
+    @pytest.mark.parametrize("flag,bound,expected", TIME_BOUND_CASES)
+    def test_correlate(self, three_hour_correlated_log, flag, bound, expected):
+        _, stdout, _ = invoke(["correlate", "req-1", "-f", three_hour_correlated_log, flag, bound])
+        assert _lines_correlate(stdout) == expected
+
+    def test_a_line_in_another_zone_is_placed_by_its_instant(self, tmp_path):
+        path = tmp_path / "zones.log"
+        path.write_text(
+            "2024-01-15T11:30:00+02:00 ERROR half past nine in UTC\n"
+            "2024-01-15T10:00:00Z ERROR ten in UTC\n"
+        )
+        _, stdout, _ = invoke(["summarize", str(path), "--after", "2024-01-15T09:45:00Z"])
+        assert _lines_summarize(stdout) == [2]
+
+    def test_diff_reads_a_bound_without_a_zone_as_utc(self, three_hour_log):
+        code, stdout, _ = invoke(
+            [
+                "diff",
+                three_hour_log,
+                "--before-start",
+                "2024-01-15T07:00:00",
+                "--before-end",
+                "2024-01-15T09:00:00",
+                "--after-start",
+                "2024-01-15T09:30:00",
+                "--after-end",
+                "2024-01-15T13:00:00",
+            ]
+        )
+        assert code == 0
+        comparison = json.loads(stdout)["comparison"]
+        assert (comparison["before"]["total"], comparison["after"]["total"]) == (1, 2)
+        assert (comparison["before"]["start"], comparison["after"]["end"]) == (
+            "2024-01-15T07:00:00Z",
+            "2024-01-15T13:00:00Z",
+        )
+
+    @pytest.fixture
+    def log_with_an_untimed_line(self, tmp_path):
+        """08:00, 10:00 and 12:00, then a line with a level and no time (line 4)."""
+        path = tmp_path / "untimed.log"
+        path.write_text(
+            "2024-01-15T08:00:00Z ERROR [w-1] correlation_id=req-1 early\n"
+            "2024-01-15T10:00:00Z ERROR [w-1] correlation_id=req-1 middle\n"
+            "2024-01-15T12:00:00Z ERROR [w-1] correlation_id=req-1 late\n"
+            "ERROR [w-1] correlation_id=req-1 no time on this line\n"
+        )
+        return str(path)
+
+    @pytest.mark.parametrize(
+        "args,lines",
+        [
+            (
+                ["search", "{f}", "--compact"],
+                lambda out: sorted(r["ln"] for r in json.loads(out)["results"]),
+            ),
+            (["summarize", "{f}"], _lines_summarize),
+            (["emit", "{f}"], _lines_emit),
+            (["sample", "{f}", "--strategy", "head", "--size", "10"], _lines_sample),
+            (["correlate", "req-1", "-f", "{f}"], lambda out: sorted(_lines_correlate(out))),
+        ],
+        ids=["search", "summarize", "emit", "sample", "correlate"],
+    )
+    def test_a_line_with_no_time_is_kept_under_a_bound_as_search_keeps_it(
+        self, log_with_an_untimed_line, args, lines
+    ):
+        args = [a.replace("{f}", log_with_an_untimed_line) for a in args]
+        _, stdout, _ = invoke(args + ["--after", "2024-01-15T09:00:00Z"])
+        assert lines(stdout) == [2, 3, 4]
+
+
+class TestLevelWords:
+    """A level word names a level, or it is the user's error; every command reads it alike."""
+
+    LEVEL_COMMANDS = [
+        ["search", "{f}", "--level", "bogus"],
+        ["search", "{f}", "--exclude-level", "bogus"],
+        ["sample", "{f}", "--level", "bogus"],
+        ["sample", "{f}", "--exclude-level", "bogus"],
+        ["emit", "{f}", "--level", "bogus"],
+        ["emit", "{f}", "--exclude-level", "bogus"],
+        ["session", "query", "no-such-session", "--level", "bogus"],
+        ["correlate-events", "{f}", "--trigger-level", "bogus"],
+    ]
+
+    @pytest.mark.parametrize("args", LEVEL_COMMANDS)
+    def test_unknown_word_is_exit_2_with_json_error(self, three_hour_log, args):
+        code, stdout, _ = invoke([a.replace("{f}", three_hour_log) for a in args])
+        assert code == 2
+        assert json.loads(stdout) == {"error": "Unknown log level: bogus", "code": 2}
+
+    @pytest.fixture
+    def three_level_log(self, tmp_path):
+        path = tmp_path / "levels.log"
+        path.write_text(
+            "2024-01-15 10:00:00 INFO fine\n"
+            "2024-01-15 10:00:01 WARN careful\n"
+            "2024-01-15 10:00:02 ERROR broken\n"
+        )
+        return str(path)
+
+    @pytest.mark.parametrize("word", ["warning", "WARN", "warn"])
+    def test_sample_exclude_level_reads_every_spelling_alike(self, three_level_log, word):
+        _, stdout, _ = invoke(["sample", three_level_log, "--exclude-level", word, "--size", "10"])
+        assert sorted(e["level"] for e in json.loads(stdout)["entries"]) == ["ERROR", "INFO"]
+
+    @pytest.mark.parametrize("word", ["warning", "WARN", "warn"])
+    def test_emit_exclude_level_reads_every_spelling_alike(self, three_level_log, word):
+        _, stdout, _ = invoke(["emit", three_level_log, "--exclude-level", word])
+        assert [json.loads(line)["level"] for line in stdout.splitlines()] == ["INFO", "ERROR"]
+
+
+class TestOneSpellingOfATime:
+    """Every entry time in every command's JSON is what `search` prints for the line."""
+
+    @pytest.fixture
+    def precision_log(self, tmp_path):
+        """A whole-second, a millisecond and a microsecond time (lines 1, 2, 3)."""
+        path = tmp_path / "precision.log"
+        path.write_text(
+            "2024-01-15 10:00:00 INFO whole\n"
+            "2024-01-15 10:00:00.123 INFO millis\n"
+            "2024-01-15 10:00:00.123456 INFO micros\n"
+        )
+        return str(path)
+
+    def _search_times(self, path):
+        _, stdout, _ = invoke(["search", path, "--compact"])
+        return {e["ln"]: e["ts"] for e in json.loads(stdout)["results"]}
+
+    def test_search_spelling_is_the_reference(self, precision_log):
+        assert self._search_times(precision_log) == {
+            1: "2024-01-15T10:00:00Z",
+            2: "2024-01-15T10:00:00.123Z",
+            3: "2024-01-15T10:00:00.123456Z",
+        }
+
+    def test_emit_matches_search(self, precision_log):
+        _, stdout, _ = invoke(["emit", precision_log])
+        got = {e["line_number"]: e["timestamp"] for e in map(json.loads, stdout.splitlines())}
+        assert got == self._search_times(precision_log)
+
+    def test_emit_compact_matches_search(self, precision_log):
+        _, stdout, _ = invoke(["emit", precision_log, "--compact"])
+        got = {e["ln"]: e["ts"] for e in map(json.loads, stdout.splitlines())}
+        assert got == self._search_times(precision_log)
+
+    def test_summarize_time_range_is_first_and_last_in_that_spelling(self, precision_log):
+        _, stdout, _ = invoke(["summarize", precision_log])
+        assert json.loads(stdout)["stats"]["time_range"] == {
+            "start": "2024-01-15T10:00:00Z",
+            "end": "2024-01-15T10:00:00.123456Z",
+        }
+
+    def test_schema_time_range_is_in_that_spelling(self, precision_log):
+        _, stdout, _ = invoke(["schema", precision_log])
+        assert json.loads(stdout)["time_range"] == {
+            "earliest": "2024-01-15T10:00:00Z",
+            "latest": "2024-01-15T10:00:00.123456Z",
+        }
+
+    def test_verify_pattern_first_and_last_match_are_in_that_spelling(self, precision_log):
+        _, stdout, _ = invoke(["verify-pattern", precision_log, "--pattern", "INFO"])
+        stats = json.loads(stdout)["statistics"]
+        assert (stats["first_match"], stats["last_match"]) == (
+            "2024-01-15T10:00:00Z",
+            "2024-01-15T10:00:00.123456Z",
+        )
+
+    def test_correlate_events_anchor_time_is_in_that_spelling(self, tmp_path):
+        path = tmp_path / "events.log"
+        path.write_text(
+            "2024-01-15T10:00:14Z INFO motor slowing\n"
+            "2024-01-15T10:00:15Z ERROR motor stalled\n"
+            "2024-01-15T10:00:16Z INFO motor restarting\n"
+        )
+        _, stdout, _ = invoke(
+            ["correlate-events", "-f", str(path), "--trigger-level", "ERROR", "--window", "3s"]
+        )
+        assert [c["anchor_timestamp"] for c in json.loads(stdout)["clusters"]] == [
+            "2024-01-15T10:00:15Z"
+        ]
+
+
+class TestCommandShell:
+    """Every llm command takes --pretty and reports an uncaught exception the same way."""
+
+    @staticmethod
+    def _commands(group, prefix=()):
+        import click
+
+        for name, cmd in sorted(group.commands.items()):
+            if isinstance(cmd, click.Group):
+                yield from TestCommandShell._commands(cmd, prefix + (name,))
+            else:
+                yield prefix + (name,), cmd
+
+    def test_every_command_has_pretty_but_the_one_that_streams_lines(self):
+        commands = list(self._commands(llm))
+        assert len(commands) == 30
+        without = [
+            " ".join(path)
+            for path, cmd in commands
+            if not any("--pretty" in p.opts for p in cmd.params)
+        ]
+        assert without == ["emit"]
+
+    @pytest.mark.parametrize(
+        "args,target,stream",
+        [
+            (["summarize", "{f}"], "logler.parser.LogParser.for_file", "stdout"),
+            (["compare", "a", "b", "-f", "{f}"], "logler.investigate.follow_thread", "stdout"),
+            (["emit", "{f}"], "logler.parser.LogParser.for_file", "stderr"),
+        ],
+    )
+    def test_uncaught_exception_is_the_json_internal_error(
+        self, monkeypatch, three_hour_log, args, target, stream
+    ):
+        module, _, attr = target.rpartition(".")
+        if module == "logler.parser.LogParser":
+            from logler.parser import LogParser as owner
+
+            monkeypatch.setattr(owner, "for_file", classmethod(_boom))
+        else:
+            import logler.investigate as owner
+
+            monkeypatch.setattr(owner, attr, _boom)
+        code, stdout, stderr = invoke([a.replace("{f}", three_hour_log) for a in args])
+        assert code == 3
+        text = {"stdout": stdout, "stderr": stderr}[stream]
+        assert json.loads(text) == {"error": "Internal error: boom", "code": 3}
+        assert {"stdout": stderr, "stderr": stdout}[stream] == ""
+
+
+def _boom(*args, **kwargs):
+    raise RuntimeError("boom")

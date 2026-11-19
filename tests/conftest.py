@@ -37,9 +37,11 @@ def pytest_sessionstart(session):
     try:
         import logler_rs  # noqa: F401
     except Exception as exc:
+        from logler._search_core import BUILD_HINT
+
         pytest.exit(
             f"logler_rs (the compiled extension) cannot be imported: {exc!r}. "
-            "Build it first: maturin develop --release -m crates/logler-py/Cargo.toml",
+            f"Build it first: {BUILD_HINT}",
             returncode=3,
         )
 

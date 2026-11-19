@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from logler._search_core import BUILD_HINT
+
 ROOT = Path(__file__).resolve().parent.parent
 
 RUNNER = (
@@ -26,6 +28,6 @@ def test_session_exits_with_build_command_when_extension_missing():
     output = result.stdout + result.stderr
     assert result.returncode == 3, output
     assert "logler_rs (the compiled extension) cannot be imported" in output
-    assert "maturin develop --release -m crates/logler-py/Cargo.toml" in output
+    assert BUILD_HINT in output
     assert "passed" not in output
     assert "skipped" not in output

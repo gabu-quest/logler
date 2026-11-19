@@ -53,6 +53,18 @@ def _to_utc(ts: Optional[str]) -> Optional[datetime]:
     return None
 
 
+def format_time(ts: datetime) -> str:
+    """An entry's time as text, the way the search engine writes it: UTC, a ``Z`` for the
+    zone, and the fraction as 3 digits for milliseconds or 6 for microseconds, none for a
+    whole second (``2024-01-15T10:00:00Z``, ``...00.123Z``, ``...00.123456Z``).
+
+    The one function that spells an entry's time; ``ts`` is an aware datetime.
+    """
+    micro = ts.microsecond
+    spec = "seconds" if micro == 0 else "milliseconds" if micro % 1000 == 0 else "microseconds"
+    return ts.astimezone(timezone.utc).isoformat(timespec=spec).removesuffix("+00:00") + "Z"
+
+
 class LogParser:
     """Parse single log lines with the Rust parser."""
 

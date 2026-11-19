@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from logler._search_core import BUILD_HINT
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -56,5 +58,5 @@ def test_missing_extension_warns_truthfully_and_builds_nothing(tmp_path):
     assert "AVAILABLE False" in result.stdout
     assert not marker.exists()
     assert "stub" in result.stderr
-    assert "maturin develop --release -m crates/logler-py/Cargo.toml" in result.stderr
+    assert BUILD_HINT in result.stderr
     assert "fallback" not in result.stderr.lower()
