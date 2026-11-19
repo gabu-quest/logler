@@ -25,20 +25,15 @@ try:
     import logler_rs
 
     RUST_AVAILABLE = True
-except ImportError:
-    try:
-        from .bootstrap import ensure_rust_backend
-
-        if ensure_rust_backend():
-            import logler_rs  # type: ignore
-
-            RUST_AVAILABLE = True
-        else:
-            RUST_AVAILABLE = False
-            warnings.warn("Rust backend not available. Using Python fallback.", stacklevel=2)
-    except (ImportError, AttributeError, OSError):
-        RUST_AVAILABLE = False
-        warnings.warn("Rust backend not available. Using Python fallback.", stacklevel=2)
+except ImportError as _exc:
+    RUST_AVAILABLE = False
+    warnings.warn(
+        f"logler's compiled extension (logler_rs) could not be imported: {_exc}. "
+        "Search, hierarchy, comparison and sampling need it and will raise "
+        "RuntimeError. Reinstall logler; in a source checkout, build it with "
+        "`maturin develop --release -m crates/logler-py/Cargo.toml`.",
+        stacklevel=2,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -46,7 +46,6 @@ src/logler/cli.py            — Human CLI (view, stats, investigate)
 | `helpers.py` | Shared utilities |
 | `watcher.py` | File watcher (watchdog) |
 | `terminal.py` | Rich terminal rendering |
-| `bootstrap.py` | Package initialization |
 
 ### LLM CLI Package (`llm_cli/`)
 

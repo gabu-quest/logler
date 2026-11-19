@@ -570,6 +570,9 @@ def detect_correlation_chains(
         >>> for c in chains["chains"]:
         ...     print(f"{c['parent_correlation_id']} -> {c['child_correlation_id']}")
     """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
     # Default patterns to detect correlation chaining
     default_patterns = [
         # Explicit field patterns
@@ -589,23 +592,10 @@ def detect_correlation_chains(
     compiled_patterns = [re.compile(p) for p in patterns]
 
     # Read and parse logs using the proper search API (cached investigator)
-    entries = []
-    if RUST_AVAILABLE:
-        from ._search_core import search as _search
+    from ._search_core import search as _search
 
-        result = _search(files, limit=10000)
-        entries = [r["entry"] for r in result.get("results", [])]
-    else:
-        # Fallback to Python parsing
-        from .parser import LogParser
-
-        parser = LogParser()
-        for file_path in files:
-            with open(file_path, "r") as f:
-                for line in f:
-                    entry = parser.parse_line(line)
-                    if entry:
-                        entries.append(entry.__dict__ if hasattr(entry, "__dict__") else entry)
+    result = _search(files, limit=10000)
+    entries = [r["entry"] for r in result.get("results", [])]
 
     # Detect chains
     chains = []
@@ -814,7 +804,9 @@ def analyze_bottlenecks(
 
     Args:
         hierarchy: Hierarchy from :func:`follow_thread_hierarchy`.
-        threshold_percentage: Minimum % of total time to be considered significant.
+        threshold_percentage: Minimum % of total time for a node to be listed in
+            ``secondary_bottlenecks``. The primary bottleneck is the hierarchy's own
+            ``bottleneck`` and is reported whatever its share.
 
     Returns:
         BottleneckAnalysis dict with shape::
