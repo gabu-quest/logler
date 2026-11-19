@@ -113,8 +113,8 @@ uv sync --extra dev
 Lint and format with ruff (pinned in the `dev` extra and in `.pre-commit-config.yaml`):
 
 ```bash
-uv run ruff check src tests benchmarks
-uv run ruff format --check src tests benchmarks
+uv run ruff check
+uv run ruff format --check
 ```
 
 ### Stale .so gotcha

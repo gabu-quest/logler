@@ -79,14 +79,22 @@ ignore = [
     # the test data.
     "E501",
 ]
-# The multiplication sign in comments and docstrings, and the information-source emoji
-# in the status icons, are meant.
-allowed-confusables = ["×", "ℹ"]
+# The multiplication sign in comments and docstrings, and the information-source, plus and
+# minus emoji in printed status lines, are meant.
+allowed-confusables = ["×", "ℹ", "➕", "➖"]
 
 [tool.ruff.lint.per-file-ignores]
 # Test and benchmark names say what they check, in the words of the thing checked.
 "tests/**/*" = ["N"]
 "benchmarks/**/*" = ["N"]
+# The tours are marimo notebooks, written by its editor: a cell's arguments are the names
+# other cells define, imports live inside cells, and a fix that adds a module-level import
+# puts it outside every cell.
+"examples/tours/*.py" = ["I", "N", "UP017"]
+
+[tool.ruff.format]
+# The examples in the docs keep one argument per line where that reads better.
+exclude = ["*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -14,14 +14,14 @@ then runs logler's investigation engine to show:
 import json
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Generate sample log data
 # ---------------------------------------------------------------------------
 
-BASE = datetime(2024, 6, 15, 14, 30, 0, tzinfo=timezone.utc)
+BASE = datetime(2024, 6, 15, 14, 30, 0, tzinfo=UTC)
 
 
 def entry(offset_ms, level, message, thread_id, cid=None, tid=None, sid=None, psid=None, svc=None):

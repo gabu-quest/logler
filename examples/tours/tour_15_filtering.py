@@ -65,7 +65,8 @@ def _():
     _levels = ["INFO", "DEBUG", "WARN", "ERROR"]
     _threads = ["worker-0", "worker-1", "worker-2", "worker-3"]
 
-    _f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")
+    # The file must outlive this cell (delete=False); it is flushed below.
+    _f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")  # noqa: SIM115
     for _i in range(200):
         _mm = _i // 60
         _ss = _i % 60

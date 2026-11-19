@@ -79,7 +79,7 @@ def _(Path, datetime, json, temp_dir, timedelta, timezone):
         for _i in range(30):
             _f.write(
                 f"Jan 15 10:{_i // 60:02d}:{_i % 60:02d} web-prod-01 "
-                f"nginx[{1000+_i}]: GET /api/endpoint-{_i} 200\n"
+                f"nginx[{1000 + _i}]: GET /api/endpoint-{_i} 200\n"
             )
 
     # Logfmt file
