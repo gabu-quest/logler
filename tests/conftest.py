@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import importlib
 import json
-import shutil
-import subprocess
 import sys
+import sysconfig
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -22,63 +20,41 @@ SRC = ROOT / "src"
 if SRC.exists():
     sys.path.insert(0, str(SRC))
 
+# The one owner of "which python" and "which logler" for every subprocess test:
+# the interpreter running pytest, and the console script installed beside it.
+PYTHON = sys.executable
+LOGLER = str(
+    Path(sysconfig.get_path("scripts")) / ("logler.exe" if sys.platform == "win32" else "logler")
+)
 
-@dataclass
-class RustBackendStatus:
-    ready: bool
-    skip_reason: str | None = None
-    error: str | None = None
 
+def pytest_sessionstart(session):
+    """Stop the whole session when the compiled extension cannot be imported.
 
-def _attempt_import_logler_rs() -> tuple[bool, Exception | None]:
+    Tests never build it and never skip for its absence: a green run without
+    the extension would prove nothing.
+    """
     try:
         import logler_rs  # noqa: F401
-
-        return True, None
-    except Exception as exc:  # pragma: no cover - only hit when Rust missing
-        return False, exc
-
-
-def _ensure_rust_backend() -> RustBackendStatus:
-    imported, import_err = _attempt_import_logler_rs()
-    if imported:
-        return RustBackendStatus(ready=True)
-
-    maturin = shutil.which("maturin")
-    cargo = shutil.which("cargo")
-    missing = [name for name, path in (("maturin", maturin), ("cargo", cargo)) if not path]
-    if missing:
-        reason = f"Rust toolchain missing ({', '.join(missing)}); cannot build logler_rs"
-        return RustBackendStatus(ready=False, skip_reason=reason, error=str(import_err))
-
-    cmd = [
-        maturin,
-        "develop",
-        "--release",
-        "-m",
-        str(ROOT / "crates" / "logler-py" / "Cargo.toml"),
-        "--features",
-        "sql",
-    ]
-    proc = subprocess.run(cmd, cwd=ROOT, check=False, capture_output=True, text=True)
-    if proc.returncode != 0:
-        return RustBackendStatus(
-            ready=False,
-            error=f"maturin develop failed ({proc.returncode}): {(proc.stderr or proc.stdout).strip()}",
+    except Exception as exc:
+        pytest.exit(
+            f"logler_rs (the compiled extension) cannot be imported: {exc!r}. "
+            "Build it first: maturin develop --release -m crates/logler-py/Cargo.toml",
+            returncode=3,
         )
 
-    imported, post_build_err = _attempt_import_logler_rs()
-    if imported:
-        return RustBackendStatus(ready=True)
 
-    return RustBackendStatus(
-        ready=False,
-        error=f"logler_rs import failed after build: {post_build_err}",
-    )
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    """Give every test a home folder of its own.
 
-
-RUST_BACKEND_STATUS = _ensure_rust_backend()
-RUST_READY = RUST_BACKEND_STATUS.ready
+    Both this process and every child process see it, so nothing a test runs
+    can read or write the real ``~/.logler``.
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
 
 
 @pytest.fixture(autouse=True)
@@ -100,12 +76,6 @@ def _clear_investigator_cache():
 
 @pytest.fixture(scope="session")
 def rust_backend():
-    status = RUST_BACKEND_STATUS
-    if status.skip_reason:
-        pytest.skip(status.skip_reason)
-    if not status.ready:
-        pytest.fail(status.error or "Rust backend missing even though maturin is available")
-
     import logler_rs
 
     return logler_rs

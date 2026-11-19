@@ -14,6 +14,8 @@ import tempfile
 import pytest
 from pathlib import Path
 
+from tests.conftest import PYTHON
+
 try:
     from logler.investigate import extract_ids, RUST_AVAILABLE
 except ImportError as e:
@@ -119,7 +121,7 @@ class TestIdsCLI:
         import subprocess
 
         result = subprocess.run(
-            ["python", "-m", "logler.cli", "llm", "ids", ids_log_file],
+            [PYTHON, "-m", "logler.cli", "llm", "ids", ids_log_file],
             capture_output=True,
             text=True,
             timeout=60,

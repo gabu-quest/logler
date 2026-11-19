@@ -23,6 +23,8 @@ import tempfile
 import pytest
 from pathlib import Path
 
+from tests.conftest import PYTHON
+
 # Exit codes (match llm_cli.py)
 EXIT_SUCCESS = 0
 EXIT_NO_RESULTS = 1
@@ -39,7 +41,7 @@ BYTES_PER_TOKEN = 4
 
 def run_llm_command(args, timeout=120):
     """Run a logler llm command and return result."""
-    cmd = ["python", "-m", "logler.cli", "llm"] + args
+    cmd = [PYTHON, "-m", "logler.cli", "llm"] + args
     result = subprocess.run(
         cmd,
         capture_output=True,

@@ -125,28 +125,32 @@ class TestAnalyzeBottlenecks:
     """Test analyze_bottlenecks function with exact thresholds."""
 
     def test_identifies_child_slow_as_bottleneck(self, deterministic_hierarchy):
-        """analyze_bottlenecks should identify child-slow."""
+        """At a 20% threshold the primary bottleneck is child-slow: 800 ms of 1000 ms."""
         result = analyze_bottlenecks(deterministic_hierarchy, threshold_percentage=20.0)
 
-        # Should identify at least one bottleneck
-        bottlenecks = result.get("bottlenecks", result.get("analysis", {}).get("bottlenecks", []))
-        primary = result.get("primary_bottleneck")
+        assert result["primary_bottleneck"] == {
+            "node_id": "child-slow",
+            "duration_ms": 800,
+            "percentage": 80.0,
+            "depth": 1,
+        }
 
-        # Either in bottlenecks list or as primary
-        if primary:
-            assert "slow" in str(primary).lower() or primary.get("node_id") == "child-slow"
-        elif bottlenecks:
-            bottleneck_ids = [b.get("node_id", str(b)) for b in bottlenecks]
-            assert "child-slow" in bottleneck_ids or any(
-                "slow" in str(b).lower() for b in bottlenecks
-            )
+    def test_threshold_filters_the_secondary_list_not_the_primary(self, deterministic_hierarchy):
+        """At a 90% threshold the primary is still child-slow and the secondary list is empty.
 
-    def test_high_threshold_filters_minor_nodes(self, deterministic_hierarchy):
-        """90% threshold should still identify child-slow (80%)."""
+        The primary is the hierarchy's own bottleneck, which has no minimum share. The
+        threshold filters the secondary list, which is drawn from the nodes ranked second
+        to fifth by duration (800, 150 and 50 ms here); none of them reaches 90%.
+        """
         result = analyze_bottlenecks(deterministic_hierarchy, threshold_percentage=90.0)
 
-        # With 90% threshold, child-slow (80%) should NOT qualify as a bottleneck
-        assert "bottlenecks" in result or "analysis" in result or "primary_bottleneck" in result
+        assert result["primary_bottleneck"] == {
+            "node_id": "child-slow",
+            "duration_ms": 800,
+            "percentage": 80.0,
+            "depth": 1,
+        }
+        assert result["secondary_bottlenecks"] == []
 
 
 class TestHierarchyNodeCounts:

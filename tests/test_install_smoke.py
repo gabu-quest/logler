@@ -7,6 +7,8 @@ Run with: pytest tests/test_install_smoke.py -v
 import subprocess
 from pathlib import Path
 
+from tests.conftest import LOGLER, PYTHON
+
 
 EXAMPLE_LOGS = Path(__file__).parent.parent / "examples" / "logs"
 
@@ -16,7 +18,7 @@ class TestCLICommands:
 
     def test_version(self):
         result = subprocess.run(
-            ["logler", "--version"],
+            [LOGLER, "--version"],
             capture_output=True,
             text=True,
         )
@@ -25,7 +27,7 @@ class TestCLICommands:
 
     def test_help(self):
         result = subprocess.run(
-            ["logler", "--help"],
+            [LOGLER, "--help"],
             capture_output=True,
             text=True,
         )
@@ -34,7 +36,7 @@ class TestCLICommands:
 
     def test_llm_help(self):
         result = subprocess.run(
-            ["logler", "llm", "--help"],
+            [LOGLER, "llm", "--help"],
             capture_output=True,
             text=True,
         )
@@ -48,7 +50,7 @@ class TestLLMCommands:
     def test_llm_schema(self):
         log_file = EXAMPLE_LOGS / "interleave" / "api.log"
         result = subprocess.run(
-            ["logler", "llm", "schema", str(log_file)],
+            [LOGLER, "llm", "schema", str(log_file)],
             capture_output=True,
             text=True,
         )
@@ -62,7 +64,7 @@ class TestLLMCommands:
     def test_llm_emit(self):
         log_file = EXAMPLE_LOGS / "interleave" / "api.log"
         result = subprocess.run(
-            ["logler", "llm", "emit", str(log_file)],
+            [LOGLER, "llm", "emit", str(log_file)],
             capture_output=True,
             text=True,
         )
@@ -78,7 +80,7 @@ class TestLLMCommands:
     def test_llm_search(self):
         log_file = EXAMPLE_LOGS / "interleave" / "api.log"
         result = subprocess.run(
-            ["logler", "llm", "search", str(log_file), "--query", "api"],
+            [LOGLER, "llm", "search", str(log_file), "--query", "api"],
             capture_output=True,
             text=True,
         )
@@ -96,7 +98,7 @@ class TestRustBackend:
 
     def test_rust_available(self):
         result = subprocess.run(
-            ["python", "-c", "import logler_rs; print('OK')"],
+            [PYTHON, "-c", "import logler_rs; print('OK')"],
             capture_output=True,
             text=True,
         )
@@ -119,7 +121,7 @@ result = json.loads(inv.search(json.dumps(query)))
 print(len(result.get('results', [])))
 """
         result = subprocess.run(
-            ["python", "-c", code],
+            [PYTHON, "-c", code],
             capture_output=True,
             text=True,
         )

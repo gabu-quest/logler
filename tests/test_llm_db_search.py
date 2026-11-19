@@ -8,6 +8,8 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
+from tests.conftest import PYTHON
+
 import pytest
 
 EXIT_SUCCESS = 0
@@ -17,7 +19,7 @@ EXIT_USER_ERROR = 2
 
 def run_llm_command(args, timeout=60, env=None):
     """Run a logler llm command and return result."""
-    cmd = [".venv/bin/python", "-m", "logler.cli", "llm"] + args
+    cmd = [PYTHON, "-m", "logler.cli", "llm"] + args
     run_env = None
     if env:
         run_env = {**os.environ, **env}

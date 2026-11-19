@@ -20,6 +20,8 @@ import pytest
 from datetime import datetime
 from pathlib import Path
 
+from tests.conftest import PYTHON
+
 try:
     from logler.investigate import search, extract_ids, follow_thread, RUST_AVAILABLE
 except ImportError as e:
@@ -178,7 +180,7 @@ class TestRealisticMicroservice:
         import subprocess
 
         cmd_base = [
-            "python",
+            PYTHON,
             "-m",
             "logler.cli",
             "llm",
@@ -292,7 +294,7 @@ class TestRealisticSyslog:
         import subprocess
 
         cmd = [
-            "python",
+            PYTHON,
             "-m",
             "logler.cli",
             "llm",

@@ -15,6 +15,8 @@ import tempfile
 import os
 from pathlib import Path
 
+from tests.conftest import PYTHON
+
 # Exit codes (should match llm_cli.py)
 EXIT_SUCCESS = 0
 EXIT_NO_RESULTS = 1
@@ -23,7 +25,7 @@ EXIT_USER_ERROR = 2
 
 def run_llm_command(args, timeout=60):
     """Run a logler llm command and return result."""
-    cmd = ["python", "-m", "logler.cli", "llm"] + args
+    cmd = [PYTHON, "-m", "logler.cli", "llm"] + args
     result = subprocess.run(
         cmd, capture_output=True, text=True, timeout=timeout, cwd=str(Path(__file__).parent.parent)
     )
@@ -315,7 +317,7 @@ class TestDiffCommand:
 class TestSessionCommands:
     """Tests for logler llm session subcommands"""
 
-    def test_session_create(self, sample_log_file):
+    def test_session_create(self, sample_log_file, _isolated_home):
         """Test session creation."""
         result = run_llm_command(
             ["session", "create", "-f", sample_log_file, "--name", "test-session"]
@@ -327,10 +329,8 @@ class TestSessionCommands:
         assert output["session_id"].startswith("sess_")
         assert output["status"] == "active"
 
-        # Cleanup
-        session_file = Path(output["session_file"])
-        if session_file.exists():
-            session_file.unlink()
+        assert Path(output["session_file"]).parent == _isolated_home / ".logler" / "sessions"
+        assert Path(output["session_file"]).exists()
 
     def test_session_list(self):
         """Test session listing."""
