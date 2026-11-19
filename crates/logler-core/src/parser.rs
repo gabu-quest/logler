@@ -450,8 +450,14 @@ impl LogParser {
 
             let json_value = if let Ok(num) = value.parse::<i64>() {
                 Value::Number(num.into())
-            } else if let Ok(f) = value.parse::<f64>() {
-                Value::Number(serde_json::Number::from_f64(f).unwrap())
+            } else if let Some(num) = value
+                .parse::<f64>()
+                .ok()
+                .and_then(serde_json::Number::from_f64)
+            {
+                // from_f64 is None for NaN and the infinities ("nan", "inf", "1e999"): JSON
+                // has no such number, so those values fall through and stay text.
+                Value::Number(num)
             } else if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") {
                 Value::Bool(value.eq_ignore_ascii_case("true"))
             } else {
@@ -762,6 +768,32 @@ mod tests {
         assert_eq!(entry.format, LogFormat::Logfmt);
         assert_eq!(entry.level, Some(LogLevel::Unknown));
         assert_eq!(entry.message, "no level set");
+    }
+
+    #[test]
+    fn test_logfmt_words_that_parse_as_non_finite_floats_stay_strings() {
+        // "nan", "inf" and "1e999" parse as f64, but JSON has no such number. In a log line
+        // they are words (user=nan), so they stay the text they were.
+        let parser = LogParser::new("test.log");
+        let line = "level=info msg=ok user=nan limit=inf low=-Infinity big=1e999 ratio=1.5 n=7";
+        let entry = parser.parse_line(12, line).unwrap();
+
+        assert_eq!(entry.format, LogFormat::Logfmt);
+        assert_eq!(entry.level, Some(LogLevel::Info));
+        for (key, word) in [
+            ("user", "nan"),
+            ("limit", "inf"),
+            ("low", "-Infinity"),
+            ("big", "1e999"),
+        ] {
+            assert_eq!(
+                entry.fields.get(key),
+                Some(&Value::String(word.to_string())),
+                "field {key} should keep its text"
+            );
+        }
+        assert_eq!(entry.fields.get("ratio"), Some(&serde_json::json!(1.5)));
+        assert_eq!(entry.fields.get("n"), Some(&serde_json::json!(7)));
     }
 
     #[test]
