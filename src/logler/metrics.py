@@ -12,7 +12,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 from .parser import format_time
 
@@ -73,17 +73,35 @@ class SeriesStats:
 # ---------------------------------------------------------------------------
 
 # Pattern 1: key=value with optional unit  (e.g., "temperature=22.5°C")
-_KV_PATTERN = re.compile(
+# A field's name runs from the first ASCII letter or underscore of its word to the word's end.
+_KV_FIELD = (
+    r"[^\Wa-zA-Z_]*"  # the word's leading digits and non-ASCII letters are not part of the name
     r"(?P<field>[a-zA-Z_][\w]*)"
     r"\s*[=:]\s*"
     r"(?P<value>-?\d+(?:\.\d+)?)"
     r"\s*(?P<unit>ms|s|us|ns|MB|GB|KB|kPa|°[CF]|%|rpm|Hz)?"
 )
+# Tried only where a word starts. Tried at every character, each try runs to the end of the
+# word and fails the same way, which is quadratic in the word's length: seconds for a 20 KB
+# hex dump, minutes for 50 KB.
+_KV_PATTERN = re.compile(r"(?<!\w)" + _KV_FIELD)
+# The one place a name may start inside a word: right where the previous match ended
+# ("a=1b=2" holds a and b).
+_KV_RESUME = re.compile(_KV_FIELD)
+
+
+def _kv_matches(message: str) -> Iterator[re.Match[str]]:
+    """Every ``name=number`` in a message, left to right, in one pass."""
+    pos = 0
+    while match := _KV_RESUME.match(message, pos) or _KV_PATTERN.search(message, pos):
+        yield match
+        pos = match.end()
+
 
 # Pattern 2: duration-style phrases  (e.g., "took 45ms", "elapsed 120s")
 _DURATION_PATTERN = re.compile(
     r"(?:took|elapsed|duration|latency|time|response_time)"
-    r"\s*[:=]?\s*"
+    r"\s*(?:[:=]\s*)?"  # not "\s*[:=]?\s*": two runs side by side split a run of spaces every way
     r"(?P<value>\d+(?:\.\d+)?)"
     r"\s*(?P<unit>ms|s|us|ns)"
 )
@@ -176,7 +194,7 @@ def _extract_from_message(
     seen_fields: set = set()
 
     # Apply key=value pattern first (highest priority — most specific)
-    for match in _KV_PATTERN.finditer(message):
+    for match in _kv_matches(message):
         field_name = match.group("field")
         if field_name in seen_fields:
             continue

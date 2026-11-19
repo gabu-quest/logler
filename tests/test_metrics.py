@@ -8,6 +8,7 @@ If the function returned garbage, these tests MUST fail.
 from __future__ import annotations
 
 import math
+import time
 from pathlib import Path
 
 import pytest
@@ -710,3 +711,49 @@ class TestExtractMetrics:
         assert "cpu_percent" in result["fields"]
         assert result["fields"]["latency"]["stats"]["min"] == 50.0
         assert result["fields"]["cpu_percent"]["stats"]["min"] == 85.0
+
+
+class TestMessageWords:
+    """Where a field's name starts and ends inside a message."""
+
+    @pytest.mark.parametrize(
+        ("message", "expected"),
+        [
+            ("latency_ms=42", {"latency_ms": [42.0]}),
+            ("a=1 b=2", {"a": [1.0], "b": [2.0]}),
+            ("a=1b=2", {"a": [1.0], "b": [2.0]}),
+            ("dur=5ms_left=3", {"dur": [5.0], "_left": [3.0]}),
+            ("2xx_count=5", {"xx_count": [5.0]}),
+            ("123=5", {}),
+            ("\u00f6gr\u00f6\u00dfe=7", {"gr\u00f6\u00dfe": [7.0]}),
+            ("x = 1  ,  y : 2", {"x": [1.0], "y": [2.0]}),
+            ("pid=7 port=80 n=3", {"n": [3.0]}),
+            ("took 45ms", {"duration": [45.0]}),
+            ("elapsed:  120s", {"elapsed": [120.0], "duration": [120.0]}),
+            ("time =3.5us", {"time": [3.5], "duration": [3.5]}),
+            ("time= 9", {"time": [9.0]}),
+            ("runtime 5ms", {"duration": [5.0]}),
+        ],
+    )
+    def test_fields_found(self, message, expected):
+        result = extract_numeric_fields([_make_entry(message=message)])
+
+        assert {name: [p.value for p in points] for name, points in result.items()} == expected
+
+    @pytest.mark.parametrize(
+        "filler",
+        ["x" * 50_000, "a1" * 25_000, "took" + " " * 50_000 + "x", "x" + " " * 50_000 + "y"],
+        ids=["one long word", "letters and digits", "spaces after took", "spaces after a word"],
+    )
+    def test_a_long_line_takes_time_in_proportion_to_its_length(self, filler):
+        """50,000 characters with nothing to find, then one field: well under a second.
+        Tried from every character, the same line takes several seconds."""
+        entries = [_make_entry(message=f"{filler} latency_ms=42")]
+
+        start = time.perf_counter()
+        result = extract_numeric_fields(entries)
+        elapsed = time.perf_counter() - start
+
+        assert [p.value for p in result["latency_ms"]] == [42.0]
+        assert list(result) == ["latency_ms"]
+        assert elapsed < 1.0
