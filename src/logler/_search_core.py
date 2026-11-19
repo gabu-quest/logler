@@ -79,12 +79,9 @@ def _normalize_entries(entries: list[dict[str, Any]]) -> None:
 def _normalize_search_result_levels(result: dict[str, Any]) -> None:
     """Normalize search result level casing and map aliases."""
     for item in result.get("results", []):
-        entry = item.get("entry", {})
-        _normalize_entry(entry)
-    for item in result.get("context_before", []):
-        _normalize_entry(item)
-    for item in result.get("context_after", []):
-        _normalize_entry(item)
+        _normalize_entry(item.get("entry", {}))
+        _normalize_entries(item.get("context_before", []))
+        _normalize_entries(item.get("context_after", []))
 
 
 def _normalize_pattern_examples(result: dict[str, Any]) -> None:

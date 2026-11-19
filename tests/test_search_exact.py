@@ -353,6 +353,15 @@ class TestLineWithNoLevelIsUnknown:
             "UNKNOWN": 3,
         }
 
+    def test_search_context_entries(self, no_level_file):
+        result = search([no_level_file], context_lines=1)
+        by_line = {i["entry"]["line_number"]: i for i in result["results"]}
+        assert sorted(by_line) == [1, 2, 3, 4, 5]
+        assert [e["level"] for e in by_line[2]["context_before"]] == ["INFO"]
+        assert [e["level"] for e in by_line[2]["context_after"]] == ["UNKNOWN"]
+        assert [e["level"] for e in by_line[4]["context_before"]] == ["UNKNOWN"]
+        assert [e["level"] for e in by_line[4]["context_after"]] == ["UNKNOWN"]
+
     def test_investigator_search(self, no_level_file):
         from logler.investigate import Investigator
 
