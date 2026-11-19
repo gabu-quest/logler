@@ -348,7 +348,7 @@ fn extract_ids(files: Vec<String>, filters_json: Option<String>) -> PyResult<Str
 
 /// Python module
 #[pymodule]
-fn logler_rs(_py: Python, m: &PyModule) -> PyResult<()> {
+fn logler_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyInvestigator>()?;
     m.add_function(wrap_pyfunction!(search, m)?)?;
     m.add_function(wrap_pyfunction!(follow_thread, m)?)?;

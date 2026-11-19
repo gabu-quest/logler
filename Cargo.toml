@@ -36,7 +36,7 @@ memmap2 = "0.9"
 tracing = "0.1"
 
 # Python bindings
-pyo3 = { version = "0.20", features = ["extension-module", "anyhow", "chrono"] }
+pyo3 = { version = "0.30", features = ["abi3-py312", "anyhow", "chrono"] }
 
 # Utilities
 uuid = { version = "1.11", features = ["v4", "serde"] }

@@ -5,7 +5,10 @@ Run with: pytest tests/test_install_smoke.py -v
 """
 
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from tests.conftest import LOGLER, PYTHON
 
@@ -128,3 +131,13 @@ print(len(result.get('results', [])))
         assert result.returncode == 0
         count = int(result.stdout.strip())
         assert count > 0
+
+
+class TestStableAbiWheel:
+    """The wheel ships one stable-ABI extension that every Python from 3.12 loads."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows extension names carry no ABI tag")
+    def test_extension_is_stable_abi_file(self):
+        from logler_rs import logler_rs as extension
+
+        assert Path(extension.__file__).name == "logler_rs.abi3.so"
