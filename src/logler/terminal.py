@@ -10,7 +10,8 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
-from .parser import LogParser, LogEntry, normalize_level_name
+from ._search_core import level_name, level_text
+from .parser import LogParser, LogEntry
 
 
 class TerminalViewer:
@@ -91,7 +92,7 @@ class TerminalViewer:
         filtered = entries
 
         if level_filter:
-            level_upper = normalize_level_name(level_filter)
+            level_upper = level_text(level_name(level_filter))
             filtered = [e for e in filtered if e.level == level_upper]
 
         if pattern:

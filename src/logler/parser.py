@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from ._search_core import _level_name
+from ._search_core import level_text
 
 try:
     import logler_rs
@@ -79,12 +79,11 @@ class LogParser:
         # Rust counts lines as unsigned; the entry keeps the number the caller gave.
         data = json.loads(self._parser.parse_line(max(line_number, 0), raw))
         ts = data.get("timestamp")
-        level = data.get("level")
         return LogEntry(
             line_number=line_number,
             raw=raw,
             timestamp=_to_utc(ts),
-            level=level.upper() if level else "UNKNOWN",
+            level=level_text(data.get("level")),
             message=data["message"],
             thread_id=data.get("thread_id"),
             correlation_id=data.get("correlation_id"),
@@ -95,11 +94,3 @@ class LogParser:
             format=data["format"],
             fields=data.get("fields") or {},
         )
-
-
-def normalize_level_name(name: str) -> str:
-    """Spell a user-given level the way entries report it (warning -> WARN, err -> ERROR).
-
-    Raises ``ValueError`` for a word that names no level.
-    """
-    return _level_name(name).upper()

@@ -136,11 +136,12 @@ class TestAnalyzeBottlenecks:
         }
 
     def test_threshold_filters_the_secondary_list_not_the_primary(self, deterministic_hierarchy):
-        """At a 90% threshold the primary is still child-slow and the secondary list is empty.
+        """At a 90% threshold the primary is still child-slow and nothing is secondary.
 
         The primary is the hierarchy's own bottleneck, which has no minimum share. The
-        threshold filters the secondary list, which is drawn from the nodes ranked second
-        to fifth by duration (800, 150 and 50 ms here); none of them reaches 90%.
+        threshold filters the secondary list, which is measured as the primary is, by
+        self-time: the root spends all 1000 ms inside its children (0 ms of its own), and
+        the two 100 ms children are 10% each.
         """
         result = analyze_bottlenecks(deterministic_hierarchy, threshold_percentage=90.0)
 
@@ -151,6 +152,23 @@ class TestAnalyzeBottlenecks:
             "depth": 1,
         }
         assert result["secondary_bottlenecks"] == []
+
+    def test_secondary_list_is_the_other_nodes_by_self_time(self, deterministic_hierarchy):
+        """The secondary list holds neither the primary nor a node that only encloses it.
+
+        The primary is child-slow: the most self-time (800 ms), not the longest node (the
+        root, 1000 ms). The secondary list is the other nodes by the same measure. The root
+        has no time of its own, so it is not a bottleneck; the two 100 ms children are 10%
+        each. Skipping position 0 of the list by duration took the root out and left
+        child-slow, the primary, in.
+        """
+        result = analyze_bottlenecks(deterministic_hierarchy, threshold_percentage=10.0)
+
+        assert result["primary_bottleneck"]["node_id"] == "child-slow"
+        assert [
+            (n["id"], n["self_time_ms"], n["self_percentage"])
+            for n in result["secondary_bottlenecks"]
+        ] == [("child-fast", 100, 10.0), ("child-medium", 100, 10.0)]
 
 
 class TestHierarchyNodeCounts:

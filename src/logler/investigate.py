@@ -51,7 +51,7 @@ from ._search_core import (  # noqa: F401
     _normalize_entries,
     _normalize_search_result_levels,
     _normalize_pattern_examples,
-    _infer_syslog_level,
+    _build_filters,
     _parse_timestamp_flex,
     _normalize_context_payload,
     _build_time_range,
@@ -232,44 +232,17 @@ class Investigator:
             offset: Skip first *N* sorted results before taking ``limit``.
                 Server-side pagination: ``offset=100, limit=100`` → page 2.
         """
-        filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
-        if level:
-            filters["levels"] = _parse_levels(level)
-        if exclude_level:
-            filters["exclude_levels"] = _parse_levels(exclude_level)
-        if exclude_query:
-            filters["exclude_pattern"] = exclude_query
-        if thread_id:
-            parts = [p.strip() for p in thread_id.split(",") if p.strip()]
-            if len(parts) == 1:
-                filters["thread_id"] = parts[0]
-            else:
-                filters["thread_ids"] = parts
-        if correlation_id:
-            parts = [p.strip() for p in correlation_id.split(",") if p.strip()]
-            if len(parts) == 1:
-                filters["correlation_id"] = parts[0]
-            else:
-                filters["correlation_ids"] = parts
-        if trace_id:
-            parts = [p.strip() for p in trace_id.split(",") if p.strip()]
-            if len(parts) == 1:
-                filters["trace_id"] = parts[0]
-            else:
-                filters["trace_ids"] = parts
-        if service_name:
-            parts = [p.strip() for p in service_name.split(",") if p.strip()]
-            if len(parts) == 1:
-                filters["service_name"] = parts[0]
-            else:
-                filters["service_names"] = parts
-        if time_start or time_end:
-            tr: Dict[str, str] = {}
-            if time_start:
-                tr["start"] = time_start
-            if time_end:
-                tr["end"] = time_end
-            filters["time_range"] = tr
+        filters = _build_filters(
+            level=level,
+            exclude_level=exclude_level,
+            exclude_query=exclude_query,
+            thread_id=thread_id,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            service_name=service_name,
+            time_start=time_start,
+            time_end=time_end,
+        )
 
         query_dict: Dict[str, Any] = {
             "files": self._files,

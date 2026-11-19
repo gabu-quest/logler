@@ -9,9 +9,7 @@ import re
 from typing import List, Optional, Dict, Any
 from collections import defaultdict
 
-from ._search_core import (
-    RUST_AVAILABLE,
-)
+from ._search_core import RUST_AVAILABLE, _investigator_for
 
 
 # ---------------------------------------------------------------------------
@@ -70,25 +68,7 @@ def follow_thread_hierarchy(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Lazy import to avoid circular dependency
-    from .investigate import Investigator
-
-    # Use Investigator when custom parsing is requested
-    if parser_format or custom_regex:
-        inv = Investigator()
-        inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
-        return inv.build_hierarchy(
-            root_identifier=root_identifier,
-            max_depth=max_depth,
-            use_naming_patterns=use_naming_patterns,
-            use_temporal_inference=use_temporal_inference,
-            min_confidence=min_confidence,
-        )
-
-    # Use cached investigator to avoid re-parsing files
-    from .cache import get_cached_investigator
-
-    investigator = get_cached_investigator(files)
+    investigator = _investigator_for(files, parser_format, custom_regex)
     result_json = investigator.build_hierarchy(
         files,
         root_identifier,
@@ -804,9 +784,10 @@ def analyze_bottlenecks(
 
     Args:
         hierarchy: Hierarchy from :func:`follow_thread_hierarchy`.
-        threshold_percentage: Minimum % of total time for a node to be listed in
-            ``secondary_bottlenecks``. The primary bottleneck is the hierarchy's own
-            ``bottleneck`` and is reported whatever its share.
+        threshold_percentage: Minimum % of total time a node must spend in itself (its
+            duration less its children's) to be listed in ``secondary_bottlenecks``. The
+            primary bottleneck is the hierarchy's own ``bottleneck``, the node with the
+            most self-time, and is reported whatever its share.
 
     Returns:
         BottleneckAnalysis dict with shape::
@@ -849,11 +830,15 @@ def analyze_bottlenecks(
         duration = node.get("duration_ms", 0)
         if duration and duration > 0:
             percentage = (duration / total_duration) * 100
+            children_ms = sum(c.get("duration_ms") or 0 for c in node.get("children", []))
+            self_time = max(duration - children_ms, 0)
             all_nodes.append(
                 {
                     "id": node.get("id"),
                     "duration_ms": duration,
                     "percentage": percentage,
+                    "self_time_ms": self_time,
+                    "self_percentage": (self_time / total_duration) * 100,
                     "depth": node.get("depth", 0),
                     "children_count": len(node.get("children", [])),
                     "is_leaf": len(node.get("children", [])) == 0,
@@ -869,10 +854,17 @@ def analyze_bottlenecks(
     # Sort by duration
     all_nodes.sort(key=lambda x: -x["duration_ms"])
 
-    # Find secondary bottlenecks
-    for node in all_nodes[1:5]:  # Top 5 excluding primary
-        if node["percentage"] >= threshold_percentage:
-            result["secondary_bottlenecks"].append(node)
+    # Secondary bottlenecks: measured as the primary is, by self-time, so a node that only
+    # encloses a slow child is not one. The four with the most that meet the threshold.
+    primary_id = bottleneck.get("node_id") if bottleneck else None
+    result["secondary_bottlenecks"] = sorted(
+        (
+            n
+            for n in all_nodes
+            if n["id"] != primary_id and n["self_percentage"] >= threshold_percentage
+        ),
+        key=lambda n: -n["self_time_ms"],
+    )[:4]
 
     # Generate optimisation suggestions
     suggestions = []

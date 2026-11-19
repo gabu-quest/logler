@@ -199,7 +199,8 @@ def emit(
     Example:
         logler llm emit app.log --level ERROR --last 1h --limit 100
     """
-    from ..parser import LogParser, normalize_level_name
+    from .._search_core import _parse_levels, level_text
+    from ..parser import LogParser
 
     with _db_file_source(files, db_path) as file_list:
         try:
@@ -211,12 +212,10 @@ def emit(
             # Parse level filters (comma-separated)
             level_set = None
             if level:
-                level_set = {normalize_level_name(lvl) for lvl in level.split(",") if lvl.strip()}
+                level_set = {level_text(name) for name in _parse_levels(level)}
             exclude_level_set = None
             if exclude_level:
-                exclude_level_set = {
-                    normalize_level_name(lvl) for lvl in exclude_level.split(",") if lvl.strip()
-                }
+                exclude_level_set = {level_text(name) for name in _parse_levels(exclude_level)}
 
             # Time filters
             time_start_str, time_end_str = _resolve_time_filters(last_duration, after, before)

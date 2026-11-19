@@ -416,7 +416,7 @@ formats:
     file_patterns: ["robot_*.log"]
 """
 
-BUILTIN_ROBOT = {("NONE", "error;3;overtravel"), ("NONE", "info;1;homed")}
+BUILTIN_ROBOT = {("UNKNOWN", "error;3;overtravel"), ("UNKNOWN", "info;1;homed")}
 BUILTIN_ROBOT_EMIT = {("UNKNOWN", "error;3;overtravel"), ("UNKNOWN", "info;1;homed")}
 
 
@@ -458,7 +458,7 @@ def test_rewriting_formats_yaml_gives_the_next_search_the_new_reading(logdir: Pa
     config.write_text(FORMATS_YAML.replace("robot_*.log", "nothing_*.log"))
     _bump(config)
 
-    assert _robot_levels("robot_1.log") == {"NONE": 2}
+    assert _robot_levels("robot_1.log") == {"UNKNOWN": 2}
 
 
 def test_deleting_formats_yaml_gives_the_next_search_the_new_reading(logdir: Path) -> None:
@@ -466,13 +466,13 @@ def test_deleting_formats_yaml_gives_the_next_search_the_new_reading(logdir: Pat
 
     (logdir / ".logler" / "formats.yaml").unlink()
 
-    assert _robot_levels("robot_1.log") == {"NONE": 2}
+    assert _robot_levels("robot_1.log") == {"UNKNOWN": 2}
 
 
 def test_creating_formats_yaml_gives_the_next_search_the_new_reading(logdir: Path) -> None:
     config = logdir / ".logler" / "formats.yaml"
     config.unlink()
-    assert _robot_levels("robot_1.log") == {"NONE": 2}
+    assert _robot_levels("robot_1.log") == {"UNKNOWN": 2}
 
     config.write_text(FORMATS_YAML)
     _bump(config)
@@ -491,7 +491,7 @@ def test_a_closer_formats_yaml_created_later_wins(logdir: Path) -> None:
         FORMATS_YAML.replace("robot_*.log", "nothing_*.log")
     )
 
-    assert _robot_levels("sub/robot_1.log") == {"NONE": 2}
+    assert _robot_levels("sub/robot_1.log") == {"UNKNOWN": 2}
 
 
 def test_rewriting_the_formats_yaml_behind_one_of_two_links_gives_the_new_reading(
@@ -526,8 +526,8 @@ def test_rewriting_the_formats_yaml_behind_one_of_two_links_gives_the_new_readin
     assert levels() == [
         ("robot_a.log", "ERROR"),
         ("robot_a.log", "INFO"),
-        ("robot_b.log", "NONE"),
-        ("robot_b.log", "NONE"),
+        ("robot_b.log", "UNKNOWN"),
+        ("robot_b.log", "UNKNOWN"),
     ]
 
 
@@ -540,7 +540,7 @@ formats:
 """
     )
     assert format_for_file("robot_1.log") is None
-    assert _robot_levels("robot_1.log") == {"NONE": 2}
+    assert _robot_levels("robot_1.log") == {"UNKNOWN": 2}
 
 
 def test_db_source_is_read_as_before_with_a_formats_file_around(logdir: Path) -> None:

@@ -41,16 +41,18 @@ except ImportError as _exc:
 # ---------------------------------------------------------------------------
 
 
-def _normalize_entry(entry: Dict[str, Any]) -> None:
-    """Normalize a single log entry in-place (uppercase level, detect format)."""
-    if "level" in entry:
-        entry["level"] = str(entry["level"]).upper().strip()
+def level_text(level: Any) -> str:
+    """The text of an entry's level: upper case, and ``UNKNOWN`` for a line with none.
 
-    # Infer syslog level if missing
-    if not entry.get("level") and entry.get("fields", {}).get("priority"):
-        inferred = _infer_syslog_level(entry["fields"]["priority"])
-        if inferred:
-            entry["level"] = inferred
+    The one owner of that spelling: the engine gives ``null`` for a line with no level.
+    """
+    return str(level or "").strip().upper() or "UNKNOWN"
+
+
+def _normalize_entry(entry: Dict[str, Any]) -> None:
+    """Normalize a single log entry in-place (level text, numeric fields)."""
+    if "level" in entry:
+        entry["level"] = level_text(entry["level"])
 
     # Convert numeric fields
     for key in ("duration_ms",):
@@ -83,26 +85,6 @@ def _normalize_pattern_examples(result: Dict[str, Any]) -> None:
     for pattern in result.get("patterns", []):
         for example in pattern.get("examples", []):
             _normalize_entry(example)
-
-
-def _infer_syslog_level(priority) -> Optional[str]:
-    """Infer syslog level from a priority field value."""
-    try:
-        pri = int(priority)
-        severity = pri & 0x07
-        severity_map = {
-            0: "FATAL",
-            1: "FATAL",
-            2: "FATAL",
-            3: "ERROR",
-            4: "WARN",
-            5: "INFO",
-            6: "INFO",
-            7: "DEBUG",
-        }
-        return severity_map.get(severity)
-    except (ValueError, TypeError):
-        return None
 
 
 def _parse_timestamp_flex(value: str) -> Optional[str]:
@@ -187,7 +169,7 @@ def _build_time_range(
     return result
 
 
-def _level_name(word: str) -> str:
+def level_name(word: str) -> str:
     """The Rust name (``Warn``) of the level a user-given word names (``warning``, ``ERR``).
 
     The words are the Rust parser's own table, read through the extension, so a level the
@@ -210,7 +192,64 @@ def _parse_levels(level_str: str) -> List[str]:
         >>> _parse_levels("ERROR,warn,crit")
         ["Error", "Warn", "Fatal"]
     """
-    return [_level_name(part) for part in level_str.split(",") if part.strip()]
+    return [level_name(part) for part in level_str.split(",") if part.strip()]
+
+
+def _build_filters(
+    level: Optional[str] = None,
+    exclude_level: Optional[str] = None,
+    exclude_query: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    service_name: Optional[str] = None,
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
+) -> Dict[str, Any]:
+    """The engine's filter dict for search's keyword arguments (the one builder).
+
+    An id argument is a comma list: one value goes under the singular key, several under
+    the plural key.  Raises ``ValueError`` for a level word that names no level.
+    """
+    filters: Dict[str, Any] = {
+        "levels": _parse_levels(level) if level else [],
+        "exclude_levels": _parse_levels(exclude_level) if exclude_level else [],
+    }
+    if exclude_query:
+        filters["exclude_pattern"] = exclude_query
+    for single, plural, value in (
+        ("thread_id", "thread_ids", thread_id),
+        ("correlation_id", "correlation_ids", correlation_id),
+        ("trace_id", "trace_ids", trace_id),
+        ("service_name", "service_names", service_name),
+    ):
+        parts = [p.strip() for p in (value or "").split(",") if p.strip()]
+        if len(parts) == 1:
+            filters[single] = parts[0]
+        elif parts:
+            filters[plural] = parts
+    if time_start or time_end:
+        time_range: Dict[str, str] = {}
+        if time_start:
+            time_range["start"] = time_start
+        if time_end:
+            time_range["end"] = time_end
+        filters["time_range"] = time_range
+    return filters
+
+
+def _investigator_for(
+    files: List[str],
+    parser_format: Optional[str] = None,
+    custom_regex: Optional[str] = None,
+) -> Any:
+    """The investigator for a call: a freshly loaded one when the caller names a format
+    (it never reaches the cache), otherwise the cached one for ``files``."""
+    if parser_format or custom_regex:
+        investigator = logler_rs.PyInvestigator()
+        load_files(investigator, files, parser_format, custom_regex)
+        return investigator
+    return get_cached_investigator(files)
 
 
 # ---------------------------------------------------------------------------
@@ -294,55 +333,19 @@ def search(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    if parser_format or custom_regex:
-        investigator = logler_rs.PyInvestigator()
-        load_files(investigator, files, parser_format, custom_regex)
-    else:
-        investigator = get_cached_investigator(files)
+    investigator = _investigator_for(files, parser_format, custom_regex)
 
-    # Build filters
-    filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
-    if level:
-        filters["levels"] = _parse_levels(level)
-    if exclude_level:
-        filters["exclude_levels"] = _parse_levels(exclude_level)
-    if exclude_query:
-        filters["exclude_pattern"] = exclude_query
-
-    # ID filters — comma-separated → multi-value
-    if thread_id:
-        parts = [p.strip() for p in thread_id.split(",") if p.strip()]
-        if len(parts) == 1:
-            filters["thread_id"] = parts[0]
-        else:
-            filters["thread_ids"] = parts
-    if correlation_id:
-        parts = [p.strip() for p in correlation_id.split(",") if p.strip()]
-        if len(parts) == 1:
-            filters["correlation_id"] = parts[0]
-        else:
-            filters["correlation_ids"] = parts
-    if trace_id:
-        parts = [p.strip() for p in trace_id.split(",") if p.strip()]
-        if len(parts) == 1:
-            filters["trace_id"] = parts[0]
-        else:
-            filters["trace_ids"] = parts
-    if service_name:
-        parts = [p.strip() for p in service_name.split(",") if p.strip()]
-        if len(parts) == 1:
-            filters["service_name"] = parts[0]
-        else:
-            filters["service_names"] = parts
-
-    # Time range — push to Rust
-    if time_start or time_end:
-        tr: Dict[str, str] = {}
-        if time_start:
-            tr["start"] = time_start
-        if time_end:
-            tr["end"] = time_end
-        filters["time_range"] = tr
+    filters = _build_filters(
+        level=level,
+        exclude_level=exclude_level,
+        exclude_query=exclude_query,
+        thread_id=thread_id,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+        service_name=service_name,
+        time_start=time_start,
+        time_end=time_end,
+    )
 
     query_dict: Dict[str, Any] = {
         "files": files,
@@ -420,14 +423,7 @@ def extract_ids(
 
     filters_json = None
     if time_start or time_end:
-        f: Dict[str, Any] = {}
-        tr: Dict[str, str] = {}
-        if time_start:
-            tr["start"] = time_start
-        if time_end:
-            tr["end"] = time_end
-        f["time_range"] = tr
-        filters_json = json.dumps(f)
+        filters_json = json.dumps(_build_filters(time_start=time_start, time_end=time_end))
 
     return json.loads(investigator.extract_ids(filters_json))
 
@@ -469,18 +465,7 @@ def follow_thread(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Lazy import to avoid circular dependency
-    from .investigate import Investigator
-
-    # Use Investigator when custom parsing is requested so parsing honors the config.
-    if parser_format or custom_regex:
-        inv = Investigator()
-        inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
-        return inv.follow_thread(
-            thread_id=thread_id, correlation_id=correlation_id, trace_id=trace_id
-        )
-
-    investigator = get_cached_investigator(files)
+    investigator = _investigator_for(files, parser_format, custom_regex)
     result_json = investigator.follow_thread(files, thread_id, correlation_id, trace_id)
     result = json.loads(result_json)
     _normalize_entries(result.get("entries", []))
@@ -557,15 +542,7 @@ def find_patterns(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Lazy import to avoid circular dependency
-    from .investigate import Investigator
-
-    if parser_format or custom_regex:
-        inv = Investigator()
-        inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
-        return inv.find_patterns(min_occurrences=min_occurrences)
-
-    investigator = get_cached_investigator(files)
+    investigator = _investigator_for(files, parser_format, custom_regex)
     result_json = investigator.find_patterns(files, min_occurrences)
     result = json.loads(result_json)
     _normalize_pattern_examples(result)

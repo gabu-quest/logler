@@ -323,3 +323,111 @@ class TestSearchResultStructure:
                 assert entry.get("line_index") == 0 or "number 0" in entry["message"]
                 break
         assert found, "Should find entry with 'number 0'"
+
+
+NO_LEVEL_LOG = """2024-01-01T10:00:00Z INFO [w-1] hello
+plain line without a level
+another plain line
+2024-01-01T10:00:01Z ERROR [w-1] boom
+plain line without a level
+"""
+
+
+@pytest.fixture
+def no_level_file(tmp_path):
+    path = tmp_path / "nolevel.log"
+    path.write_text(NO_LEVEL_LOG)
+    return str(path)
+
+
+class TestLineWithNoLevelIsUnknown:
+    """A line the engine gives no level reads UNKNOWN through every door, never NONE."""
+
+    def test_search(self, no_level_file):
+        result = search([no_level_file])
+        levels = {i["entry"]["line_number"]: i["entry"]["level"] for i in result["results"]}
+        assert levels == {1: "INFO", 2: "UNKNOWN", 3: "UNKNOWN", 4: "ERROR", 5: "UNKNOWN"}
+        assert search([no_level_file], output_format="count")["by_level"] == {
+            "INFO": 1,
+            "ERROR": 1,
+            "UNKNOWN": 3,
+        }
+
+    def test_investigator_search(self, no_level_file):
+        from logler.investigate import Investigator
+
+        inv = Investigator()
+        inv.load_files([no_level_file])
+        levels = [i["entry"]["level"] for i in inv.search()["results"]]
+        assert sorted(levels) == ["ERROR", "INFO", "UNKNOWN", "UNKNOWN", "UNKNOWN"]
+
+    def test_follow_thread_and_get_context(self, no_level_file):
+        from logler.investigate import follow_thread, get_context
+
+        entries = follow_thread([no_level_file], thread_id="w-1")["entries"]
+        assert entries and all(e["level"] in {"INFO", "ERROR", "UNKNOWN"} for e in entries)
+        context = get_context(no_level_file, 2, 1, 1)
+        assert context["target"]["level"] == "UNKNOWN"
+        assert [e["level"] for e in context["context_before"]] == ["INFO"]
+        assert [e["level"] for e in context["context_after"]] == ["UNKNOWN"]
+
+    def test_find_patterns_examples(self, no_level_file):
+        """The engine only makes patterns of error lines, so no real example lacks a level;
+        the normaliser still gives a level-less example UNKNOWN."""
+        from logler._search_core import _normalize_pattern_examples
+        from logler.investigate import find_patterns
+
+        repeated = find_patterns([no_level_file], min_occurrences=1)["patterns"]
+        assert {e["level"] for p in repeated for e in p["examples"]} == {"ERROR"}
+
+        result = {"patterns": [{"examples": [{"level": None}, {"level": " warn "}]}]}
+        _normalize_pattern_examples(result)
+        assert [e["level"] for e in result["patterns"][0]["examples"]] == ["UNKNOWN", "WARN"]
+
+    def test_parser_adapter_agrees(self):
+        from logler.parser import LogParser
+
+        assert LogParser().parse_line(1, "plain line without a level").level == "UNKNOWN"
+
+
+class TestSyslogLevelComesFromTheEngine:
+    """The Python syslog fallback was dead: the engine maps the priority itself."""
+
+    def test_priority_lines_have_their_levels(self, tmp_path):
+        path = tmp_path / "syslog.log"
+        path.write_text(
+            "<14>Jan  1 10:00:00 host app[1]: info line\n"
+            "<11>Jan  1 10:00:01 host app[1]: err line\n"
+            "<12>Jan  1 10:00:02 host app[1]: warn line\n"
+        )
+        levels = {
+            i["entry"]["line_number"]: i["entry"]["level"] for i in search([str(path)])["results"]
+        }
+        assert levels == {1: "INFO", 2: "ERROR", 3: "WARN"}
+
+
+class TestExplicitFormatNeverReachesTheCache:
+    def test_custom_regex_then_plain_gives_builtin_reading(self, tmp_path):
+        path = tmp_path / "robot.log"
+        path.write_text("error;3;overtravel\ninfo;1;homed\n")
+        regex = r"^(?P<level>\w+);(?P<axis>\d+);(?P<message>.*)$"
+        custom = search([str(path)], custom_regex=regex)
+        assert {i["entry"]["level"] for i in custom["results"]} == {"ERROR", "INFO"}
+        plain = search([str(path)])
+        assert {i["entry"]["level"] for i in plain["results"]} == {"UNKNOWN"}
+        again = search([str(path)], custom_regex=regex)
+        assert {i["entry"]["level"] for i in again["results"]} == {"ERROR", "INFO"}
+
+    def test_find_patterns_takes_an_explicit_format(self, tmp_path):
+        from logler.investigate import find_patterns
+
+        path = tmp_path / "robot.log"
+        path.write_text("".join(f"2024-01-15T10:00:0{i}Z;error;overtravel\n" for i in range(3)))
+        regex = r"^(?P<timestamp>\S+);(?P<level>\w+);(?P<message>.*)$"
+
+        named = find_patterns([str(path)], custom_regex=regex)["patterns"]
+        assert [
+            (p["pattern"], p["occurrences"], p["first_seen"], p["last_seen"]) for p in named
+        ] == [("overtravel", 3, "2024-01-15T10:00:00Z", "2024-01-15T10:00:02Z")]
+        # Read without the format, the lines have no level, so they are no error pattern.
+        assert find_patterns([str(path)])["patterns"] == []
