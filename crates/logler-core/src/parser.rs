@@ -1,5 +1,5 @@
 use crate::types::{LogEntry, LogFormat, LogLevel};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -17,15 +17,201 @@ static COMMON_LOG_RE: OnceLock<Regex> = OnceLock::new();
 static LOGFMT_PAIR_RE: OnceLock<Regex> = OnceLock::new();
 static BSD_SYSLOG_RE: OnceLock<Regex> = OnceLock::new();
 
+/// A timestamp inside a line: date, `T` or space, time, an optional `.` or `,` fraction and an
+/// optional zone. `read_timestamp` reads what this finds.
+const TIMESTAMP_PATTERN: &str =
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?";
+
+// One list of keys per field, read by the JSON and the logfmt branch; the first key present wins.
+const TIMESTAMP_KEYS: &[&str] = &["timestamp", "time", "@timestamp", "ts", "datetime"];
+const LEVEL_KEYS: &[&str] = &["level", "severity", "log_level", "loglevel", "lvl"];
+const MESSAGE_KEYS: &[&str] = &["message", "msg", "text", "content"];
+const THREAD_KEYS: &[&str] = &[
+    "thread",
+    "thread_id",
+    "tid",
+    "threadId",
+    "thread_name",
+    "threadName",
+];
+const CORRELATION_KEYS: &[&str] = &[
+    "correlation_id",
+    "correlationId",
+    "request_id",
+    "requestId",
+    "req_id",
+];
+const TRACE_KEYS: &[&str] = &["trace_id", "traceId"];
+const SPAN_KEYS: &[&str] = &["span_id", "spanId"];
+const PARENT_SPAN_KEYS: &[&str] = &["parent_span_id", "parentSpanId"];
+const SERVICE_KEYS: &[&str] = &["service", "service_name", "serviceName"];
+
+/// The first key of `keys` for which `read` gives a value.
+fn first_by<T>(keys: &[&str], read: impl Fn(&str) -> Option<T>) -> Option<T> {
+    keys.iter().find_map(|key| read(key))
+}
+
+/// Like `first_by`, and the key that gave the value is noted in `taken`.
+fn take_first<'k, T>(
+    keys: &[&'k str],
+    taken: &mut Vec<&'k str>,
+    read: impl Fn(&str) -> Option<T>,
+) -> Option<T> {
+    keys.iter().find_map(|key| {
+        let value = read(key)?;
+        taken.push(key);
+        Some(value)
+    })
+}
+
+/// A Unix time given as a JSON number. Its size tells the unit: seconds stay below 1e11
+/// (the year 5138), then milliseconds, microseconds and nanoseconds, each a thousand times
+/// larger. A number with a fraction is kept to the microsecond.
+fn epoch_timestamp(number: &serde_json::Number) -> Option<DateTime<Utc>> {
+    let per_second = |size: f64| match size {
+        s if s < 1e11 => 1_i64,
+        s if s < 1e14 => 1_000,
+        s if s < 1e17 => 1_000_000,
+        _ => 1_000_000_000,
+    };
+    if let Some(whole) = number.as_i64() {
+        let units = per_second(whole.unsigned_abs() as f64);
+        let nanos = whole.rem_euclid(units) * (1_000_000_000 / units);
+        return DateTime::from_timestamp(whole.div_euclid(units), nanos as u32);
+    }
+    let value = number.as_f64()?;
+    let micros = (value / per_second(value.abs()) as f64 * 1e6).round();
+    // `as` saturates, and chrono refuses what lies past its last year.
+    DateTime::from_timestamp_micros(micros as i64)
+}
+
+/// A run of ASCII digits as a number; `None` when any byte is something else.
+fn number(digits: &[u8]) -> Option<u32> {
+    digits.iter().try_fold(0u32, |sum, byte| {
+        byte.is_ascii_digit()
+            .then(|| sum * 10 + u32::from(byte - b'0'))
+    })
+}
+
+/// The one reader of a timestamp string: `YYYY-MM-DD`, `T` or a space, `HH:MM:SS`, an optional
+/// fraction after `.` or `,`, and an optional zone (`Z`, `+09:00`, `+0900`). No zone is read
+/// as UTC. The shape is fixed, so it is read by position, in one pass and without a format
+/// string; anything left over after the zone makes it no timestamp.
+fn read_timestamp(text: &str) -> Option<DateTime<Utc>> {
+    let (head, mut rest) = text.trim().as_bytes().split_at_checked(19)?;
+    let marks = (head[4], head[7], head[10], head[13], head[16]);
+    if !matches!(marks, (b'-', b'-', b'T' | b't' | b' ', b':', b':')) {
+        return None;
+    }
+    let part = |from: usize, to: usize| number(&head[from..to]);
+    let date = NaiveDate::from_ymd_opt(part(0, 4)? as i32, part(5, 7)?, part(8, 10)?)?;
+    let (hour, minute, second) = (part(11, 13)?, part(14, 16)?, part(17, 19)?);
+
+    let mut nanos = 0;
+    if let [b'.' | b',', fraction @ ..] = rest {
+        let count = fraction.iter().take_while(|b| b.is_ascii_digit()).count();
+        // Nine digits make a nanosecond; digits past the ninth are dropped.
+        let kept = &fraction[..count.min(9)];
+        if kept.is_empty() {
+            return None;
+        }
+        nanos = number(kept)? * 10u32.pow(9 - kept.len() as u32);
+        rest = &fraction[count..];
+    }
+    // chrono keeps a leap second (`:60`) as second 59 with one more second of nanoseconds.
+    let (second, nanos) = match second {
+        60 => (59, nanos + 1_000_000_000),
+        _ => (second, nanos),
+    };
+    let local = date.and_hms_nano_opt(hour, minute, second, nanos)?;
+
+    let east = match rest.trim_ascii_start() {
+        [] | [b'Z' | b'z'] => 0,
+        [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] | [sign @ (b'+' | b'-'), h1, h2, m1, m2] => {
+            let (hours, minutes) = (number(&[*h1, *h2])?, number(&[*m1, *m2])?);
+            if minutes > 59 {
+                return None;
+            }
+            let seconds = (hours * 3600 + minutes * 60) as i32;
+            if *sign == b'-' {
+                -seconds
+            } else {
+                seconds
+            }
+        }
+        _ => return None,
+    };
+    let zone = FixedOffset::east_opt(east)?;
+    Some(
+        zone.from_local_datetime(&local)
+            .single()?
+            .with_timezone(&Utc),
+    )
+}
+
+/// The letters a line starts with, when a word ends there (no digit or `_` runs on).
+fn leading_word(text: &str) -> Option<&str> {
+    let end = text
+        .find(|c: char| !c.is_ascii_alphabetic())
+        .unwrap_or(text.len());
+    let runs_on = text[end..]
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_alphanumeric() || c == '_');
+    (end > 0 && !runs_on).then(|| &text[..end])
+}
+
+/// A level word at the head of a line, in any letter case: the first word after a timestamp
+/// that starts the line, bare or in square brackets (`2024-01-15 10:00:00 warn ...`,
+/// `[2024-01-15 10:00:00] warn ...`; spaces, `-`, `|` or `:` may stand between), or the
+/// first word of the line when a colon follows it (`error: disk full`).
+/// `timestamp` is the first timestamp of `text`, as `find_timestamp` gives it.
+fn head_level(text: &str, timestamp: Option<&regex::Match>) -> Option<LogLevel> {
+    let lead = text.len() - text.trim_start().len();
+    let leads = |found: &&regex::Match| {
+        let rest = &text[lead..found.start()];
+        rest.is_empty() || (rest == "[" && text[found.end()..].starts_with(']'))
+    };
+    if let Some(timestamp) = timestamp.filter(leads) {
+        let rest = &text[timestamp.end()..];
+        let word = rest.trim_start_matches(|c: char| c.is_whitespace() || "]-|:".contains(c));
+        if word.len() == rest.len() {
+            return None;
+        }
+        return LogLevel::from_word(leading_word(word)?);
+    }
+    let text = &text[lead..];
+    let word = leading_word(text)?;
+    text[word.len()..]
+        .starts_with(':')
+        .then(|| LogLevel::from_word(word))?
+}
+
+/// The first level word that stands alone in square brackets, in any letter case: `[info]`.
+/// Only the few bytes after each `[` are read, so a line of many brackets costs one pass.
+fn bracket_level(text: &str) -> Option<LogLevel> {
+    text.match_indices('[').find_map(|(open, _)| {
+        let inner = &text.as_bytes()[open + 1..];
+        let close = inner
+            .iter()
+            .take(LogLevel::LONGEST_WORD + 1)
+            .position(|b| !b.is_ascii_alphabetic())?;
+        (inner[close] == b']').then(|| LogLevel::from_word(&text[open + 1..open + 1 + close]))?
+    })
+}
+
+/// The first timestamp in a text. One search serves both the timestamp and the level.
+fn find_timestamp(text: &str) -> Option<regex::Match<'_>> {
+    TIMESTAMP_RE.get()?.find(text)
+}
+
 fn init_regexes() {
-    TIMESTAMP_RE.get_or_init(|| {
-        Regex::new(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
-            .unwrap()
-    });
-    LOG_LEVEL_RE.get_or_init(|| {
-        Regex::new(r"\b(TRACE|VERBOSE|DEBUG|INFO|INFORMATION|WARN|WARNING|ERROR|ERR|FATAL|CRITICAL|CRIT)\b")
-            .unwrap()
-    });
+    TIMESTAMP_RE.get_or_init(|| Regex::new(TIMESTAMP_PATTERN).unwrap());
+    // A level word in capitals, anywhere in the line; the words come from the one table in
+    // `types.rs`. The places where a word counts in any letter case are in `extract_level`.
+    // This function runs for every line, so the pattern is built inside the closure.
+    LOG_LEVEL_RE
+        .get_or_init(|| Regex::new(&format!(r"\b(?:{})\b", LogLevel::words_pattern())).unwrap());
     THREAD_ID_RE.get_or_init(|| {
         Regex::new(concat!(
             r"(?:",
@@ -239,60 +425,37 @@ impl LogParser {
         let obj = value.as_object()?;
         let mut entry = self.base_entry(line_number, raw, LogFormat::Json);
 
-        entry.timestamp = self.extract_json_timestamp(obj);
-        entry.level = self.extract_json_level(obj);
-        entry.message = self.extract_json_message(obj);
-        entry.thread_id = self.extract_json_field(
-            obj,
-            &[
-                "thread",
-                "thread_id",
-                "tid",
-                "threadId",
-                "thread_name",
-                "threadName",
-            ],
-        );
-        entry.correlation_id =
-            self.extract_json_field(obj, &["correlation_id", "request_id", "req_id"]);
-        entry.trace_id = self.extract_json_field(obj, &["trace_id", "traceId"]);
-        entry.span_id = self.extract_json_field(obj, &["span_id", "spanId"]);
-        entry.parent_span_id = self.extract_json_field(obj, &["parent_span_id", "parentSpanId"]);
-        entry.service_name =
-            self.extract_json_field(obj, &["service", "service_name", "serviceName"]);
+        // The keys read into an entry field. Every other key stays in `fields`, a listed key
+        // whose value could not be read (`"level": 30`, a second message key) among them.
+        let mut taken: Vec<&str> = Vec::new();
+        entry.timestamp = take_first(TIMESTAMP_KEYS, &mut taken, |key| match obj.get(key)? {
+            Value::String(text) => read_timestamp(text),
+            Value::Number(number) => epoch_timestamp(number),
+            _ => None,
+        });
+        entry.level = take_first(LEVEL_KEYS, &mut taken, |key| {
+            obj.get(key)?.as_str().and_then(LogLevel::parse)
+        });
+        entry.message = take_first(MESSAGE_KEYS, &mut taken, |key| {
+            obj.get(key)?.as_str().map(String::from)
+        })
+        .unwrap_or_else(|| serde_json::to_string(obj).unwrap_or_default());
+        let mut id = |keys: &[&'static str]| {
+            take_first(keys, &mut taken, |key| match obj.get(key)? {
+                Value::String(text) => Some(text.clone()),
+                Value::Number(number) => Some(number.to_string()),
+                _ => None,
+            })
+        };
+        entry.thread_id = id(THREAD_KEYS);
+        entry.correlation_id = id(CORRELATION_KEYS);
+        entry.trace_id = id(TRACE_KEYS);
+        entry.span_id = id(SPAN_KEYS);
+        entry.parent_span_id = id(PARENT_SPAN_KEYS);
+        entry.service_name = id(SERVICE_KEYS);
 
         for (key, value) in obj.iter() {
-            if !matches!(
-                key.as_str(),
-                "timestamp"
-                    | "time"
-                    | "@timestamp"
-                    | "ts"
-                    | "level"
-                    | "severity"
-                    | "log_level"
-                    | "message"
-                    | "msg"
-                    | "text"
-                    | "thread"
-                    | "thread_id"
-                    | "tid"
-                    | "threadId"
-                    | "thread_name"
-                    | "threadName"
-                    | "service"
-                    | "service_name"
-                    | "serviceName"
-                    | "correlation_id"
-                    | "request_id"
-                    | "req_id"
-                    | "trace_id"
-                    | "traceId"
-                    | "span_id"
-                    | "spanId"
-                    | "parent_span_id"
-                    | "parentSpanId"
-            ) {
+            if !taken.contains(&key.as_str()) {
                 entry.fields.insert(key.clone(), value.clone());
             }
         }
@@ -303,8 +466,9 @@ impl LogParser {
     fn parse_plain(&self, line_number: usize, raw: &str) -> LogEntry {
         let mut entry = self.base_entry(line_number, raw, LogFormat::PlainText);
 
-        entry.timestamp = self.extract_timestamp(raw);
-        entry.level = self.extract_level(raw);
+        let timestamp = find_timestamp(raw);
+        entry.timestamp = timestamp.and_then(|found| read_timestamp(found.as_str()));
+        entry.level = self.extract_level(raw, timestamp.as_ref());
         entry.thread_id = self.extract_thread_id(raw);
         entry.correlation_id = self.extract_correlation_id(raw);
         entry.trace_id = self.extract_trace_id(raw);
@@ -331,16 +495,17 @@ impl LogParser {
             remaining = &raw[cap.get(0)?.end()..];
         }
 
+        let timestamp = find_timestamp(remaining);
         // Keyword fallback for syslog without priority prefix
         if entry.level.is_none() {
-            entry.level = self.extract_level(remaining);
+            entry.level = self.extract_level(remaining, timestamp.as_ref());
         }
         // Pattern-based inference for common syslog messages
         if entry.level.is_none() {
             entry.level = Self::infer_syslog_level(remaining);
         }
 
-        entry.timestamp = self.extract_timestamp(remaining);
+        entry.timestamp = timestamp.and_then(|found| read_timestamp(found.as_str()));
         entry.message = remaining.trim().to_string();
         Some(entry)
     }
@@ -439,6 +604,8 @@ impl LogParser {
     fn parse_logfmt(&self, line_number: usize, raw: &str) -> Option<LogEntry> {
         let mut entry = self.base_entry(line_number, raw, LogFormat::Logfmt);
         let mut fields = HashMap::new();
+        // Each value as written in the line: an id is that text, not the number it parses to.
+        let mut texts: Vec<(&str, &str)> = Vec::new();
 
         for cap in LOGFMT_PAIR_RE.get()?.captures_iter(raw) {
             let key = cap.get(1)?.as_str();
@@ -464,6 +631,7 @@ impl LogParser {
                 Value::String(value.to_string())
             };
 
+            texts.push((key, value));
             fields.insert(key.to_string(), json_value);
         }
 
@@ -475,43 +643,30 @@ impl LogParser {
             .find(raw)
             .map_or("", |first_pair| &raw[..first_pair.start()]);
 
-        if let Some(Value::String(level)) = fields.get("level").or_else(|| fields.get("lvl")) {
-            entry.level = LogLevel::parse(level);
-        } else {
-            entry.level = self.extract_level(prefix).or(Some(LogLevel::Unknown));
+        // A key written twice keeps its last value, as `fields` does.
+        let written = |key: &str| {
+            texts
+                .iter()
+                .rev()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| *value)
+        };
+        let text = |keys: &[&str]| first_by(keys, |key| written(key).map(String::from));
+        let lead = find_timestamp(prefix);
+        entry.level = first_by(LEVEL_KEYS, |key| written(key).and_then(LogLevel::from_word))
+            .or_else(|| self.extract_level(prefix, lead.as_ref()))
+            .or(Some(LogLevel::Unknown));
+        if let Some(message) = text(MESSAGE_KEYS) {
+            entry.message = message;
         }
-        if let Some(Value::String(msg)) = fields.get("msg").or_else(|| fields.get("message")) {
-            entry.message = msg.clone();
-        }
-        if let Some(Value::String(ts)) = fields.get("ts").or_else(|| fields.get("timestamp")) {
-            entry.timestamp = DateTime::parse_from_rfc3339(ts)
-                .ok()
-                .map(|dt| dt.with_timezone(&Utc));
-        } else {
-            entry.timestamp = self.extract_timestamp(prefix);
-        }
-        if let Some(Value::String(thread)) =
-            fields.get("thread").or_else(|| fields.get("thread_id"))
-        {
-            entry.thread_id = Some(thread.clone());
-        }
-        if let Some(Value::String(corr)) = fields
-            .get("correlation_id")
-            .or_else(|| fields.get("request_id"))
-        {
-            entry.correlation_id = Some(corr.clone());
-        }
-        if let Some(Value::String(trace)) = fields.get("trace_id") {
-            entry.trace_id = Some(trace.clone());
-        }
-        if let Some(Value::String(span)) = fields.get("span_id") {
-            entry.span_id = Some(span.clone());
-        }
-        if let Some(Value::String(service)) =
-            fields.get("service").or_else(|| fields.get("service_name"))
-        {
-            entry.service_name = Some(service.clone());
-        }
+        entry.timestamp = first_by(TIMESTAMP_KEYS, |key| written(key).and_then(read_timestamp))
+            .or_else(|| lead.and_then(|found| read_timestamp(found.as_str())));
+        entry.thread_id = text(THREAD_KEYS).or_else(|| self.extract_thread_id(prefix));
+        entry.correlation_id = text(CORRELATION_KEYS);
+        entry.trace_id = text(TRACE_KEYS);
+        entry.span_id = text(SPAN_KEYS);
+        entry.parent_span_id = text(PARENT_SPAN_KEYS);
+        entry.service_name = text(SERVICE_KEYS);
 
         entry.fields = fields;
         Some(entry)
@@ -523,7 +678,7 @@ impl LogParser {
 
         entry.timestamp = caps
             .name("timestamp")
-            .and_then(|m| self.parse_timestamp_flex(m.as_str()));
+            .and_then(|m| self.parse_custom_timestamp(m.as_str()));
         entry.level = caps.name("level").and_then(|m| LogLevel::parse(m.as_str()));
         entry.thread_id = caps
             .name("thread")
@@ -548,110 +703,43 @@ impl LogParser {
         Some(entry)
     }
 
-    fn parse_timestamp_flex(&self, value: &str) -> Option<DateTime<Utc>> {
-        if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
-            return Some(dt.with_timezone(&Utc));
-        }
-        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S") {
-            return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
-        }
-        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(value, "%d-%m-%Y %H:%M:%S") {
-            return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
-        }
-        None
+    /// The shared reader, then the looser forms only a custom format's capture may hold:
+    /// fields written without a leading zero (`2024-1-5 1:02:03`), or the day first.
+    fn parse_custom_timestamp(&self, value: &str) -> Option<DateTime<Utc>> {
+        read_timestamp(value).or_else(|| {
+            ["%Y-%m-%d %H:%M:%S", "%d-%m-%Y %H:%M:%S"]
+                .iter()
+                .find_map(|format| NaiveDateTime::parse_from_str(value, format).ok())
+                .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc))
+        })
     }
 
-    fn extract_json_timestamp(
-        &self,
-        obj: &serde_json::Map<String, serde_json::Value>,
-    ) -> Option<DateTime<Utc>> {
-        for field in &["timestamp", "time", "@timestamp", "ts"] {
-            if let Some(value) = obj.get(*field) {
-                if let Some(s) = value.as_str() {
-                    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-                        return Some(dt.with_timezone(&Utc));
-                    }
-                } else if let Some(ts_num) = value.as_i64() {
-                    if let Some(dt) = DateTime::from_timestamp(ts_num, 0) {
-                        return Some(dt);
-                    }
-                }
-            }
+    /// The leftmost level word in a place where one counts. In capitals a word counts
+    /// anywhere. In any letter case it counts at the head of the line (`head_level`) and alone
+    /// in square brackets (`bracket_level`); a lower-case word inside a sentence does not.
+    /// `timestamp` is the first timestamp of `text`, as `find_timestamp` gives it.
+    fn extract_level(&self, text: &str, timestamp: Option<&regex::Match>) -> Option<LogLevel> {
+        if let Some(level) = head_level(text, timestamp) {
+            return Some(level);
         }
-        None
-    }
-
-    fn extract_json_level(
-        &self,
-        obj: &serde_json::Map<String, serde_json::Value>,
-    ) -> Option<LogLevel> {
-        for field in &["level", "severity", "log_level"] {
-            if let Some(value) = obj.get(*field) {
-                if let Some(s) = value.as_str() {
-                    return LogLevel::parse(s);
-                }
-            }
-        }
-        None
-    }
-
-    fn extract_json_message(&self, obj: &serde_json::Map<String, serde_json::Value>) -> String {
-        for field in &["message", "msg", "text"] {
-            if let Some(value) = obj.get(*field) {
-                if let Some(s) = value.as_str() {
-                    return s.to_string();
-                }
-            }
-        }
-        serde_json::to_string(obj).unwrap_or_default()
-    }
-
-    fn extract_json_field(
-        &self,
-        obj: &serde_json::Map<String, serde_json::Value>,
-        keys: &[&str],
-    ) -> Option<String> {
-        for key in keys {
-            if let Some(value) = obj.get(*key) {
-                if let Some(s) = value.as_str() {
-                    return Some(s.to_string());
-                }
-            }
-        }
-        None
-    }
-
-    fn extract_timestamp(&self, text: &str) -> Option<DateTime<Utc>> {
-        let re = TIMESTAMP_RE.get()?;
-        let cap = re.find(text)?;
-        let ts_str = cap.as_str();
-
-        if let Ok(dt) = DateTime::parse_from_rfc3339(ts_str) {
-            return Some(dt.with_timezone(&Utc));
-        }
-        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(ts_str, "%Y-%m-%d %H:%M:%S") {
-            return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
-        }
-        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(ts_str, "%Y-%m-%dT%H:%M:%S") {
-            return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
-        }
-
-        None
-    }
-
-    fn extract_level(&self, text: &str) -> Option<LogLevel> {
-        let re = LOG_LEVEL_RE.get()?;
-        let cap = re.find(text)?;
-        LogLevel::parse(cap.as_str())
+        let capital = LOG_LEVEL_RE.get()?.find(text);
+        let end = capital.map_or(text.len(), |word| word.start());
+        bracket_level(&text[..end])
+            .or_else(|| capital.and_then(|word| LogLevel::from_word(word.as_str())))
     }
 
     fn extract_thread_id(&self, text: &str) -> Option<String> {
         let re = THREAD_ID_RE.get()?;
-        let cap = re.captures(text)?;
-        // Check all capture groups (1-5) since we have multiple alternations
-        for i in 1..=5 {
-            if let Some(m) = cap.get(i) {
-                return Some(m.as_str().to_string());
+        for cap in re.captures_iter(text) {
+            // Check all capture groups (1-5) since we have multiple alternations
+            for i in 1..=5 {
+                if let Some(m) = cap.get(i) {
+                    // Group 2 is `[name]`: a level word in brackets is the level, not a thread.
+                    if i == 2 && LogLevel::from_word(m.as_str()).is_some() {
+                        break;
+                    }
+                    return Some(m.as_str().to_string());
+                }
             }
         }
         None
@@ -975,5 +1063,393 @@ mod tests {
             entry.fields.get("status").and_then(|v| v.as_u64()),
             Some(503)
         );
+    }
+
+    fn parse(line: &str) -> LogEntry {
+        LogParser::new("test.log").parse_line(1, line).unwrap()
+    }
+
+    fn utc(s: &str) -> Option<DateTime<Utc>> {
+        Some(DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc))
+    }
+
+    #[test]
+    fn test_plain_text_level_words_and_places() {
+        let rows: &[(&str, Option<LogLevel>)] = &[
+            ("2024-01-01T00:00:00Z trace Message", Some(LogLevel::Trace)),
+            ("2024-01-01T00:00:00Z Trace Message", Some(LogLevel::Trace)),
+            ("2024-01-01T00:00:00Z warn Message", Some(LogLevel::Warn)),
+            ("2024-01-01T00:00:00Z ERR Message", Some(LogLevel::Error)),
+            ("2024-01-01T00:00:00Z CRIT Message", Some(LogLevel::Fatal)),
+            (
+                "2024-01-01T00:00:00Z INFORMATION Message",
+                Some(LogLevel::Info),
+            ),
+            (
+                "2024-01-15 10:00:00,123 error cannot open file",
+                Some(LogLevel::Error),
+            ),
+            ("2024-01-15 10:00:00 - info - started", Some(LogLevel::Info)),
+            (
+                "10:30:00.123 [info] Application myapp started",
+                Some(LogLevel::Info),
+            ),
+            (
+                "2024/01/15 10:00:00 [error] 1234#0: *1 connect() failed",
+                Some(LogLevel::Error),
+            ),
+            ("warning: unused variable", Some(LogLevel::Warn)),
+            ("Something happened ERROR occurred", Some(LogLevel::Error)),
+            (
+                "INFORMATION about DEBUGGING the ERROR in WARNING systems",
+                Some(LogLevel::Info),
+            ),
+            ("2024-01-01T00:00:00Z Just a message", None),
+            ("Loading user info for bob", None),
+            ("no error found in 3 files", None),
+            ("Server returned error NXDOMAIN", None),
+            ("stack trace follows", None),
+            ("2024-01-01T00:00:00Z [worker-1] fetching debug info", None),
+            (
+                "[2024-01-15 10:00:00] error something broke",
+                Some(LogLevel::Error),
+            ),
+            (
+                "[2024-01-15T10:00:00.123Z] info: started",
+                Some(LogLevel::Info),
+            ),
+            ("[2024-01-15 10:00:00 worker] error in a sentence", None),
+            ("x 2024-01-15 10:00:00 error in a sentence", None),
+        ];
+        for (line, expected) in rows {
+            assert_eq!(parse(line).level, *expected, "level of {line:?}");
+        }
+    }
+
+    #[test]
+    fn test_bracketed_level_word_is_never_the_thread_id() {
+        let entry = parse("2024-01-01 10:00:00 [INFO] started");
+        assert_eq!(entry.level, Some(LogLevel::Info), "level of [INFO] line");
+        assert_eq!(entry.thread_id, None, "thread id of [INFO] line");
+
+        let entry = parse("2024-01-01 10:00:00 [INFO] [worker-1] started");
+        assert_eq!(entry.level, Some(LogLevel::Info), "level of two brackets");
+        assert_eq!(
+            entry.thread_id.as_deref(),
+            Some("worker-1"),
+            "thread id of two brackets"
+        );
+    }
+
+    #[test]
+    fn test_json_and_logfmt_read_one_list_of_keys_per_field() {
+        let json_levels = [
+            (r#"{"loglevel": "error", "message": "test"}"#, "loglevel"),
+            (r#"{"lvl": "error", "message": "test"}"#, "lvl"),
+        ];
+        for (line, what) in json_levels {
+            assert_eq!(parse(line).level, Some(LogLevel::Error), "level of {what}");
+        }
+
+        let entry = parse(r#"{"level": "err", "content": "disk full"}"#);
+        assert_eq!(entry.level, Some(LogLevel::Error), "level of err");
+        assert_eq!(entry.message, "disk full", "message from content");
+
+        let entry = parse(r#"{"datetime": "2024-01-15T10:00:00Z", "msg": "x"}"#);
+        assert_eq!(entry.timestamp, utc("2024-01-15T10:00:00Z"), "datetime key");
+
+        let entry = parse(r#"{"requestId": "r-9", "msg": "x"}"#);
+        assert_eq!(entry.correlation_id.as_deref(), Some("r-9"), "requestId");
+        assert!(
+            !entry.fields.contains_key("requestId"),
+            "requestId must not stay in fields: {:?}",
+            entry.fields
+        );
+
+        let line = r#"ts=2024-01-15T10:00:00Z severity=warning tid=api-7 requestId=r-9 msg="slow""#;
+        let entry = parse(line);
+        assert_eq!(entry.format, LogFormat::Logfmt, "format of logfmt row");
+        assert_eq!(entry.level, Some(LogLevel::Warn), "logfmt level");
+        assert_eq!(entry.thread_id.as_deref(), Some("api-7"), "logfmt thread");
+        assert_eq!(
+            entry.correlation_id.as_deref(),
+            Some("r-9"),
+            "logfmt correlation"
+        );
+        assert_eq!(entry.message, "slow", "logfmt message");
+
+        let entry = parse("2024-01-15T10:00:00Z INFO time=12ms user=bob");
+        assert_eq!(entry.level, Some(LogLevel::Info), "prefix level");
+        assert_eq!(
+            entry.timestamp,
+            utc("2024-01-15T10:00:00Z"),
+            "12ms is no timestamp, the prefix is read"
+        );
+    }
+
+    #[test]
+    fn test_an_id_that_is_a_number_is_still_an_id() {
+        let entry = parse(r#"{"tid": 1234, "msg": "x"}"#);
+        assert_eq!(entry.thread_id.as_deref(), Some("1234"), "json number tid");
+
+        let entry = parse(r#"level=info thread=7 msg="x""#);
+        assert_eq!(
+            entry.thread_id.as_deref(),
+            Some("7"),
+            "logfmt number thread"
+        );
+
+        let entry = parse(r#"level=info trace_id=0012345678901234 span_id=00000042 msg="x""#);
+        assert_eq!(
+            entry.trace_id.as_deref(),
+            Some("0012345678901234"),
+            "trace id keeps its zeros"
+        );
+        assert_eq!(
+            entry.span_id.as_deref(),
+            Some("00000042"),
+            "span id keeps its zeros"
+        );
+    }
+
+    /// Every spelling `read_timestamp` takes names the instant chrono reads from the RFC 3339
+    /// spelling of the same fields, and what chrono refuses there (month 13, 30 February,
+    /// hour 24, a zone past a day) is refused in every spelling.
+    #[test]
+    fn test_read_timestamp_agrees_with_chrono_in_every_spelling() {
+        let dates = [
+            "2024-01-15",
+            "2024-02-29",
+            "2023-02-29",
+            "2024-13-01",
+            "2024-00-10",
+            "2024-04-31",
+            "0001-01-01",
+            "9999-12-31",
+        ];
+        let times = [
+            "00:00:00", "10:00:00", "23:59:59", "23:59:60", "10:30:60", "24:00:00", "10:60:00",
+            "10:00:61",
+        ];
+        let fractions = ["", ".5", ".123", ".123456789", ".1234567891234"];
+        let zones = [
+            "Z", "+00:00", "+09:00", "-05:30", "+23:59", "+24:00", "-00:00", "+09:60",
+        ];
+        let (mut read, mut refused) = (0, 0);
+        for date in dates {
+            for time in times {
+                for fraction in fractions {
+                    for zone in zones {
+                        let rfc3339 = format!("{date}T{time}{fraction}{zone}");
+                        let expected = DateTime::parse_from_rfc3339(&rfc3339)
+                            .ok()
+                            .map(|dt| dt.with_timezone(&Utc));
+                        match expected {
+                            Some(_) => read += 1,
+                            None => refused += 1,
+                        }
+                        let mut spellings = vec![
+                            rfc3339.clone(),
+                            rfc3339.replace('T', " "),
+                            rfc3339.replace('T', "t"),
+                            rfc3339.replace('.', ","),
+                            format!("{date}T{time}{fraction}{}", zone.replace(':', "")),
+                            format!("{date} {time}{fraction} {zone}"),
+                            format!("  {rfc3339}  "),
+                        ];
+                        if zone == "Z" {
+                            spellings.extend([
+                                format!("{date}T{time}{fraction}"),
+                                format!("{date} {time}{fraction}z"),
+                            ]);
+                        }
+                        for spelling in spellings {
+                            assert_eq!(read_timestamp(&spelling), expected, "{spelling:?}");
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            (read, refused),
+            (600, 1960),
+            "how many of the table chrono reads"
+        );
+    }
+
+    #[test]
+    fn test_read_timestamp_refuses_any_other_shape() {
+        for text in [
+            "",
+            "2024-01-15",
+            "2024-01-15T10:00",
+            "2024-01-1510:00:00",
+            "2024-01-15_10:00:00",
+            "2024-1-15 10:00:00",
+            "2024-01-15 1:00:00",
+            "24-01-15 10:00:00",
+            "2024/01/15 10:00:00",
+            "2024-01-15 10:00:00.",
+            "2024-01-15 10:00:00.x",
+            "2024-01-15 10:00:00+09",
+            "2024-01-15 10:00:00+9:00",
+            "2024-01-15 10:00:00+09:00x",
+            "2024-01-15 10:00:00 UTC",
+            "2024-01-15 10:00:00 tomorrow",
+            "+024-01-15 10:00:00",
+            "２０２４-01-15 10:00:00",
+            "2024-01-15 10:00:00\u{3000}Z",
+        ] {
+            assert_eq!(read_timestamp(text), None, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn test_one_reader_for_timestamp_strings() {
+        let rows: &[(&str, &str)] = &[
+            (
+                r#"{"timestamp": "2024-01-15 10:00:00", "msg": "x"}"#,
+                "2024-01-15T10:00:00Z",
+            ),
+            (
+                r#"{"timestamp": "2024-01-15T10:00:00", "msg": "x"}"#,
+                "2024-01-15T10:00:00Z",
+            ),
+            (
+                r#"{"time": "2024-01-15 10:00:00,123", "msg": "x"}"#,
+                "2024-01-15T10:00:00.123Z",
+            ),
+            (
+                r#"{"ts": "2024-01-15T19:00:00+0900", "msg": "x"}"#,
+                "2024-01-15T10:00:00Z",
+            ),
+            (
+                "2024-01-15 10:00:00.123 INFO started",
+                "2024-01-15T10:00:00.123Z",
+            ),
+            (
+                "2024-01-15 10:00:00,123 INFO started",
+                "2024-01-15T10:00:00.123Z",
+            ),
+            (
+                r#"ts="2024-01-15 10:00:00" level=info msg="x""#,
+                "2024-01-15T10:00:00Z",
+            ),
+            (
+                r#"{"ts": "2024-01-15 19:00:00+09:00", "msg": "x"}"#,
+                "2024-01-15T10:00:00Z",
+            ),
+            (
+                r#"{"ts": "2024-01-15 19:00:00.250+0900", "msg": "x"}"#,
+                "2024-01-15T10:00:00.250Z",
+            ),
+            (
+                r#"{"ts": "2024-01-15 10:00:00Z", "msg": "x"}"#,
+                "2024-01-15T10:00:00Z",
+            ),
+            (
+                r#"{"ts": "2024-01-15T05:00:00.5-05:00", "msg": "x"}"#,
+                "2024-01-15T10:00:00.5Z",
+            ),
+            (
+                "2024-01-15 05:00:00-0500 INFO started",
+                "2024-01-15T10:00:00Z",
+            ),
+        ];
+        for (line, expected) in rows {
+            assert_eq!(parse(line).timestamp, utc(expected), "timestamp of {line}");
+        }
+        for line in [
+            r#"{"timestamp": "not a time", "msg": "x"}"#,
+            r#"{"timestamp": "時刻ではない文字列です、ほんとうに", "msg": "x"}"#,
+            r#"{"timestamp": "2024-01-15 10:00:00 tomorrow", "msg": "x"}"#,
+        ] {
+            assert_eq!(parse(line).timestamp, None, "no timestamp in {line}");
+        }
+
+        let regex = Regex::new(r"^(?P<timestamp>\S+ \S+) (?P<message>.*)$").unwrap();
+        let custom = LogParser::with_custom_regex("test.log", regex);
+        let entry = custom.parse_line(1, "15-01-2024 10:00:00 hello").unwrap();
+        assert_eq!(
+            entry.timestamp,
+            utc("2024-01-15T10:00:00Z"),
+            "custom regex keeps its day-first form"
+        );
+        let entry = custom.parse_line(1, "2024-01-15 10:00:00,5 hello").unwrap();
+        assert_eq!(
+            entry.timestamp,
+            utc("2024-01-15T10:00:00.5Z"),
+            "custom regex reads the shared forms"
+        );
+        let entry = custom.parse_line(1, "2024-1-5 1:02:03 hello").unwrap();
+        assert_eq!(
+            entry.timestamp,
+            utc("2024-01-05T01:02:03Z"),
+            "custom regex keeps fields written without a leading zero"
+        );
+    }
+
+    #[test]
+    fn test_logfmt_thread_in_brackets_before_the_pairs_is_read() {
+        let line = "2024-01-01T00:00:00Z INFO [worker-1] correlation_id=req-123 trace_id=abcd1234abcd1234 span_id=efef5678 Database query";
+        let entry = parse(line);
+        assert_eq!(entry.format, LogFormat::Logfmt, "format");
+        assert_eq!(entry.thread_id.as_deref(), Some("worker-1"), "thread id");
+        assert_eq!(entry.level, Some(LogLevel::Info), "level");
+    }
+
+    #[test]
+    fn test_json_epoch_number_is_read_in_the_unit_its_size_tells() {
+        let rows: &[(&str, &str)] = &[
+            (r#"{"ts": 1705312800, "msg": "x"}"#, "2024-01-15T10:00:00Z"),
+            (
+                r#"{"time": 1705312800123, "msg": "x"}"#,
+                "2024-01-15T10:00:00.123Z",
+            ),
+            (
+                r#"{"time": 1705312800123456, "msg": "x"}"#,
+                "2024-01-15T10:00:00.123456Z",
+            ),
+            (
+                r#"{"time": 1705312800123456789, "msg": "x"}"#,
+                "2024-01-15T10:00:00.123456789Z",
+            ),
+            (
+                r#"{"ts": 1705312800.25, "msg": "x"}"#,
+                "2024-01-15T10:00:00.25Z",
+            ),
+            (
+                r#"{"ts": 1705312800123.5, "msg": "x"}"#,
+                "2024-01-15T10:00:00.1235Z",
+            ),
+            (r#"{"ts": 0, "msg": "x"}"#, "1970-01-01T00:00:00Z"),
+            (r#"{"ts": -1, "msg": "x"}"#, "1969-12-31T23:59:59Z"),
+            (r#"{"ts": -1500, "msg": "x"}"#, "1969-12-31T23:35:00Z"),
+        ];
+        for (line, expected) in rows {
+            assert_eq!(parse(line).timestamp, utc(expected), "timestamp of {line}");
+        }
+        for line in [
+            r#"{"ts": 1e300, "msg": "x"}"#,
+            r#"{"ts": true, "msg": "x"}"#,
+        ] {
+            assert_eq!(parse(line).timestamp, None, "no timestamp in {line}");
+        }
+    }
+
+    #[test]
+    fn test_json_key_that_was_not_read_stays_in_fields() {
+        let entry = parse(
+            r#"{"msg": "a", "text": "b", "level": 30, "lvl": "warn", "time": "soon", "ts": 1705312800, "thread": ["x"], "tid": 7, "user": "u1"}"#,
+        );
+        assert_eq!(entry.message, "a", "message");
+        assert_eq!(entry.level, Some(LogLevel::Warn), "level");
+        assert_eq!(entry.timestamp, utc("2024-01-15T10:00:00Z"), "timestamp");
+        assert_eq!(entry.thread_id.as_deref(), Some("7"), "thread id");
+        let expected: HashMap<String, Value> = serde_json::from_str(
+            r#"{"text": "b", "level": 30, "time": "soon", "thread": ["x"], "user": "u1"}"#,
+        )
+        .unwrap();
+        assert_eq!(entry.fields, expected, "fields");
     }
 }

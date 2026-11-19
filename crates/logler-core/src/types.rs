@@ -36,17 +36,67 @@ pub enum LogLevel {
     Unknown,
 }
 
+/// The one table of level words: every word a log may use for a level, in capitals.
+/// `LogLevel::parse`, `LogLevel::from_word` and the plain-text level patterns all read it.
+pub const LEVEL_WORDS: &[(LogLevel, &[&str])] = &[
+    (LogLevel::Trace, &["TRACE", "VERBOSE"]),
+    (LogLevel::Debug, &["DEBUG"]),
+    (LogLevel::Info, &["INFO", "INFORMATION", "NOTICE"]),
+    (LogLevel::Warn, &["WARN", "WARNING"]),
+    (LogLevel::Error, &["ERROR", "ERR", "SEVERE"]),
+    (
+        LogLevel::Fatal,
+        &[
+            "FATAL",
+            "CRITICAL",
+            "CRIT",
+            "EMERG",
+            "EMERGENCY",
+            "ALERT",
+            "PANIC",
+        ],
+    ),
+];
+
 impl LogLevel {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.to_uppercase().as_str() {
-            "TRACE" => Some(Self::Trace),
-            "DEBUG" => Some(Self::Debug),
-            "INFO" => Some(Self::Info),
-            "WARN" | "WARNING" => Some(Self::Warn),
-            "ERROR" => Some(Self::Error),
-            "FATAL" | "CRITICAL" => Some(Self::Fatal),
-            _ => Some(Self::Unknown),
+    /// The byte length of the longest word in `LEVEL_WORDS`.
+    pub const LONGEST_WORD: usize = {
+        let (mut longest, mut level) = (0, 0);
+        while level < LEVEL_WORDS.len() {
+            let words = LEVEL_WORDS[level].1;
+            let mut word = 0;
+            while word < words.len() {
+                if words[word].len() > longest {
+                    longest = words[word].len();
+                }
+                word += 1;
+            }
+            level += 1;
         }
+        longest
+    };
+
+    /// The level a word names, ignoring letter case; `None` for a word not in the table.
+    pub fn from_word(s: &str) -> Option<Self> {
+        LEVEL_WORDS
+            .iter()
+            .find(|(_, words)| words.iter().any(|w| w.eq_ignore_ascii_case(s)))
+            .map(|(level, _)| *level)
+    }
+
+    /// Like `from_word`, but any other word answers `Some(Unknown)`.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(Self::from_word(s).unwrap_or(Self::Unknown))
+    }
+
+    /// Every level word as a regex alternation, longest first, built from `LEVEL_WORDS`.
+    pub fn words_pattern() -> String {
+        let mut words: Vec<&str> = LEVEL_WORDS
+            .iter()
+            .flat_map(|(_, words)| words.iter().copied())
+            .collect();
+        words.sort_by_key(|w| std::cmp::Reverse(w.len()));
+        words.join("|")
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -362,4 +412,48 @@ pub enum LogFormat {
     Logfmt,
     Custom,
     Unknown,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_level_word_table_maps_every_word_in_any_letter_case() {
+        let table: &[(LogLevel, &[&str])] = &[
+            (LogLevel::Trace, &["TRACE", "VERBOSE"]),
+            (LogLevel::Debug, &["DEBUG"]),
+            (LogLevel::Info, &["INFO", "INFORMATION", "NOTICE"]),
+            (LogLevel::Warn, &["WARN", "WARNING"]),
+            (LogLevel::Error, &["ERROR", "ERR", "SEVERE"]),
+            (
+                LogLevel::Fatal,
+                &[
+                    "FATAL",
+                    "CRITICAL",
+                    "CRIT",
+                    "EMERG",
+                    "EMERGENCY",
+                    "ALERT",
+                    "PANIC",
+                ],
+            ),
+        ];
+        for (level, words) in table {
+            for word in *words {
+                for spelling in [word.to_string(), word.to_lowercase()] {
+                    assert_eq!(
+                        LogLevel::parse(&spelling),
+                        Some(*level),
+                        "word {spelling:?} should read as {level:?}"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            LogLevel::parse("bogus"),
+            Some(LogLevel::Unknown),
+            "an unlisted word answers Some(Unknown)"
+        );
+    }
 }
