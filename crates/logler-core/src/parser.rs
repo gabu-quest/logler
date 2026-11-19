@@ -672,32 +672,44 @@ impl LogParser {
         Some(entry)
     }
 
+    /// A line read by the user's regex. Every named group is read the way the JSON branch reads
+    /// a string value: a group named by one of the key lists fills that field (first key
+    /// present wins); every other group that took part in the match, and a listed group whose
+    /// value was not read, goes into `fields` as captured.
     fn try_parse_custom(&self, line_number: usize, raw: &str, regex: &Regex) -> Option<LogEntry> {
         let caps = regex.captures(raw)?;
         let mut entry = self.base_entry(line_number, raw, LogFormat::Custom);
 
-        entry.timestamp = caps
-            .name("timestamp")
-            .and_then(|m| self.parse_custom_timestamp(m.as_str()));
-        entry.level = caps.name("level").and_then(|m| LogLevel::parse(m.as_str()));
-        entry.thread_id = caps
-            .name("thread")
-            .or_else(|| caps.name("thread_id"))
-            .map(|m| m.as_str().to_string());
-        entry.correlation_id = caps
-            .name("correlation_id")
-            .or_else(|| caps.name("request_id"))
-            .map(|m| m.as_str().to_string());
-        entry.trace_id = caps.name("trace_id").map(|m| m.as_str().to_string());
-        entry.span_id = caps.name("span_id").map(|m| m.as_str().to_string());
-        entry.parent_span_id = caps.name("parent_span_id").map(|m| m.as_str().to_string());
-        entry.service_name = caps
-            .name("service")
-            .or_else(|| caps.name("service_name"))
-            .map(|m| m.as_str().to_string());
+        let mut taken: Vec<&str> = Vec::new();
+        let group = |key: &str| caps.name(key).map(|m| m.as_str());
+        entry.timestamp = take_first(TIMESTAMP_KEYS, &mut taken, |key| {
+            self.parse_custom_timestamp(group(key)?)
+        });
+        entry.level = take_first(LEVEL_KEYS, &mut taken, |key| LogLevel::parse(group(key)?));
+        if let Some(message) =
+            take_first(MESSAGE_KEYS, &mut taken, |key| group(key).map(String::from))
+        {
+            entry.message = message;
+        }
+        let mut id = |keys: &[&'static str]| {
+            take_first(keys, &mut taken, |key| group(key).map(String::from))
+        };
+        entry.thread_id = id(THREAD_KEYS);
+        entry.correlation_id = id(CORRELATION_KEYS);
+        entry.trace_id = id(TRACE_KEYS);
+        entry.span_id = id(SPAN_KEYS);
+        entry.parent_span_id = id(PARENT_SPAN_KEYS);
+        entry.service_name = id(SERVICE_KEYS);
 
-        if let Some(msg) = caps.name("message").or_else(|| caps.name("msg")) {
-            entry.message = msg.as_str().to_string();
+        for name in regex.capture_names().flatten() {
+            if taken.contains(&name) {
+                continue;
+            }
+            if let Some(value) = group(name) {
+                entry
+                    .fields
+                    .insert(name.to_string(), Value::String(value.to_string()));
+            }
         }
 
         Some(entry)
@@ -1451,5 +1463,141 @@ mod tests {
         )
         .unwrap();
         assert_eq!(entry.fields, expected, "fields");
+    }
+
+    #[test]
+    fn test_custom_regex_reads_every_named_group() {
+        let plc = Regex::new(
+            r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\|(?P<level>\w+)\|(?P<station>[\w-]+)\|(?P<message>.*)$",
+        )
+        .unwrap();
+        let robot = Regex::new(r"^(?P<lvl>\w+);(?P<axis>\d+);(?P<msg>.*)$").unwrap();
+        let ids = Regex::new(
+            r"^(?P<request_id>\S+) (?P<threadName>\S+) (?P<level>\S+) (?P<user>\S+)?(?P<note>x)?$",
+        )
+        .unwrap();
+        let stamped = Regex::new(r"^(?P<timestamp>\S+) (?P<message>.*)$").unwrap();
+        let fields = |pairs: &[(&str, &str)]| -> HashMap<String, Value> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), Value::String(v.to_string())))
+                .collect()
+        };
+
+        // (regex, line, format, level, timestamp, message, thread, correlation, fields)
+        #[allow(clippy::type_complexity)]
+        let rows: Vec<(
+            &Regex,
+            &str,
+            LogFormat,
+            Option<LogLevel>,
+            Option<&str>,
+            &str,
+            Option<&str>,
+            Option<&str>,
+            HashMap<String, Value>,
+        )> = vec![
+            (
+                &plc,
+                "2024-01-15 10:00:00|warn|ST-07|pressure low",
+                LogFormat::Custom,
+                Some(LogLevel::Warn),
+                Some("2024-01-15T10:00:00Z"),
+                "pressure low",
+                None,
+                None,
+                fields(&[("station", "ST-07")]),
+            ),
+            (
+                &plc,
+                "2024-01-15 10:00:01|error|ST-07|valve stuck",
+                LogFormat::Custom,
+                Some(LogLevel::Error),
+                Some("2024-01-15T10:00:01Z"),
+                "valve stuck",
+                None,
+                None,
+                fields(&[("station", "ST-07")]),
+            ),
+            (
+                &plc,
+                "2024-01-15 10:00:02 INFO a plain line in a plc file",
+                LogFormat::PlainText,
+                Some(LogLevel::Info),
+                Some("2024-01-15T10:00:02Z"),
+                "2024-01-15 10:00:02 INFO a plain line in a plc file",
+                None,
+                None,
+                HashMap::new(),
+            ),
+            (
+                &robot,
+                "error;3;overtravel",
+                LogFormat::Custom,
+                Some(LogLevel::Error),
+                None,
+                "overtravel",
+                None,
+                None,
+                fields(&[("axis", "3")]),
+            ),
+            (
+                &robot,
+                "info;1;homed",
+                LogFormat::Custom,
+                Some(LogLevel::Info),
+                None,
+                "homed",
+                None,
+                None,
+                fields(&[("axis", "1")]),
+            ),
+            (
+                &ids,
+                "req-9 pool-3 bogus bob",
+                LogFormat::Custom,
+                // A word that names no level reads as Unknown, as in the JSON branch.
+                Some(LogLevel::Unknown),
+                None,
+                "req-9 pool-3 bogus bob",
+                Some("pool-3"),
+                Some("req-9"),
+                // `note` did not take part in the match: it is absent.
+                fields(&[("user", "bob")]),
+            ),
+            (
+                &stamped,
+                "notatime hi",
+                LogFormat::Custom,
+                None,
+                None,
+                "hi",
+                None,
+                None,
+                // A listed group whose value could not be read is kept as captured.
+                fields(&[("timestamp", "notatime")]),
+            ),
+        ];
+        for (regex, line, format, level, timestamp, message, thread, correlation, expected) in rows
+        {
+            let entry = LogParser::with_custom_regex("test.log", regex.clone())
+                .parse_line(1, line)
+                .unwrap();
+            assert_eq!(entry.format, format, "format of {line}");
+            assert_eq!(entry.level, level, "level of {line}");
+            assert_eq!(
+                entry.timestamp,
+                timestamp.and_then(utc),
+                "timestamp of {line}"
+            );
+            assert_eq!(entry.message, message, "message of {line}");
+            assert_eq!(entry.thread_id.as_deref(), thread, "thread of {line}");
+            assert_eq!(
+                entry.correlation_id.as_deref(),
+                correlation,
+                "correlation id of {line}"
+            );
+            assert_eq!(entry.fields, expected, "fields of {line}");
+        }
     }
 }
