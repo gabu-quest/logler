@@ -67,6 +67,7 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 
 ### Added
 
+- **`analyze_thread_health()` returns each thread's level counts**, as its documentation said: `{thread_id: {"INFO": 3, "ERROR": 2, "total": 5}}`. It returned a note and one number. The counting is done once in the engine.
 - **A node of a hierarchy names its service:** `service` is the `service_name` of the first of its entries that has one, or null.
 - **`export_to_otlp()`** exports a hierarchy to the JSON form of OTLP traces, with the arguments of `export_to_jaeger` and `export_to_zipkin`.
 - **Type information.** The package ships `py.typed` and a stub for the compiled extension, and is checked with mypy.

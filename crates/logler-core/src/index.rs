@@ -315,6 +315,24 @@ impl LogIndex {
         }
     }
 
+    /// For each thread id, its number of entries at each level. An entry with no level counts
+    /// as Unknown; an entry with no thread id is in no thread's counts.
+    pub fn thread_level_counts(&self) -> HashMap<String, HashMap<LogLevel, usize>> {
+        let mut threads: HashMap<String, HashMap<LogLevel, usize>> = HashMap::new();
+        for entry in self.entries.iter().flatten() {
+            let Some(thread_id) = &entry.thread_id else {
+                continue;
+            };
+            let level = entry.level.unwrap_or(LogLevel::Unknown);
+            *threads
+                .entry(thread_id.clone())
+                .or_default()
+                .entry(level)
+                .or_insert(0) += 1;
+        }
+        threads
+    }
+
     /// Get statistics about the indexed file
     pub fn get_stats(&self) -> IndexStats {
         let empty_vec = Vec::new();

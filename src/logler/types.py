@@ -460,6 +460,12 @@ class FileMetadataInfo(TypedDict):
     log_levels: dict[str, int]
 
 
+ThreadLevelCounts = dict[str, dict[str, int]]
+"""Thread id -> entry count per upper-case level name (only levels that occur, ``UNKNOWN`` for
+no level) and ``total``, the thread's number of entries. The keys are the log's own, so this
+is a mapping, not a TypedDict."""
+
+
 # ---------------------------------------------------------------------------
 # Sampling types
 # ---------------------------------------------------------------------------

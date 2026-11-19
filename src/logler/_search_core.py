@@ -566,6 +566,31 @@ def get_metadata(files: list[str]) -> list[dict[str, Any]]:
     return json.loads(result_json)
 
 
+def get_thread_level_counts(files: list[str]) -> dict[str, dict[str, int]]:
+    """Count each thread's entries by level.
+
+    Args:
+        files: Log file paths to count.
+
+    Returns:
+        A dict mapping every thread id in the files to a dict of its entry count per upper-case
+        level name (``UNKNOWN`` for an entry with no level; only levels that occur) and
+        ``total``, the thread's number of entries. Several files add up. An entry with no
+        thread id is in no thread's counts.
+
+    Example::
+
+        >>> counts = get_thread_level_counts(["app.log"])
+        >>> counts["worker-1"]
+        {'ERROR': 2, 'INFO': 3, 'total': 5}
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    investigator = get_cached_investigator(files)
+    return json.loads(investigator.thread_level_counts(files))
+
+
 # ---------------------------------------------------------------------------
 # Token-efficient output formatters
 # ---------------------------------------------------------------------------

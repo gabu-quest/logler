@@ -159,6 +159,7 @@ These functions are part of the public API but not yet covered by contract tests
 | `get_context()` | Get surrounding log lines for a specific entry; a line number the file has no entry for raises `ValueError` |
 | `find_patterns()` | Detect repeated log patterns with frequency |
 | `get_metadata()` | Extract metadata and field statistics |
+| `analyze_thread_health()` (in `logler.helpers`) | Each thread's entry count per level: `{thread_id: {"INFO": 3, "ERROR": 2, "total": 5}}`. Only levels that occur are keys (`UNKNOWN` for an entry with no level); `total` is the thread's number of entries; several files add up; an entry with no thread id is in no thread's counts |
 | `analyze_error_flow()` | Trace error propagation through the hierarchy |
 | `extract_metrics()` | Extract numeric values with stats (min/max/mean/p95/p99) |
 | `detect_formats()` | Auto-detect log format with confidence scoring |

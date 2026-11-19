@@ -145,6 +145,13 @@ impl PyInvestigator {
             .map_err(engine_err)
     }
 
+    /// Each thread id's count of entries per level, and its total, as JSON
+    fn thread_level_counts(&self, py: Python<'_>, files: Vec<String>) -> PyResult<String> {
+        let paths = to_paths(&files);
+        py.detach(|| to_json(Ok(self.read().thread_level_counts(&paths))))
+            .map_err(engine_err)
+    }
+
     /// Extract all unique IDs from loaded files
     fn extract_ids(&self, py: Python<'_>, filters_json: Option<String>) -> PyResult<String> {
         let filters = filters_json

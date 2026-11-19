@@ -1085,6 +1085,33 @@ impl Investigator {
         Ok(metadata)
     }
 
+    /// For every thread id in the loaded files (or in `files`, when any are named), its number
+    /// of entries at each level, by level name, and `total`, its number of entries. Several
+    /// files add up; an entry with no thread id is in no thread's counts.
+    pub fn thread_level_counts(
+        &self,
+        files: &[PathBuf],
+    ) -> BTreeMap<String, BTreeMap<String, usize>> {
+        let mut threads: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+        for (file_path, index) in &self.indices {
+            if !files.is_empty()
+                && !files
+                    .iter()
+                    .any(|f| f.to_string_lossy() == file_path.as_str())
+            {
+                continue;
+            }
+            for (thread_id, levels) in index.thread_level_counts() {
+                let counts = threads.entry(thread_id).or_default();
+                for (level, count) in levels {
+                    *counts.entry(level.as_str().to_string()).or_insert(0) += count;
+                    *counts.entry("total".to_string()).or_insert(0) += count;
+                }
+            }
+        }
+        threads
+    }
+
     /// Extract all unique IDs (thread, correlation, trace, service) from loaded files
     pub fn extract_ids(&self, filters: Option<&SearchFilters>) -> anyhow::Result<IdsResult> {
         type IdMap = HashMap<String, (usize, Option<DateTime<Utc>>, Option<DateTime<Utc>>)>;
@@ -1984,6 +2011,42 @@ mod tests {
                 .collect();
             assert_eq!(walked, expected);
         }
+    }
+
+    #[test]
+    fn thread_level_counts_are_per_thread_and_per_level() {
+        let one = make_test_file(&[
+            &json_entry("2024-01-15T10:00:00Z", "INFO", "a", "t1", "svc"),
+            &json_entry("2024-01-15T10:00:01Z", "ERROR", "b", "t1", "svc"),
+            &json_entry("2024-01-15T10:00:02Z", "ERROR", "c", "t1", "svc"),
+            &json_entry("2024-01-15T10:00:03Z", "WARN", "d", "t2", "svc"),
+            r#"{"timestamp":"2024-01-15T10:00:04Z","message":"no level","thread_id":"t3"}"#,
+            r#"{"timestamp":"2024-01-15T10:00:05Z","level":"ERROR","message":"no thread"}"#,
+        ]);
+        let two = make_test_file(&[
+            &json_entry("2024-01-15T10:00:06Z", "INFO", "e", "t1", "svc"),
+            &json_entry("2024-01-15T10:00:07Z", "WARN", "f", "t2", "svc"),
+        ]);
+        let mut inv = Investigator::new();
+        inv.load_files(&[one.path().to_path_buf(), two.path().to_path_buf()])
+            .unwrap();
+        let counts = |t: &[(&str, usize)]| -> BTreeMap<String, usize> {
+            t.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+        };
+        let all = inv.thread_level_counts(&[]);
+        assert_eq!(all.len(), 3);
+        assert_eq!(
+            all["t1"],
+            counts(&[("INFO", 2), ("ERROR", 2), ("total", 4)])
+        );
+        assert_eq!(all["t2"], counts(&[("WARN", 2), ("total", 2)]));
+        assert_eq!(all["t3"], counts(&[("UNKNOWN", 1), ("total", 1)]));
+        let only_one = inv.thread_level_counts(&[one.path().to_path_buf()]);
+        assert_eq!(
+            only_one["t1"],
+            counts(&[("INFO", 1), ("ERROR", 2), ("total", 3)])
+        );
+        assert_eq!(only_one["t2"], counts(&[("WARN", 1), ("total", 1)]));
     }
 
     #[test]

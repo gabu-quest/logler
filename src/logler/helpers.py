@@ -8,7 +8,9 @@ patterns, making it easier for LLM agents to perform typical tasks.
 from typing import Any
 
 import logler.investigate as investigate
+from logler._search_core import get_thread_level_counts
 from logler.investigate import Investigator
+from logler.types import ThreadLevelCounts
 
 
 def quick_summary(files: list[str]) -> dict[str, Any]:
@@ -125,28 +127,21 @@ def get_error_context(file: str, line_number: int, lines: int = 10) -> dict[str,
     }
 
 
-def analyze_thread_health(files: list[str]) -> dict[str, Any]:
+def analyze_thread_health(files: list[str]) -> ThreadLevelCounts:
     """
-    Analyze health of each thread.
+    Count each thread's log entries by level.
 
-    Not implemented per thread: returns a dictionary with ``note`` (a sentence saying so)
-    and ``total_threads`` (the first file's number of distinct thread ids).
+    Returns a dictionary mapping every thread ID in the files to its log level counts: the
+    count per upper-case level name (``UNKNOWN`` for an entry with no level; only levels that
+    occur) and ``total``, the thread's number of entries. Several files add up. An entry with
+    no thread ID is in no thread's counts.
 
     Example:
         health = analyze_thread_health(["app.log"])
-        print(health["total_threads"])
+        for thread_id, counts in health.items():
+            error_rate = counts.get('ERROR', 0) / counts.get('total', 1) * 100
     """
-    # Get all entries
-    metadata = investigate.get_metadata(files)
-    inv = Investigator()
-    inv.load_files(files)
-
-    # This is a simplified version - full implementation would track by thread
-    # For now, return basic info
-    return {
-        "note": "Thread health analysis requires SQL queries for full implementation",
-        "total_threads": metadata[0].get("unique_threads", 0),
-    }
+    return get_thread_level_counts(files)
 
 
 def get_timeline_summary(files: list[str], correlation_id: str) -> str:
