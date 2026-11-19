@@ -2,7 +2,13 @@
 Logler - Beautiful local log viewer with thread tracking and real-time updates.
 """
 
-__version__ = "1.1.2"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("logler")
+except PackageNotFoundError:
+    # A source tree on the path that was never installed has no version to report.
+    __version__ = "0+unknown"
 __author__ = "Logler Contributors"
 
 # Correlation context
