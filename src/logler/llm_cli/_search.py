@@ -46,7 +46,7 @@ def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, p
     Example:
         logler llm schema app.log worker.log
     """
-    from ..parser import LogParser, format_time
+    from ..parser import LogParser, read_lines
 
     with _db_file_source(files, db_path) as file_list:
         # Track schema information
@@ -62,46 +62,44 @@ def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, p
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                with open(file_path, "r", errors="replace") as f:
-                    for i, line in enumerate(f):
-                        if not full and i >= sample_size:
-                            break
+                for number, line in read_lines(file_path):
+                    if not full and number > sample_size:
+                        break
 
-                        line = line.rstrip()
-                        if not line:
-                            continue
+                    if not line.strip():
+                        continue
 
-                        entry = parser.parse_line(i + 1, line)
-                        total_entries += 1
+                    entry = parser.parse_line(number, line)
+                    total_entries += 1
 
-                        # Track field presence
-                        if entry.timestamp:
-                            field_presence["timestamp"] += 1
-                            timestamps.append(entry.timestamp)
-                        if entry.level:
-                            field_presence["level"] += 1
-                            level_values[str(entry.level)] += 1
-                        if entry.message:
-                            field_presence["message"] += 1
-                        if entry.thread_id:
-                            field_presence["thread_id"] += 1
-                            thread_patterns.add(entry.thread_id)
-                        if entry.correlation_id:
-                            field_presence["correlation_id"] += 1
-                            correlation_patterns.add(entry.correlation_id)
-                        if entry.trace_id:
-                            field_presence["trace_id"] += 1
-                        if entry.span_id:
-                            field_presence["span_id"] += 1
+                    # Track field presence
+                    if entry.timestamp:
+                        field_presence["timestamp"] += 1
+                        timestamps.append((entry.timestamp, entry.timestamp_text))
+                    if entry.level:
+                        field_presence["level"] += 1
+                        level_values[str(entry.level)] += 1
+                    if entry.message:
+                        field_presence["message"] += 1
+                    if entry.thread_id:
+                        field_presence["thread_id"] += 1
+                        thread_patterns.add(entry.thread_id)
+                    if entry.correlation_id:
+                        field_presence["correlation_id"] += 1
+                        correlation_patterns.add(entry.correlation_id)
+                    if entry.trace_id:
+                        field_presence["trace_id"] += 1
+                    if entry.span_id:
+                        field_presence["span_id"] += 1
 
-                        # Track format
-                        format_name = getattr(entry, "format", None) or "Unknown"
-                        format_counts[str(format_name)] += 1
+                    # Track format
+                    format_name = getattr(entry, "format", None) or "Unknown"
+                    format_counts[str(format_name)] += 1
 
-                        # Track custom fields from extra
-                        if hasattr(entry, "extra") and entry.extra:
-                            for key in entry.extra.keys():
-                                custom_fields.add(key)
+                    # Track custom fields from extra
+                    if hasattr(entry, "extra") and entry.extra:
+                        for key in entry.extra.keys():
+                            custom_fields.add(key)
 
             except FileNotFoundError:
                 _error_json(f"File not found: {file_path}")
@@ -141,12 +139,8 @@ def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, p
         # Time range
         time_range = None
         if timestamps:
-            sorted_ts = sorted([t for t in timestamps if t])
-            if sorted_ts:
-                time_range = {
-                    "earliest": format_time(sorted_ts[0]),
-                    "latest": format_time(sorted_ts[-1]),
-                }
+            sorted_ts = sorted(timestamps, key=lambda pair: pair[0])
+            time_range = {"earliest": sorted_ts[0][1], "latest": sorted_ts[-1][1]}
 
         # Format distribution
         format_dist = {}
@@ -766,7 +760,7 @@ def summarize(
     Example:
         logler llm summarize app.log --focus errors
     """
-    from ..parser import LogParser, format_time
+    from ..parser import LogParser, read_lines
 
     with _db_file_source(files, db_path) as file_list:
         # Resolve time and service filters
@@ -779,65 +773,63 @@ def summarize(
         errors = []
         warnings = []
         unique_errors = defaultdict(int)
-        first_time = last_time = None
+        first_time = last_time = first_text = last_text = None
         correlation_ids = set()
 
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                with open(file_path, "r", errors="replace") as f:
-                    for i, line in enumerate(f):
-                        line = line.rstrip()
-                        if not line:
+                for number, line in read_lines(file_path):
+                    if not line.strip():
+                        continue
+
+                    entry = parser.parse_line(number, line)
+
+                    # Apply time filters
+                    if _outside_bounds(entry.timestamp, time_start, time_end):
+                        continue
+
+                    # Apply service filter
+                    if svc_set:
+                        entry_svc = getattr(entry, "service_name", None) or getattr(
+                            entry, "service", None
+                        )
+                        if entry_svc not in svc_set:
                             continue
 
-                        entry = parser.parse_line(i + 1, line)
+                    total += 1
 
-                        # Apply time filters
-                        if _outside_bounds(entry.timestamp, time_start, time_end):
-                            continue
+                    level_val = level_text(entry.level)
+                    by_level[level_val] += 1
 
-                        # Apply service filter
-                        if svc_set:
-                            entry_svc = getattr(entry, "service_name", None) or getattr(
-                                entry, "service", None
+                    if entry.timestamp:
+                        if first_time is None or entry.timestamp < first_time:
+                            first_time, first_text = entry.timestamp, entry.timestamp_text
+                        if last_time is None or entry.timestamp > last_time:
+                            last_time, last_text = entry.timestamp, entry.timestamp_text
+
+                    if entry.correlation_id:
+                        correlation_ids.add(entry.correlation_id)
+
+                    if level_val == "ERROR":
+                        msg = entry.message or line[:100]
+                        unique_errors[msg] += 1
+                        if len(errors) < 10:
+                            errors.append(
+                                {
+                                    "line": number,
+                                    "message": msg,
+                                    "correlation_id": entry.correlation_id,
+                                }
                             )
-                            if entry_svc not in svc_set:
-                                continue
-
-                        total += 1
-
-                        level_val = level_text(entry.level)
-                        by_level[level_val] += 1
-
-                        if entry.timestamp:
-                            if first_time is None or entry.timestamp < first_time:
-                                first_time = entry.timestamp
-                            if last_time is None or entry.timestamp > last_time:
-                                last_time = entry.timestamp
-
-                        if entry.correlation_id:
-                            correlation_ids.add(entry.correlation_id)
-
-                        if level_val == "ERROR":
-                            msg = entry.message or line[:100]
-                            unique_errors[msg] += 1
-                            if len(errors) < 10:
-                                errors.append(
-                                    {
-                                        "line": i + 1,
-                                        "message": msg,
-                                        "correlation_id": entry.correlation_id,
-                                    }
-                                )
-                        elif level_val in ["WARN", "WARNING"]:
-                            if len(warnings) < 5:
-                                warnings.append(
-                                    {
-                                        "line": i + 1,
-                                        "message": entry.message or line[:100],
-                                    }
-                                )
+                    elif level_val in ["WARN", "WARNING"]:
+                        if len(warnings) < 5:
+                            warnings.append(
+                                {
+                                    "line": number,
+                                    "message": entry.message or line[:100],
+                                }
+                            )
 
             except (FileNotFoundError, PermissionError):
                 pass
@@ -868,11 +860,7 @@ def summarize(
                 "total_entries": total,
                 "by_level": dict(by_level),
                 "unique_correlation_ids": len(correlation_ids),
-                "time_range": (
-                    {"start": format_time(first_time), "end": format_time(last_time)}
-                    if first_time
-                    else None
-                ),
+                "time_range": ({"start": first_text, "end": last_text} if first_time else None),
             },
             "errors": errors if focus in ["errors", "all"] else [],
             "warnings": warnings if focus in ["warnings", "all"] else [],
@@ -928,12 +916,9 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
     def entries(file_list):
         """The files' lines as engine entry dicts, one at a time."""
         for file_path in file_list:
-            try:
-                parser = LogParser.for_file(file_path)
-                for number, line in read_lines(file_path):
-                    yield parser.parse_entry(number, line, file_path)
-            except (FileNotFoundError, PermissionError) as e:
-                _error_json(f"Cannot read file {file_path}: {e}")
+            parser = LogParser.for_file(file_path)
+            for number, line in read_lines(file_path):
+                yield parser.parse_entry(number, line, file_path)
 
     with _db_file_source(files, db_path, default_glob="*.log") as file_list:
         # Get query from argument or stdin

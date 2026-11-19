@@ -202,12 +202,13 @@ class TestOneSpellingOfATime:
 
     @pytest.fixture
     def precision_log(self, tmp_path):
-        """A whole-second, a millisecond and a microsecond time (lines 1, 2, 3)."""
+        """A whole-second, a millisecond, a microsecond and a nanosecond time (lines 1 to 4)."""
         path = tmp_path / "precision.log"
         path.write_text(
             "2024-01-15 10:00:00 INFO whole\n"
             "2024-01-15 10:00:00.123 INFO millis\n"
             "2024-01-15 10:00:00.123456 INFO micros\n"
+            "2024-01-15T10:00:01.123456789Z INFO nanos\n"
         )
         return str(path)
 
@@ -220,6 +221,7 @@ class TestOneSpellingOfATime:
             1: "2024-01-15T10:00:00Z",
             2: "2024-01-15T10:00:00.123Z",
             3: "2024-01-15T10:00:00.123456Z",
+            4: "2024-01-15T10:00:01.123456789Z",
         }
 
     def test_emit_matches_search(self, precision_log):
@@ -236,14 +238,14 @@ class TestOneSpellingOfATime:
         _, stdout, _ = invoke(["summarize", precision_log])
         assert json.loads(stdout)["stats"]["time_range"] == {
             "start": "2024-01-15T10:00:00Z",
-            "end": "2024-01-15T10:00:00.123456Z",
+            "end": "2024-01-15T10:00:01.123456789Z",
         }
 
     def test_schema_time_range_is_in_that_spelling(self, precision_log):
         _, stdout, _ = invoke(["schema", precision_log])
         assert json.loads(stdout)["time_range"] == {
             "earliest": "2024-01-15T10:00:00Z",
-            "latest": "2024-01-15T10:00:00.123456Z",
+            "latest": "2024-01-15T10:00:01.123456789Z",
         }
 
     def test_verify_pattern_first_and_last_match_are_in_that_spelling(self, precision_log):
@@ -251,7 +253,7 @@ class TestOneSpellingOfATime:
         stats = json.loads(stdout)["statistics"]
         assert (stats["first_match"], stats["last_match"]) == (
             "2024-01-15T10:00:00Z",
-            "2024-01-15T10:00:00.123456Z",
+            "2024-01-15T10:00:01.123456789Z",
         )
 
     def test_correlate_events_anchor_time_is_in_that_spelling(self, tmp_path):
@@ -267,3 +269,127 @@ class TestOneSpellingOfATime:
         assert [c["anchor_timestamp"] for c in json.loads(stdout)["clusters"]] == [
             "2024-01-15T10:00:15Z"
         ]
+
+    def test_correlate_events_anchor_time_has_the_nine_digits_search_prints(self, tmp_path):
+        path = tmp_path / "events.log"
+        path.write_text(
+            "2024-01-15T10:00:14.000000001Z INFO motor slowing\n"
+            "2024-01-15T10:00:15.123456789Z ERROR motor stalled\n"
+            "2024-01-15T10:00:16.5Z INFO motor restarting\n"
+        )
+        assert self._search_times(str(path))[2] == "2024-01-15T10:00:15.123456789Z"
+        _, stdout, _ = invoke(
+            ["correlate-events", "-f", str(path), "--trigger-level", "ERROR", "--window", "3s"]
+        )
+        assert [c["anchor_timestamp"] for c in json.loads(stdout)["clusters"]] == [
+            "2024-01-15T10:00:15.123456789Z"
+        ]
+        _, stdout, _ = invoke(
+            [
+                "correlate-events",
+                "-f",
+                str(path),
+                "--anchor-file",
+                str(path),
+                "--anchor-line",
+                "2",
+                "--window",
+                "3s",
+            ]
+        )
+        assert [c["anchor_timestamp"] for c in json.loads(stdout)["clusters"]] == [
+            "2024-01-15T10:00:15.123456789Z"
+        ]
+
+    def test_a_leap_second_is_spelled_as_search_spells_it(self, tmp_path):
+        path = tmp_path / "leap.log"
+        path.write_text("2024-12-31T23:59:60Z INFO leap\n2025-01-01T00:00:00Z INFO after\n")
+        times = self._search_times(str(path))
+        assert times == {1: "2024-12-31T23:59:60Z", 2: "2025-01-01T00:00:00Z"}
+        _, stdout, _ = invoke(["emit", str(path)])
+        assert {
+            e["line_number"]: e["timestamp"] for e in map(json.loads, stdout.splitlines())
+        } == times
+        _, stdout, _ = invoke(["summarize", str(path)])
+        assert json.loads(stdout)["stats"]["time_range"] == {
+            "start": "2024-12-31T23:59:60Z",
+            "end": "2025-01-01T00:00:00Z",
+        }
+        _, stdout, _ = invoke(["schema", str(path)])
+        assert json.loads(stdout)["time_range"] == {
+            "earliest": "2024-12-31T23:59:60Z",
+            "latest": "2025-01-01T00:00:00Z",
+        }
+        _, stdout, _ = invoke(["verify-pattern", str(path), "--pattern", "INFO"])
+        stats = json.loads(stdout)["statistics"]
+        assert (stats["first_match"], stats["last_match"]) == (
+            "2024-12-31T23:59:60Z",
+            "2025-01-01T00:00:00Z",
+        )
+
+
+class TestRelativeDurations:
+    """`--last`, `--after -1h` and `--before -30m` read a duration through one parser."""
+
+    @pytest.fixture
+    def recent_log(self, tmp_path):
+        """Lines 3 hours, 45 minutes and 10 minutes old (lines 1, 2, 3)."""
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        stamps = [
+            (now - timedelta(minutes=m)).strftime("%Y-%m-%dT%H:%M:%SZ") for m in (180, 45, 10)
+        ]
+        path = tmp_path / "recent.log"
+        path.write_text("".join(f"{ts} ERROR line {n}\n" for n, ts in enumerate(stamps, start=1)))
+        return str(path)
+
+    @pytest.mark.parametrize(
+        "args,expected",
+        [
+            (["--last", "30m"], [3]),
+            (["--last", "30M"], [3]),
+            (["--last", "1h"], [2, 3]),
+            (["--last", "1d"], [1, 2, 3]),
+            (["--after", "-1h"], [2, 3]),
+            (["--after", "-1H"], [2, 3]),
+            (["--before", "-30m"], [1, 2]),
+            (["--after", "-2h", "--before", "-30m"], [2]),
+        ],
+    )
+    def test_the_lines_kept(self, recent_log, args, expected):
+        for command in (["summarize"], ["emit"]):
+            _, stdout, _ = invoke(command + [recent_log] + args)
+            lines = _lines_summarize(stdout) if command == ["summarize"] else _lines_emit(stdout)
+            assert lines == expected
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["--after", "90x"],
+            ["--after", "-90x"],
+            ["--before", "-1w"],
+            ["--last", "90x"],
+            ["--last", "-1h"],
+            # longer than the calendar: no time lies that far back
+            ["--last", "99999999999d"],
+            ["--last", "800000d"],
+            ["--after", "-3000000d"],
+            # a minute 60 is no time (a second 60 is a leap second, and is one)
+            ["--after", "2024-01-15T10:60:00"],
+        ],
+    )
+    def test_a_bad_duration_or_time_is_the_users_error(self, recent_log, args):
+        code, stdout, _ = invoke(["summarize", recent_log] + args)
+        assert code == 2
+        assert json.loads(stdout)["code"] == 2
+
+    def test_last_is_from_the_duration_ago_to_now_spelled_as_every_time_is(self):
+        from datetime import timedelta
+
+        from logler.llm_cli import _resolve_time_filters
+        from logler.parser import format_time, to_utc
+
+        start, end = _resolve_time_filters("30m", None, None)
+        assert to_utc(end) - to_utc(start) == timedelta(minutes=30)
+        assert (start, end) == (format_time(to_utc(start)), format_time(to_utc(end)))

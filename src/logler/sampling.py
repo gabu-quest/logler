@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from collections import defaultdict
 
-from ._search_core import search
+from ._search_core import level_text, search
 
 
 def smart_sample(
@@ -127,7 +127,7 @@ def _sample_representative(entries: List[Dict], size: int) -> List[Dict]:
     # Group by level
     by_level = defaultdict(list)
     for entry in entries:
-        level = entry.get("level", "INFO")
+        level = level_text(entry.get("level"))
         by_level[level].append(entry)
 
     # Calculate proportional samples per level
@@ -222,7 +222,7 @@ def _sample_errors_focused(entries: List[Dict], size: int) -> List[Dict]:
 
     # Separate errors from non-errors
     for i, entry in enumerate(entries):
-        level = entry.get("level", "INFO")
+        level = level_text(entry.get("level"))
         if level in ["ERROR", "FATAL"]:
             error_indices.append(i)
         else:
@@ -295,7 +295,7 @@ def _calculate_coverage(population: List[Dict], sample: List[Dict]) -> Dict[str,
     # Level coverage
     level_coverage = defaultdict(int)
     for entry in sample:
-        level = entry.get("level", "INFO")
+        level = level_text(entry.get("level"))
         level_coverage[level] += 1
 
     # Thread coverage

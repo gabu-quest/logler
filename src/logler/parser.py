@@ -6,6 +6,7 @@ over it, so a line reads the same here as it does in search and the index.
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, Optional, Tuple
@@ -25,6 +26,7 @@ class LogEntry:
     line_number: int
     raw: str
     timestamp: Optional[datetime] = None
+    timestamp_text: Optional[str] = None
     level: str = "UNKNOWN"
     message: str = ""
     thread_id: Optional[str] = None
@@ -37,6 +39,14 @@ class LogEntry:
     fields: Dict[str, Any] = field(default_factory=dict)
 
 
+def cut_newline(line: str) -> str:
+    """A line without its ending: one "\\n" or one "\\r\\n", nothing else (trailing spaces and
+    a lone "\\r" stay). The one cut, for every reader that gets lines with their endings."""
+    if line.endswith("\n"):
+        return line[:-2] if line.endswith("\r\n") else line[:-1]
+    return line
+
+
 def read_lines(path: str) -> Iterator[Tuple[int, str]]:
     """A log file's lines, numbered from 1, cut the way the Rust index cuts them: a line ends
     at "\\n" or "\\r\\n", nothing else is trimmed and no line is skipped. So a reader that
@@ -47,27 +57,33 @@ def read_lines(path: str) -> Iterator[Tuple[int, str]]:
     """
     with open(path, encoding="utf-8-sig", errors="replace", newline="\n") as f:
         for number, line in enumerate(f, start=1):
-            if line.endswith("\n"):
-                line = line[:-2] if line.endswith("\r\n") else line[:-1]
-            yield number, line
+            yield number, cut_newline(line)
+
+
+_LEAP_SECOND = re.compile(r"(\d\d:\d\d):60")
 
 
 def without_leap_second(ts: str) -> str:
-    """Rust's RFC 3339 timestamp with a leap second (":60") read as the last second of its
-    minute: neither ``datetime`` nor a SQL ``TIMESTAMP`` can hold second 60."""
-    return ts.replace(":60", ":59", 1) if ":60" in ts else ts
+    """Rust's RFC 3339 timestamp with a leap second (second 60) read as the last second of
+    its minute: neither ``datetime`` nor a SQL ``TIMESTAMP`` can hold second 60. Only the
+    seconds are touched: a minute 60 stays, and is no time."""
+    return _LEAP_SECOND.sub(r"\1:59", ts, count=1) if ":60" in ts else ts
 
 
-def _to_utc(ts: Optional[str]) -> Optional[datetime]:
-    """Rust's RFC 3339 timestamp as an aware UTC datetime.
+def to_utc(ts: Optional[str]) -> Optional[datetime]:
+    """An ISO 8601 / RFC 3339 time as an aware UTC datetime: the one reader of a time string.
 
-    ``None`` for a time ``datetime`` cannot hold: a year before 1 or after 9999.
+    A time with no zone is UTC, as a log line's is. ``None`` for no text, for text that is
+    not a time, and for a time ``datetime`` cannot hold (a year before 1 or after 9999).
     """
     if not ts:
         return None
     try:
-        return datetime.fromisoformat(without_leap_second(ts)).astimezone(timezone.utc)
-    except (ValueError, OverflowError):
+        parsed = datetime.fromisoformat(without_leap_second(ts))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError, TypeError):
         return None
 
 
@@ -120,7 +136,8 @@ class LogParser:
         return LogEntry(
             line_number=line_number,
             raw=raw,
-            timestamp=_to_utc(ts),
+            timestamp=to_utc(ts),
+            timestamp_text=ts,
             level=level_text(data.get("level")),
             message=data["message"],
             thread_id=data.get("thread_id"),

@@ -99,15 +99,14 @@ def stats(files: tuple, output_json: bool):
         logler stats app.log             # Show statistics
         logler stats app.log --json      # Output as JSON
     """
-    from .parser import LogParser
+    from .parser import LogParser, read_lines
     from rich.console import Console
     from rich.table import Table
 
     console = Console()
     for file_path in files:
         parser = LogParser.for_file(file_path)
-        with open(file_path, "r") as f:
-            entries = [parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(f)]
+        entries = [parser.parse_line(number, line) for number, line in read_lines(file_path)]
 
         stats_data = {
             "total": len(entries),

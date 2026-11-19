@@ -11,7 +11,8 @@ Public API surface is re-exported by :mod:`logler.investigate`.
 import json
 import warnings
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import timedelta
+import re
 from collections import defaultdict
 
 from ._loading import load_files
@@ -89,25 +90,6 @@ def _normalize_pattern_examples(result: Dict[str, Any]) -> None:
             _normalize_entry(example)
 
 
-def _parse_timestamp_flex(value: str) -> Optional[str]:
-    """Parse a timestamp string in common formats, return ISO-8601 or None."""
-    formats = [
-        "%Y-%m-%dT%H:%M:%S.%fZ",
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%dT%H:%M:%S.%f%z",
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-    ]
-    for fmt in formats:
-        try:
-            dt = datetime.strptime(value, fmt)
-            return dt.isoformat()
-        except ValueError:
-            continue
-    return None
-
-
 def _normalize_context_payload(result: Dict[str, Any]) -> None:
     """Normalize context payload from Rust (rename keys to match API)."""
     target = result.get("target")
@@ -119,56 +101,19 @@ def _normalize_context_payload(result: Dict[str, Any]) -> None:
         _normalize_entry(entry)
 
 
-def _build_time_range(
-    time_start: Optional[str] = None,
-    time_end: Optional[str] = None,
-    duration: Optional[str] = None,
-) -> Dict[str, str]:
-    """Build a time_range dict from CLI-style arguments.
+_DURATION = re.compile(r"^(\d+)(s|m|h|d)$")
+_DURATION_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 
-    Supports ISO timestamps for start/end, and duration strings like ``30m``,
-    ``2h``, ``1d`` relative to now or to a given start/end.
+
+def parse_duration(text: str) -> timedelta:
+    """A relative duration (``30s``, ``2h``, ``1d``; the unit in either case) as a timedelta.
+
+    The one parser of a duration. Raises ``ValueError`` for anything else.
     """
-    result: Dict[str, str] = {}
-
-    if time_start:
-        parsed = _parse_timestamp_flex(time_start)
-        if parsed:
-            result["start"] = parsed
-        else:
-            result["start"] = time_start  # Pass through, let Rust parse
-
-    if time_end:
-        parsed = _parse_timestamp_flex(time_end)
-        if parsed:
-            result["end"] = parsed
-        else:
-            result["end"] = time_end
-
-    if duration and not (time_start and time_end):
-        import re as _re
-        from datetime import timedelta
-
-        m = _re.match(r"^(\d+)(s|m|h|d)$", duration.lower())
-        if m:
-            value = int(m.group(1))
-            unit = m.group(2)
-            delta = {
-                "s": timedelta(seconds=value),
-                "m": timedelta(minutes=value),
-                "h": timedelta(hours=value),
-                "d": timedelta(days=value),
-            }[unit]
-
-            now = datetime.utcnow()
-            if time_start and not time_end:
-                result["end"] = (now).isoformat() + "Z"
-            elif not time_start:
-                result["start"] = (now - delta).isoformat() + "Z"
-                if not time_end:
-                    result["end"] = now.isoformat() + "Z"
-
-    return result
+    match = _DURATION.match(text.lower())
+    if not match:
+        raise ValueError(f"Invalid duration format: {text}. Use format like '30m', '2h', '1d'")
+    return timedelta(**{_DURATION_UNITS[match.group(2)]: int(match.group(1))})
 
 
 def level_name(word: str) -> str:
@@ -613,7 +558,7 @@ def _format_as_summary(result: Dict[str, Any]) -> Dict[str, Any]:
     for item in results:
         entry = item.get("entry", {})
         message = entry.get("message", "").strip()
-        level = entry.get("level", "INFO")
+        level = level_text(entry.get("level"))
         timestamp = entry.get("timestamp")
         file_path = entry.get("file", "")
 
@@ -688,7 +633,7 @@ def _format_as_count(result: Dict[str, Any]) -> Dict[str, Any]:
 
     for item in results:
         entry = item.get("entry", {})
-        level = entry.get("level", "INFO")
+        level = level_text(entry.get("level"))
         file_path = entry.get("file", "")
         timestamp = entry.get("timestamp")
 

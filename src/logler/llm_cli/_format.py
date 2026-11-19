@@ -18,6 +18,7 @@ from ._core import (
 )
 from ..safe_regex import safe_compile, RegexTimeoutError, RegexPatternTooLongError
 from ..config import FormatFileError, config_for_file, find_config, load_usable_config
+from ..parser import read_lines
 from ..builtin_formats import get_builtin_formats, get_builtin_format
 
 
@@ -140,35 +141,33 @@ def format_test(
 
     for file_path in file_list:
         try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                for i, line in enumerate(f, 1):
-                    line = line.rstrip("\n\r")
-                    if not line:
-                        continue
-                    total_lines += 1
-                    match = compiled.match(line)
-                    if match:
-                        matched_lines += 1
-                        if len(results) < limit:
-                            results.append(
-                                {
-                                    "file": file_path,
-                                    "line_number": i,
-                                    "matched": True,
-                                    "groups": match.groupdict(),
-                                    "raw": line[:500],
-                                }
-                            )
-                    elif len(results) < limit and total_lines <= limit * 2:
+            for number, line in read_lines(file_path):
+                if not line:
+                    continue
+                total_lines += 1
+                match = compiled.match(line)
+                if match:
+                    matched_lines += 1
+                    if len(results) < limit:
                         results.append(
                             {
                                 "file": file_path,
-                                "line_number": i,
-                                "matched": False,
-                                "groups": {},
+                                "line_number": number,
+                                "matched": True,
+                                "groups": match.groupdict(),
                                 "raw": line[:500],
                             }
                         )
+                elif len(results) < limit and total_lines <= limit * 2:
+                    results.append(
+                        {
+                            "file": file_path,
+                            "line_number": number,
+                            "matched": False,
+                            "groups": {},
+                            "raw": line[:500],
+                        }
+                    )
         except OSError as e:
             results.append(
                 {

@@ -195,6 +195,14 @@ def _parse_entry_timestamp(entry: Dict[str, Any]) -> Optional[datetime]:
         return None
 
 
+def _entry_time_text(entry: Dict[str, Any], parsed: datetime) -> str:
+    """An entry's time as every command prints it. The engine's own text (UTC, ending in
+    ``Z``) is printed as it is, so it keeps every digit of a second the log had; any other
+    spelling, or a datetime, is spelled by ``format_time`` from ``parsed``."""
+    ts = entry.get("timestamp")
+    return ts if isinstance(ts, str) and ts.endswith("Z") else format_time(parsed)
+
+
 def _apply_temporal_rule(
     entries: List[Dict[str, Any]],
     rule: TemporalRule,
@@ -256,7 +264,7 @@ def _apply_temporal_rule(
                 "group": group_name,
                 "rule_type": "temporal",
                 "rule_index": rule_index,
-                "anchor_timestamp": format_time(anchor_ts),
+                "anchor_timestamp": _entry_time_text(anchor_entry, anchor_ts),
                 "anchor_message": anchor_desc,
                 "window": rule.window,
                 "entry_count": len(cluster_entries),

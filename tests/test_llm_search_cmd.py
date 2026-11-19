@@ -2,8 +2,10 @@
 
 import json
 
+import pytest
 
-from tests.conftest import EXIT_NO_RESULTS, EXIT_SUCCESS, run_llm_command
+
+from tests.conftest import EXIT_NO_RESULTS, EXIT_SUCCESS, invoke, run_llm_command
 
 
 class TestSearchCommand:
@@ -230,3 +232,52 @@ class TestSearchMetadataOnly:
         agg = data["aggregations"]
         assert agg["by_service"]["svc-x"] == 40
         assert agg["by_service"]["svc-y"] == 40
+
+
+class TestCountsByLevelAddUp:
+    """A line with no level is counted under UNKNOWN, in every count by level."""
+
+    @pytest.fixture
+    def ten_lines_three_without_a_level(self, tmp_path):
+        path = tmp_path / "ten.log"
+        path.write_text(
+            "2024-01-15T10:00:00Z INFO one\n"
+            "2024-01-15T10:00:01Z ERROR two\n"
+            "continuation without a level\n"
+            "2024-01-15T10:00:03Z WARN four\n"
+            "2024-01-15T10:00:04Z INFO five\n"
+            "  at somewhere.java:12\n"
+            "2024-01-15T10:00:06Z INFO seven\n"
+            "2024-01-15T10:00:07Z ERROR eight\n"
+            "plain nine\n"
+            "2024-01-15T10:00:09Z DEBUG ten\n"
+        )
+        return str(path)
+
+    EXPECTED = {"INFO": 3, "ERROR": 2, "WARN": 1, "DEBUG": 1, "UNKNOWN": 3}
+
+    def test_search(self, ten_lines_three_without_a_level):
+        _, stdout, _ = invoke(["search", ten_lines_three_without_a_level])
+        assert json.loads(stdout)["aggregations"]["by_level"] == self.EXPECTED
+
+    def test_summarize(self, ten_lines_three_without_a_level):
+        _, stdout, _ = invoke(["summarize", ten_lines_three_without_a_level])
+        assert json.loads(stdout)["stats"]["by_level"] == self.EXPECTED
+
+    def test_triage_reads_the_metadata_counts(self, ten_lines_three_without_a_level):
+        _, stdout, _ = invoke(["triage", ten_lines_three_without_a_level])
+        assert json.loads(stdout)["metrics"]["log_levels"] == self.EXPECTED
+
+    def test_a_file_with_no_level_on_any_line(self, tmp_path):
+        path = tmp_path / "none.log"
+        path.write_text("alpha\nbeta\ngamma\n")
+        _, stdout, _ = invoke(["summarize", str(path)])
+        assert json.loads(stdout)["stats"]["by_level"] == {"UNKNOWN": 3}
+
+    @pytest.mark.parametrize("entry", [{}, {"level": None}, {"level": ""}])
+    def test_an_entry_dict_with_no_level_is_counted_under_unknown(self, entry):
+        from logler._search_core import _format_as_count, _format_as_summary
+
+        result = {"results": [{"entry": {"message": "m", "file": "f", **entry}}]}
+        assert _format_as_count(result)["by_level"] == {"UNKNOWN": 1}
+        assert _format_as_summary(result)["log_levels"] == {"UNKNOWN": 1}

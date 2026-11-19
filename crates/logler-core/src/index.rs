@@ -320,17 +320,25 @@ impl LogIndex {
         let empty_vec = Vec::new();
         let entries = self.entries.as_ref().unwrap_or(&empty_vec);
 
+        // `level_index` holds the entries that have a level; one with none counts as Unknown,
+        // so the counts add up to the number of entries.
+        let mut level_counts: HashMap<LogLevel, usize> = self
+            .level_index
+            .iter()
+            .map(|(k, v)| (*k, v.len()))
+            .collect();
+        let with_level: usize = level_counts.values().sum();
+        if entries.len() > with_level {
+            *level_counts.entry(LogLevel::Unknown).or_insert(0) += entries.len() - with_level;
+        }
+
         IndexStats {
             total_lines: self.total_lines,
             total_entries: entries.len(),
             unique_threads: self.thread_index.len(),
             unique_correlations: self.correlation_index.len(),
             unique_traces: self.trace_index.len(),
-            level_counts: self
-                .level_index
-                .iter()
-                .map(|(k, v)| (*k, v.len()))
-                .collect(),
+            level_counts,
         }
     }
 }
@@ -367,6 +375,19 @@ mod tests {
         let stats = index.get_stats();
         assert_eq!(stats.total_lines, 2);
         assert_eq!(stats.unique_threads, 1);
+    }
+
+    #[test]
+    fn stats_count_an_entry_with_no_level_as_unknown() {
+        let index = index_of(
+            b"2024-01-15T10:00:00Z INFO one\nno level here\n2024-01-15T10:00:02Z ERROR three\nnor here\n",
+        );
+        let stats = index.get_stats();
+        assert_eq!(stats.total_entries, 4);
+        assert_eq!(stats.level_counts.get(&LogLevel::Info), Some(&1));
+        assert_eq!(stats.level_counts.get(&LogLevel::Error), Some(&1));
+        assert_eq!(stats.level_counts.get(&LogLevel::Unknown), Some(&2));
+        assert_eq!(stats.level_counts.values().sum::<usize>(), 4);
     }
 
     fn index_of(bytes: &[u8]) -> LogIndex {

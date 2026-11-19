@@ -11,10 +11,10 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any, Dict, Iterator, List, Optional, Sequence
 
-from .parser import format_time
+from .parser import format_time, to_utc
 
 
 @dataclass
@@ -104,14 +104,6 @@ _DURATION_PATTERN = re.compile(
     r"\s*(?:[:=]\s*)?"  # not "\s*[:=]?\s*": two runs side by side split a run of spaces every way
     r"(?P<value>\d+(?:\.\d+)?)"
     r"\s*(?P<unit>ms|s|us|ns)"
-)
-
-# Pattern 3: measurement phrases  (e.g., "temperature 85.2", "cpu_usage 92.1%")
-_MEASUREMENT_PATTERN = re.compile(
-    r"(?:temp|temperature|pressure|voltage|current|cpu|memory|disk|load|rate|count|size|bytes|packets)"
-    r"\s*[:=]?\s*"
-    r"(?P<value>-?\d+(?:\.\d+)?)"
-    r"\s*(?P<unit>ms|s|MB|GB|KB|°[CF]|%|kPa|rpm|Hz)?"
 )
 
 
@@ -342,7 +334,7 @@ def aggregate_time_buckets(
     delta = _parse_bucket_duration(bucket_size)
 
     # Filter and sort by timestamp
-    timestamped = [(p, _parse_ts(p.timestamp)) for p in points if p.timestamp]
+    timestamped = [(p, to_utc(p.timestamp)) for p in points if p.timestamp]
     timestamped = [(p, ts) for p, ts in timestamped if ts is not None]
 
     if not timestamped:
@@ -378,17 +370,6 @@ def aggregate_time_buckets(
         )
 
     return result
-
-
-def _parse_ts(ts_str: Optional[str]) -> Optional[datetime]:
-    """An ISO 8601 time as an aware datetime; one with no zone is UTC, as a log line's is."""
-    if not ts_str:
-        return None
-    try:
-        ts = datetime.fromisoformat(ts_str)
-    except (ValueError, TypeError):
-        return None
-    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
 
 def _parse_bucket_duration(duration: str) -> timedelta:

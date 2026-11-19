@@ -88,3 +88,33 @@ def test_the_index_keeps_file_order(rust_backend, fifty_thousand_lines):
 
     timeline = json.loads(investigator.follow_thread([fifty_thousand_lines], "t-3", None, None))
     assert [e["line_number"] for e in timeline["entries"]] == list(range(3, 50001, 7))
+
+
+def test_metadata_counts_by_level_add_up_to_the_lines_and_a_line_with_none_is_unknown(tmp_path):
+    from logler.investigate import get_metadata
+
+    path = tmp_path / "ten.log"
+    path.write_text(
+        "2024-01-15T10:00:00Z INFO one\n"
+        "2024-01-15T10:00:01Z ERROR two\n"
+        "continuation without a level\n"
+        "2024-01-15T10:00:03Z WARN four\n"
+        "2024-01-15T10:00:04Z INFO five\n"
+        "  at somewhere.java:12\n"
+        "2024-01-15T10:00:06Z INFO seven\n"
+        "2024-01-15T10:00:07Z ERROR eight\n"
+        "plain nine\n"
+        "2024-01-15T10:00:09Z DEBUG ten\n"
+    )
+    (meta,) = get_metadata([str(path)])
+    assert meta["log_levels"] == {"INFO": 3, "ERROR": 2, "WARN": 1, "DEBUG": 1, "UNKNOWN": 3}
+    assert sum(meta["log_levels"].values()) == 10
+
+
+def test_metadata_of_a_file_with_no_level_on_any_line_is_all_unknown(tmp_path):
+    from logler.investigate import get_metadata
+
+    path = tmp_path / "none.log"
+    path.write_text("alpha\nbeta\ngamma\n")
+    (meta,) = get_metadata([str(path)])
+    assert meta["log_levels"] == {"UNKNOWN": 3}

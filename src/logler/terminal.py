@@ -12,7 +12,7 @@ from rich.text import Text
 
 from .log_reader import CompleteLines
 from ._search_core import level_name, level_text
-from .parser import LogParser, LogEntry
+from .parser import LogParser, LogEntry, cut_newline
 
 
 class TerminalViewer:
@@ -59,13 +59,17 @@ class TerminalViewer:
         # One handle and one reader serve the first read and the follow, so they share the
         # position. Only the follow waits for the newline of a last line still being written.
         with open(file_path, "rb") as f:
+            if f.read(3) != b"\xef\xbb\xbf":  # a byte-order mark is not part of line 1
+                f.seek(0)
             growing = CompleteLines(f)
             all_lines = list(growing)
             if not follow and growing.unfinished():
                 all_lines.append(growing.unfinished())
 
             # Parse entries, each file with the format that names it
-            entries = [parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(all_lines)]
+            entries = [
+                parser.parse_line(i + 1, cut_newline(line)) for i, line in enumerate(all_lines)
+            ]
 
             # Apply filters
             filtered = self._apply_filters(entries, level_filter, pattern, thread_filter)
@@ -179,7 +183,7 @@ class TerminalViewer:
         while True:
             for line in growing:
                 line_number += 1
-                entry = parser.parse_line(line_number, line.rstrip())
+                entry = parser.parse_line(line_number, cut_newline(line))
 
                 # Apply filters
                 filtered = self._apply_filters([entry], level_filter, pattern, thread_filter)

@@ -401,6 +401,35 @@ class TestTemporalCorrelation:
     def _make_config(self, *rules) -> CorrelationsConfig:
         return CorrelationsConfig(correlations={"test-group": CorrelationGroup(rules=list(rules))})
 
+    def test_anchor_time_is_the_entrys_own_text(self):
+        """A nanosecond stamp is printed with its nine digits, as the entry holds it."""
+        entries = [
+            _make_entry(
+                file="sensor.log",
+                timestamp="2024-01-15T10:00:03.123456789Z",
+                level="WARN",
+                message="Pressure drop",
+                fields={"pressure": 1.5},
+            ),
+            _make_entry(
+                file="plc.log",
+                timestamp="2024-01-15T10:00:04Z",
+                level="ERROR",
+                message="Motor stall detected",
+            ),
+        ]
+        config = self._make_config(
+            TemporalRule(
+                type="temporal",
+                anchor=EventCondition(field="pressure", condition="< 2.0"),
+                window="5s",
+            )
+        )
+        result = correlate_by_rules(entries, config)
+        assert [c["anchor_timestamp"] for c in result["clusters"]] == [
+            "2024-01-15T10:00:03.123456789Z"
+        ]
+
     def test_basic_temporal_window(self):
         """Entries within the time window of an anchor are correlated."""
         entries = [

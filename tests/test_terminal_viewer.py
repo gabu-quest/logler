@@ -231,3 +231,37 @@ def test_a_byte_that_is_not_utf8_is_shown_as_the_replacement_character(tmp_path,
     asyncio.run(viewer.view_file(str(path)))
 
     assert _shown(capture) == [(1, _text(1)), (2, "2024-01-15 10:00:00 INFO caf\ufffd open")]
+
+
+def test_a_byte_order_mark_is_not_part_of_line_one(tmp_path, capture):
+    path = tmp_path / "bom.log"
+    path.write_bytes(b"\xef\xbb\xbf" + _line(1).encode() + _line(2).encode())
+    viewer = _viewer(capture)
+
+    asyncio.run(viewer.view_file(str(path)))
+
+    assert _shown(capture) == [(1, _text(1)), (2, _text(2))]
+
+
+def test_a_line_keeps_its_trailing_spaces_in_the_entry(tmp_path, capture):
+    """The viewer cuts a line as search does: only the line ending goes. The pattern is
+    looked for in the entry's message, so it finds two closing spaces only when they stay."""
+    path = tmp_path / "s.log"
+    path.write_text(_line(1, message="shop open") + _line(2, message="shop open  "))
+    viewer = _viewer(capture)
+
+    asyncio.run(viewer.view_file(str(path), pattern="open  "))
+
+    assert _shown(capture) == [(2, _text(2, message="shop open"))]
+
+
+def test_cut_newline_takes_the_line_ending_and_nothing_else():
+    from logler.parser import cut_newline
+
+    assert [cut_newline(s) for s in ("a  \n", "a\r\n", "a\rb\n", "a\r\r\n", "a ")] == [
+        "a  ",
+        "a",
+        "a\rb",
+        "a\r",
+        "a ",
+    ]

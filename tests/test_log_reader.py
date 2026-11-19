@@ -213,3 +213,19 @@ class TestLogReader:
 
             assert entry["service"] == expected_last[path.name]["service"]
             assert entry["message"] == expected_last[path.name]["message"]
+
+
+class TestReadLinesCutsLikeSearch:
+    """`LogReader.read_lines` cuts a file the way `parser.read_lines` and the index do."""
+
+    @pytest.fixture
+    def odd_file(self, tmp_path):
+        path = tmp_path / "odd.log"
+        path.write_bytes(b"\xef\xbb\xbfone\rtwo\nthree\r\r\nfour  \n")
+        return str(path)
+
+    def test_a_bare_return_does_not_end_a_line_and_a_bom_is_not_text(self, odd_file):
+        assert list(LogReader(odd_file).read_lines()) == ["one\rtwo", "three\r", "four  "]
+
+    def test_start_line_and_max_lines_count_those_lines(self, odd_file):
+        assert list(LogReader(odd_file).read_lines(start_line=1, max_lines=1)) == ["three\r"]

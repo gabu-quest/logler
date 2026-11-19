@@ -1,8 +1,8 @@
 """
-Shared utilities for the LLM-First CLI.
-
-Exit codes, JSON output helpers, glob expansion, time filters,
-and max-bytes truncation used across all command submodules.
+What every llm command shares: the ``llm`` group, the exit codes, the JSON output and error
+helpers, the ``command`` decorator (error handling and ``--pretty``), level-word options,
+glob expansion, the time filter options and how they resolve to bounds, and the max-bytes
+truncation.
 """
 
 import click
@@ -14,11 +14,11 @@ import re
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Set, Tuple
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from .._search_core import _parse_levels, level_text
+from .._search_core import _parse_levels, level_text, parse_duration
 from ..config import FormatFileError
-from ..parser import _to_utc
+from ..parser import format_time, to_utc
 
 
 @click.group()
@@ -117,27 +117,6 @@ def _level_texts(value: Optional[str]) -> Optional[Set[str]]:
     return {level_text(name) for name in _parse_levels(value)} if value else None
 
 
-def _parse_duration(duration: str) -> timedelta:
-    """Parse duration string like '30m', '2h', '1d' to timedelta."""
-    match = re.match(r"^(\d+)(s|m|h|d)$", duration.lower())
-    if not match:
-        raise ValueError(f"Invalid duration format: {duration}. Use format like '30m', '2h', '1d'")
-
-    value = int(match.group(1))
-    unit = match.group(2)
-
-    if unit == "s":
-        return timedelta(seconds=value)
-    elif unit == "m":
-        return timedelta(minutes=value)
-    elif unit == "h":
-        return timedelta(hours=value)
-    elif unit == "d":
-        return timedelta(days=value)
-    else:
-        raise ValueError(f"Unknown time unit: {unit}")
-
-
 def _expand_globs(patterns: List[str]) -> List[str]:
     """The files the patterns name. A folder a pattern matches is not a log file."""
     import glob
@@ -221,17 +200,15 @@ def time_filter_options(f):
 
 def _resolve_time_filters(
     last_duration: Optional[str], after: Optional[str], before: Optional[str]
-) -> tuple:
+) -> Tuple[Optional[str], Optional[str]]:
     """Resolve time filter options into (time_start, time_end) ISO strings.
 
     Supports relative time with '-' prefix: --after=-1h --before=-30m
     means "between 1 hour ago and 30 minutes ago".
     """
-    from .. import investigate as inv_mod
-
     if last_duration:
-        tr = inv_mod._build_time_range(last=last_duration)
-        return (tr.get("start") if tr else None, tr.get("end") if tr else None)
+        now = datetime.now(timezone.utc)
+        return (format_time(_before(now, last_duration, "--last")), format_time(now))
 
     time_start = None
     time_end = None
@@ -247,10 +224,7 @@ def _resolve_time_bounds(
 ) -> Tuple[Optional[datetime], Optional[datetime]]:
     """The same bounds as aware datetimes, for a command that compares entry times itself."""
     start, end = _resolve_time_filters(last_duration, after, before)
-    return (
-        datetime.fromisoformat(start) if start else None,
-        datetime.fromisoformat(end) if end else None,
-    )
+    return (to_utc(start), to_utc(end))
 
 
 def _outside_bounds(ts: Optional[datetime], start: Optional[datetime], end: Optional[datetime]):
@@ -266,7 +240,18 @@ def _time_text_outside_bounds(
     ts: Optional[str], start: Optional[datetime], end: Optional[datetime]
 ):
     """``_outside_bounds`` for an engine entry, whose time is text."""
-    return _outside_bounds(_to_utc(ts), start, end)
+    return _outside_bounds(to_utc(ts), start, end)
+
+
+def _before(now: datetime, duration: str, flag_name: str) -> datetime:
+    """``now`` minus a relative duration (``30m``, ``2h``, ``1d``). Text that is no duration,
+    or one that reaches back past the calendar's first year, is the user's error."""
+    try:
+        return now - parse_duration(duration)
+    except (ValueError, OverflowError):
+        _error_json(
+            f"Invalid duration for {flag_name}: {duration}. Use format like '30m', '2h', '1d'"
+        )
 
 
 def _parse_time_arg(value: str, flag_name: str) -> str:
@@ -275,25 +260,14 @@ def _parse_time_arg(value: str, flag_name: str) -> str:
     Relative format: -30m, -2h, -1d (dash prefix + duration)
     """
     if value.startswith("-"):
-        # Relative time: subtract duration from now
-        try:
-            delta = _parse_duration(value[1:])
-            return (datetime.now(timezone.utc) - delta).isoformat()
-        except ValueError:
-            _error_json(
-                f"Invalid relative duration for {flag_name}: {value}. "
-                f"Use format like '-30m', '-2h', '-1d'"
-            )
+        return format_time(_before(datetime.now(timezone.utc), value[1:], flag_name))
     else:
         # Absolute ISO8601 timestamp. Without a zone it is UTC, as a log timestamp without
         # one is; every entry's time is zone-aware, so the bound must be too.
-        try:
-            parsed = datetime.fromisoformat(value)
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.isoformat()
-        except ValueError:
+        parsed = to_utc(value)
+        if parsed is None:
             _error_json(f"Invalid timestamp format for {flag_name}: {value}")
+        return format_time(parsed)
 
 
 def _extract_patterns(values: List[str]) -> List[str]:

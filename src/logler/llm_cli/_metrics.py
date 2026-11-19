@@ -49,7 +49,7 @@ def verify_pattern(
     Example:
         logler llm verify-pattern app.log --pattern "timeout after (\\d+)ms" --extract-groups
     """
-    from ..parser import LogParser, format_time
+    from ..parser import LogParser, read_lines
 
     with _db_file_source(files, db_path) as file_list:
         try:
@@ -67,40 +67,38 @@ def verify_pattern(
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                with open(file_path, "r", errors="replace") as f:
-                    for i, line in enumerate(f):
-                        line = line.rstrip()
-                        if not line:
-                            continue
+                for number, line in read_lines(file_path):
+                    if not line.strip():
+                        continue
 
-                        total_entries += 1
-                        entry = parser.parse_line(i + 1, line)
+                    total_entries += 1
+                    entry = parser.parse_line(number, line)
 
-                        # Try matching against message and raw
-                        match = regex.search(entry.message or "") or regex.search(line)
+                    # Try matching against message and raw
+                    match = regex.search(entry.message or "") or regex.search(line)
 
-                        if match:
-                            match_info = {
-                                "file": file_path,
-                                "line_number": i + 1,
-                                "raw": line[:200],
-                            }
+                    if match:
+                        match_info = {
+                            "file": file_path,
+                            "line_number": number,
+                            "raw": line[:200],
+                        }
 
-                            if extract_groups and match.groups():
-                                match_info["groups"] = list(match.groups())
-                                for j, grp in enumerate(match.groups()):
-                                    if grp:
-                                        group_values[f"group_{j + 1}"][grp] += 1
+                        if extract_groups and match.groups():
+                            match_info["groups"] = list(match.groups())
+                            for j, grp in enumerate(match.groups()):
+                                if grp:
+                                    group_values[f"group_{j + 1}"][grp] += 1
 
-                            matches.append(match_info)
+                        matches.append(match_info)
 
-                            if not first_match:
-                                first_match = entry.timestamp
-                            last_match = entry.timestamp
+                        if not first_match:
+                            first_match = entry.timestamp_text
+                        last_match = entry.timestamp_text
 
-                            # Track by thread
-                            if entry.thread_id:
-                                by_thread[entry.thread_id] += 1
+                        # Track by thread
+                        if entry.thread_id:
+                            by_thread[entry.thread_id] += 1
 
             except FileNotFoundError:
                 _error_json(f"File not found: {file_path}")
@@ -116,8 +114,8 @@ def verify_pattern(
                 "total_matches": len(matches),
                 "total_entries": total_entries,
                 "match_rate": (round(len(matches) / total_entries, 6) if total_entries > 0 else 0),
-                "first_match": format_time(first_match) if first_match else None,
-                "last_match": format_time(last_match) if last_match else None,
+                "first_match": first_match or None,
+                "last_match": last_match or None,
             },
             "sample_matches": matches[:20],  # First 20 matches as samples
         }
@@ -199,7 +197,7 @@ def emit(
     Example:
         logler llm emit app.log --level ERROR --last 1h --limit 100
     """
-    from ..parser import LogParser, format_time
+    from ..parser import LogParser, read_lines
 
     with _db_file_source(files, db_path) as file_list:
         # Parse field list
@@ -233,82 +231,78 @@ def emit(
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                with open(file_path, "r", errors="replace") as f:
-                    for i, line in enumerate(f):
-                        line = line.rstrip()
-                        if not line:
+                for number, line in read_lines(file_path):
+                    if not line.strip():
+                        continue
+
+                    entry = parser.parse_line(number, line)
+
+                    # Apply level filter (comma-separated)
+                    if level_set and entry.level not in level_set:
+                        continue
+                    if exclude_level_set and entry.level in exclude_level_set:
+                        continue
+
+                    # Apply service filter
+                    if service:
+                        svc = getattr(entry, "service_name", None)
+                        if not svc or svc != service:
                             continue
 
-                        entry = parser.parse_line(i + 1, line)
+                    # Apply time filter
+                    if _outside_bounds(entry.timestamp, time_start, time_end):
+                        continue
 
-                        # Apply level filter (comma-separated)
-                        if level_set and entry.level not in level_set:
-                            continue
-                        if exclude_level_set and entry.level in exclude_level_set:
-                            continue
-
-                        # Apply service filter
-                        if service:
-                            svc = getattr(entry, "service_name", None)
-                            if not svc or svc != service:
+                    # Apply query filter
+                    if query_regex:
+                        if not query_regex.search(entry.message or ""):
+                            if not query_regex.search(line):
                                 continue
 
-                        # Apply time filter
-                        if _outside_bounds(entry.timestamp, time_start, time_end):
+                    # Apply exclude query filter
+                    if exclude_regex:
+                        if exclude_regex.search(entry.message or "") or exclude_regex.search(line):
                             continue
 
-                        # Apply query filter
-                        if query_regex:
-                            if not query_regex.search(entry.message or ""):
-                                if not query_regex.search(line):
-                                    continue
+                    # Build output
+                    entry_time = entry.timestamp_text
+                    if compact:
+                        out = {
+                            "ln": number,
+                            "ts": entry_time,
+                            "lv": entry.level,
+                            "msg": entry.message,
+                        }
+                        if len(file_list) > 1:
+                            out["src"] = Path(file_path).name
+                        if entry.thread_id:
+                            out["th"] = entry.thread_id
+                    else:
+                        out = {
+                            "file": file_path,
+                            "line_number": number,
+                            "timestamp": entry_time,
+                            "level": entry.level,
+                            "message": entry.message,
+                        }
+                        if entry.thread_id:
+                            out["thread_id"] = entry.thread_id
+                        if entry.correlation_id:
+                            out["correlation_id"] = entry.correlation_id
+                        if hasattr(entry, "service_name") and entry.service_name:
+                            out["service_name"] = entry.service_name
 
-                        # Apply exclude query filter
-                        if exclude_regex:
-                            if exclude_regex.search(entry.message or "") or exclude_regex.search(
-                                line
-                            ):
-                                continue
+                    # Filter fields if specified
+                    if include_fields:
+                        out = {k: v for k, v in out.items() if k in include_fields}
 
-                        # Build output
-                        entry_time = format_time(entry.timestamp) if entry.timestamp else None
-                        if compact:
-                            out = {
-                                "ln": i + 1,
-                                "ts": entry_time,
-                                "lv": entry.level,
-                                "msg": entry.message,
-                            }
-                            if len(file_list) > 1:
-                                out["src"] = Path(file_path).name
-                            if entry.thread_id:
-                                out["th"] = entry.thread_id
-                        else:
-                            out = {
-                                "file": file_path,
-                                "line_number": i + 1,
-                                "timestamp": entry_time,
-                                "level": entry.level,
-                                "message": entry.message,
-                            }
-                            if entry.thread_id:
-                                out["thread_id"] = entry.thread_id
-                            if entry.correlation_id:
-                                out["correlation_id"] = entry.correlation_id
-                            if hasattr(entry, "service_name") and entry.service_name:
-                                out["service_name"] = entry.service_name
-
-                        # Filter fields if specified
-                        if include_fields:
-                            out = {k: v for k, v in out.items() if k in include_fields}
-
-                        if buffer is not None:
-                            buffer.append(out)
-                        else:
-                            click.echo(json.dumps(out, default=str))
-                            emitted += 1
-                            if limit and emitted >= limit:
-                                break
+                    if buffer is not None:
+                        buffer.append(out)
+                    else:
+                        click.echo(json.dumps(out, default=str))
+                        emitted += 1
+                        if limit and emitted >= limit:
+                            break
 
             except FileNotFoundError:
                 pass

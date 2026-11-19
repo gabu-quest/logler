@@ -743,9 +743,9 @@ impl HierarchyBuilder {
     fn calculate_level_counts(&self, entries: &[&LogEntry]) -> HashMap<String, usize> {
         let mut counts = HashMap::new();
         for entry in entries {
-            if let Some(level) = entry.level {
-                *counts.entry(level.as_str().to_string()).or_insert(0) += 1;
-            }
+            // A line with no level is counted, under UNKNOWN, so the counts add up.
+            let level = entry.level.unwrap_or(LogLevel::Unknown);
+            *counts.entry(level.as_str().to_string()).or_insert(0) += 1;
         }
         counts
     }
@@ -980,6 +980,19 @@ mod tests {
             service_name: None,
             fields,
         }
+    }
+
+    #[test]
+    fn level_counts_hold_an_entry_with_no_level_as_unknown() {
+        let builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let with_level = make_entry_with_fields(None, HashMap::new());
+        let mut without = make_entry_with_fields(None, HashMap::new());
+        without.level = None;
+        let counts = builder.calculate_level_counts(&[&with_level, &without, &without]);
+        assert_eq!(
+            counts,
+            HashMap::from([("INFO".to_string(), 1), ("UNKNOWN".to_string(), 2)])
+        );
     }
 
     #[test]

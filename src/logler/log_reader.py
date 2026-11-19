@@ -80,20 +80,18 @@ class LogReader:
     def _read_lines_forward(
         self, start_line: int = 0, max_lines: Optional[int] = None
     ) -> Iterator[str]:
-        """Read lines forward from the file."""
-        with open(self.file_path, "r", encoding="utf-8", errors="replace") as f:
-            line_num = 0
-            lines_read = 0
+        """Read lines forward from the file, cut and numbered as search cuts them
+        (``parser.read_lines``): ``start_line`` counts from 0."""
+        from .parser import read_lines
 
-            for line in f:
-                if line_num >= start_line:
-                    yield line.rstrip("\n\r")
-                    lines_read += 1
+        lines_read = 0
+        for number, line in read_lines(str(self.file_path)):
+            if number - 1 >= start_line:
+                yield line
+                lines_read += 1
 
-                    if max_lines and lines_read >= max_lines:
-                        break
-
-                line_num += 1
+                if max_lines and lines_read >= max_lines:
+                    break
 
     def _read_lines_reverse(
         self, start_line: int = 0, max_lines: Optional[int] = None

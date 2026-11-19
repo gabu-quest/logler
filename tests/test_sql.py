@@ -40,7 +40,7 @@ except ImportError as e:
 
 try:
     from logler.sql import SqlEngine
-    from logler.parser import LogParser
+    from logler.parser import LogParser, read_lines
 
     SQL_AVAILABLE = True
 except ImportError:
@@ -110,13 +110,11 @@ def sql_log_file():
 def _build_entries(file_path):
     """A log file's lines as the entry dicts SqlEngine.load_entries reads."""
     parser = LogParser()
-    entries = []
-    with open(file_path, encoding="utf-8", errors="replace") as f:
-        for line_number, line in enumerate(f, start=1):
-            line = line.rstrip("\n\r")
-            if line:
-                entries.append(parser.parse_entry(line_number, line, file_path))
-    return entries
+    return [
+        parser.parse_entry(number, line, file_path)
+        for number, line in read_lines(file_path)
+        if line
+    ]
 
 
 @pytest.fixture

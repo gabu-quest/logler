@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from collections import defaultdict
 
-from ._search_core import search, follow_thread
+from ._search_core import level_text, search, follow_thread
 
 _DEFAULT_TIMELINE_LIMIT = 10_000
 
@@ -348,7 +348,7 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
     services = set()
 
     for entry in entries:
-        level = entry.get("level", "INFO")
+        level = level_text(entry.get("level"))
         level_counts[level] += 1
         if level in ["ERROR", "FATAL"]:
             error_count += 1
@@ -459,7 +459,7 @@ def _analyze_period(entries: List[Dict], start: str, end: str) -> Dict[str, Any]
     threads = set()
 
     for entry in entries:
-        level = entry.get("level", "INFO")
+        level = level_text(entry.get("level"))
         level_counts[level] += 1
 
         if level in ["ERROR", "FATAL"]:

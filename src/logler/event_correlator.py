@@ -16,8 +16,12 @@ from typing import Any, Dict, List, Optional
 
 from . import investigate
 from .config import EventCondition, parse_duration
-from .correlator import _matches_anchor, _make_virtual_trace_id, _parse_entry_timestamp
-from .parser import format_time
+from .correlator import (
+    _entry_time_text,
+    _make_virtual_trace_id,
+    _matches_anchor,
+    _parse_entry_timestamp,
+)
 
 
 def search_around_timestamp(
@@ -198,7 +202,7 @@ def _correlate_around_entry(
     return {
         "virtual_trace_id": vtid,
         "rule_type": "event_window",
-        "anchor_timestamp": format_time(anchor_ts),
+        "anchor_timestamp": _entry_time_text(anchor_entry, anchor_ts),
         "anchor_message": anchor_msg,
         "anchor_file": Path(anchor_entry.get("file", "")).name,
         "anchor_line": anchor_entry.get("line_number"),
@@ -304,7 +308,7 @@ def _correlate_by_trigger(
                     "virtual_trace_id": vtid,
                     "rule_type": "event_trigger",
                     "trigger": trigger,
-                    "anchor_timestamp": format_time(trigger_ts),
+                    "anchor_timestamp": _entry_time_text(trigger_entry, trigger_ts),
                     "anchor_message": trigger_msg,
                     "anchor_file": Path(trigger_entry.get("file", "")).name,
                     "anchor_line": trigger_entry.get("line_number"),

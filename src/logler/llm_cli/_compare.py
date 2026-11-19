@@ -6,14 +6,13 @@ from typing import Optional, List, Dict, Any
 from collections import defaultdict
 from datetime import datetime
 
-from .._search_core import level_text
+from .._search_core import level_text, parse_duration
 
 from ._core import (
     command,
     EXIT_SUCCESS,
     _output_json,
     _error_json,
-    _parse_duration,
     _parse_time_arg,
     db_source_option,
     _db_file_source,
@@ -214,7 +213,7 @@ def diff(
     Example:
         logler llm diff app.log --baseline 1h
     """
-    from ..parser import LogParser, format_time
+    from ..parser import LogParser, format_time, read_lines, to_utc
     from datetime import timezone
 
     with _db_file_source(files, db_path) as file_list:
@@ -223,17 +222,20 @@ def diff(
 
         if baseline:
             try:
-                duration = _parse_duration(baseline)
+                duration = parse_duration(baseline)
                 after_end_ts = now
                 after_start_ts = now - duration
                 before_end_ts = after_start_ts
                 before_start_ts = before_end_ts - duration
-            except ValueError as e:
-                _error_json(str(e))
+            except (ValueError, OverflowError):
+                _error_json(
+                    f"Invalid duration for --baseline: {baseline}. "
+                    "Use format like '30m', '2h', '1d'"
+                )
         else:
 
             def bound(value, flag):
-                return datetime.fromisoformat(_parse_time_arg(value, flag)) if value else None
+                return to_utc(_parse_time_arg(value, flag)) if value else None
 
             before_start_ts = bound(before_start, "--before-start")
             before_end_ts = bound(before_end, "--before-end")
@@ -247,26 +249,24 @@ def diff(
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                with open(file_path, "r", errors="replace") as f:
-                    for i, line in enumerate(f):
-                        line = line.rstrip()
-                        if not line:
-                            continue
+                for number, line in read_lines(file_path):
+                    if not line.strip():
+                        continue
 
-                        entry = parser.parse_line(i + 1, line)
+                    entry = parser.parse_line(number, line)
 
-                        if not entry.timestamp:
-                            continue
+                    if not entry.timestamp:
+                        continue
 
-                        ts = entry.timestamp
+                    ts = entry.timestamp
 
-                        if before_start_ts and before_end_ts:
-                            if before_start_ts <= ts <= before_end_ts:
-                                before_entries.append(entry)
+                    if before_start_ts and before_end_ts:
+                        if before_start_ts <= ts <= before_end_ts:
+                            before_entries.append(entry)
 
-                        if after_start_ts and after_end_ts:
-                            if after_start_ts <= ts <= after_end_ts:
-                                after_entries.append(entry)
+                    if after_start_ts and after_end_ts:
+                        if after_start_ts <= ts <= after_end_ts:
+                            after_entries.append(entry)
 
             except (FileNotFoundError, PermissionError):
                 pass

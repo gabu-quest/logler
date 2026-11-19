@@ -597,3 +597,126 @@ class TestFilesArgument:
 
         assert code == 2, out
         assert json.loads(out)["error"].startswith("No files found matching")
+
+
+class TestPerLineReadersNumberLinesAsSearchDoes:
+    """schema, summarize, verify-pattern, emit, diff, format test and stats cut a file as
+    search does: a line ends at "\\n" or "\\r\\n", a bare "\\r" stays in the line, the text
+    keeps its trailing spaces."""
+
+    @pytest.fixture
+    def carriage_return_log(self, tmp_path):
+        """Four lines; line 2 ends in spaces, line 3 holds a bare carriage return."""
+        path = tmp_path / "cr.log"
+        path.write_bytes(
+            b"2024-01-15T10:00:00Z ERROR one\n"
+            b"2024-01-15T10:00:01Z ERROR two  \n"
+            b"2024-01-15T10:00:02Z ERROR three\r2024-01-15T10:00:02Z ERROR still three\n"
+            b"2024-01-15T10:00:03Z ERROR four\n"
+        )
+        return str(path)
+
+    def test_search_is_the_reference(self, carriage_return_log):
+        _, stdout, _ = invoke(["search", carriage_return_log, "--compact"])
+        assert sorted(e["ln"] for e in json.loads(stdout)["results"]) == [1, 2, 3, 4]
+
+    def test_emit(self, carriage_return_log):
+        _, stdout, _ = invoke(["emit", carriage_return_log])
+        assert [json.loads(line)["line_number"] for line in stdout.splitlines()] == [1, 2, 3, 4]
+
+    def test_summarize(self, carriage_return_log):
+        _, stdout, _ = invoke(["summarize", carriage_return_log])
+        data = json.loads(stdout)
+        assert data["stats"]["total_entries"] == 4
+        assert [e["line"] for e in data["errors"]] == [1, 2, 3, 4]
+
+    def test_schema(self, carriage_return_log):
+        _, stdout, _ = invoke(["schema", carriage_return_log])
+        assert json.loads(stdout)["total_entries"] == 4
+
+    def test_verify_pattern_numbers_the_line_after_it_as_search_does(self, carriage_return_log):
+        _, stdout, _ = invoke(["verify-pattern", carriage_return_log, "--pattern", "four"])
+        (match,) = json.loads(stdout)["sample_matches"]
+        assert (match["line_number"], match["raw"]) == (4, "2024-01-15T10:00:03Z ERROR four")
+
+    def test_verify_pattern_raw_keeps_trailing_spaces(self, carriage_return_log):
+        _, stdout, _ = invoke(["verify-pattern", carriage_return_log, "--pattern", "two"])
+        (match,) = json.loads(stdout)["sample_matches"]
+        assert (match["line_number"], match["raw"]) == (2, "2024-01-15T10:00:01Z ERROR two  ")
+
+    def test_diff(self, carriage_return_log):
+        _, stdout, _ = invoke(
+            [
+                "diff",
+                carriage_return_log,
+                "--before-start",
+                "2024-01-15T10:00:00",
+                "--before-end",
+                "2024-01-15T10:00:03",
+                "--after-start",
+                "2024-01-15T11:00:00",
+                "--after-end",
+                "2024-01-15T12:00:00",
+            ]
+        )
+        assert json.loads(stdout)["comparison"]["before"]["total"] == 4
+
+    def test_format_test(self, carriage_return_log):
+        regex = r"(?P<ts>\S+) (?P<level>\w+) (?P<msg>four)"
+        _, stdout, _ = invoke(["format", "test", "-f", carriage_return_log, "--regex", regex])
+        data = json.loads(stdout)
+        assert data["total_lines"] == 4
+        assert [r["line_number"] for r in data["results"] if r["matched"]] == [4]
+
+    def test_stats(self, carriage_return_log):
+        from click.testing import CliRunner
+
+        from logler.cli import main
+
+        result = CliRunner().invoke(main, ["stats", carriage_return_log, "--json"])
+        assert json.loads(result.stdout)["total"] == 4
+
+    def test_blank_lines_keep_their_present_treatment(self, tmp_path):
+        """The five that skip a blank line still skip it (and a line of spaces); the line
+        numbers still count it."""
+        path = tmp_path / "blank.log"
+        path.write_bytes(
+            b"2024-01-15T10:00:00Z ERROR one\n\n   \n2024-01-15T10:00:03Z ERROR four\n"
+        )
+        _, stdout, _ = invoke(["emit", str(path)])
+        assert [json.loads(line)["line_number"] for line in stdout.splitlines()] == [1, 4]
+        _, stdout, _ = invoke(["summarize", str(path)])
+        assert json.loads(stdout)["stats"]["total_entries"] == 2
+        _, stdout, _ = invoke(["schema", str(path)])
+        assert json.loads(stdout)["total_entries"] == 2
+        _, stdout, _ = invoke(["verify-pattern", str(path), "--pattern", "ERROR"])
+        assert json.loads(stdout)["statistics"]["total_entries"] == 2
+        _, stdout, _ = invoke(
+            [
+                "diff",
+                str(path),
+                "--before-start",
+                "2024-01-15T10:00:00",
+                "--before-end",
+                "2024-01-15T10:00:05",
+                "--after-start",
+                "2024-01-15T11:00:00",
+                "--after-end",
+                "2024-01-15T12:00:00",
+            ]
+        )
+        assert json.loads(stdout)["comparison"]["before"]["total"] == 2
+
+    def test_format_test_skips_an_empty_line_and_keeps_a_line_of_spaces(self, tmp_path):
+        path = tmp_path / "blank.log"
+        path.write_bytes(
+            b"2024-01-15T10:00:00Z ERROR one\n\n   \n2024-01-15T10:00:03Z ERROR four\n"
+        )
+        _, stdout, _ = invoke(["format", "test", "-f", str(path), "--regex", r"(?P<ts>\S+) .*"])
+        data = json.loads(stdout)
+        assert data["total_lines"] == 3
+        assert [(r["line_number"], r["matched"]) for r in data["results"]] == [
+            (1, True),
+            (3, False),
+            (4, True),
+        ]
