@@ -98,9 +98,11 @@ class ThreadTracker:
     def get_thread(self, thread_id: str) -> dict | None:
         """Get thread information."""
         thread = self.threads.get(thread_id)
-        if thread:
-            thread["correlation_ids"] = sorted(thread["correlation_ids"])
-        return thread
+        if thread is None:
+            return None
+        thread_copy = thread.copy()
+        thread_copy["correlation_ids"] = sorted(thread["correlation_ids"])
+        return thread_copy
 
     def get_all_threads(self) -> list[dict]:
         """Get all tracked threads."""

@@ -555,3 +555,24 @@ class TestStateIsolation:
         assert t2 is not None  # guard
         assert t2["thread_id"] == "tracker2-thread"
         assert tracker2.get_thread("tracker1-thread") is None
+
+
+class TestReadingDoesNotBreakTracking:
+    """Reading a thread leaves the tracker's own record alone."""
+
+    def test_track_read_read_track_again(self):
+        tracker = ThreadTracker()
+        tracker.track(LogEntry(line_number=1, raw="a", thread_id="w", correlation_id="req-b"))
+        tracker.track(LogEntry(line_number=2, raw="b", thread_id="w", correlation_id="req-a"))
+        first = tracker.get_thread("w")
+        second = tracker.get_thread("w")
+        assert first is not None and second is not None
+        assert first["correlation_ids"] == ["req-a", "req-b"]
+        assert second["correlation_ids"] == ["req-a", "req-b"]
+
+        tracker.track(LogEntry(line_number=3, raw="c", thread_id="w", correlation_id="req-c"))
+        third = tracker.get_thread("w")
+        assert third is not None
+        assert third["log_count"] == 3
+        assert third["correlation_ids"] == ["req-a", "req-b", "req-c"]
+        assert tracker.threads["w"]["correlation_ids"] == {"req-a", "req-b", "req-c"}
