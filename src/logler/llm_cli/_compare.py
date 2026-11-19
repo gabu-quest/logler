@@ -223,8 +223,6 @@ def diff(
 
     with _db_file_source(files, db_path) as file_list:
         try:
-            parser = LogParser()
-
             # Parse time periods
             now = datetime.now(timezone.utc)
 
@@ -258,6 +256,7 @@ def diff(
 
             for file_path in file_list:
                 try:
+                    parser = LogParser.for_file(file_path)
                     with open(file_path, "r", errors="replace") as f:
                         for i, line in enumerate(f):
                             line = line.rstrip()

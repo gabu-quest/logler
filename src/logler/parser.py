@@ -65,6 +65,15 @@ class LogParser:
             raise RuntimeError("Rust backend not available")
         self._parser = logler_rs.PyLineParser(force_format=force_format, custom_regex=custom_regex)
 
+    @classmethod
+    def for_file(cls, path: str) -> "LogParser":
+        """The parser for one file: its format from ``.logler/formats.yaml`` when one
+        names the file (``config.format_for_file``), else the built-in detection."""
+        from .config import format_for_file
+
+        fmt = format_for_file(path)
+        return cls(custom_regex=fmt.regex) if fmt is not None else cls()
+
     def parse_line(self, line_number: int, raw: str) -> LogEntry:
         """Parse a single log line."""
         # Rust counts lines as unsigned; the entry keeps the number the caller gave.

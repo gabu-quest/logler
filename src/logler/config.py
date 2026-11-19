@@ -9,8 +9,10 @@ for proprietary log formats and cross-file correlation rules.
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 from datetime import timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Dict, List, Literal, Optional, Union
 
@@ -219,17 +221,20 @@ def _find_config_file(start_dir: str | Path, filename: str) -> Path | None:
     Returns:
         Path to the config file, or None if not found.
     """
-    current = Path(start_dir).resolve()
+    found = _walk_up(os.path.realpath(start_dir), filename)
+    return Path(found) if found else None
 
+
+def _walk_up(directory: str, filename: str) -> str | None:
+    """The one walk: `.logler/<filename>` in `directory` (already resolved) or a parent."""
     while True:
-        candidate = current / CONFIG_DIR / filename
-        if candidate.is_file():
+        candidate = os.path.join(directory, CONFIG_DIR, filename)
+        if os.path.isfile(candidate):
             return candidate
-
-        parent = current.parent
-        if parent == current:
+        parent = os.path.dirname(directory)
+        if parent == directory:
             return None
-        current = parent
+        directory = parent
 
 
 def find_config(start_dir: str | Path) -> Path | None:
@@ -337,3 +342,83 @@ def get_format_for_file(config: LoglerConfig, filepath: str | Path) -> FormatCon
                 return format_config
 
     return None
+
+
+# =============================================================================
+# Which format parses a file
+# =============================================================================
+
+# A loaded config per formats.yaml, valid while the file's (mtime, size) is unchanged.
+_config_cache: Dict[str, tuple] = {}
+
+
+def _stamp(path: Path) -> tuple:
+    stat = path.stat()
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def formats_stamp(file: str | Path) -> tuple | None:
+    """What a change of the format that parses ``file`` would change: the formats.yaml
+    found from the file's directory and its (mtime, size); ``None`` when there is none.
+
+    A cheap check (a ``stat`` per directory up to the config, no parse) for caches of what a
+    file reads as.
+    """
+    found = _walk_up(os.path.dirname(os.path.realpath(file)), CONFIG_FILENAME)
+    if found is None:
+        return None
+    try:
+        return (found, *_stamp(Path(found)))
+    except OSError:
+        return None
+
+
+@lru_cache(maxsize=256)
+def _rust_accepts(regex: str) -> bool:
+    """True when the Rust engine, the only reader of a custom regex, can compile it."""
+    try:
+        import logler_rs
+
+        logler_rs.PyLineParser(custom_regex=regex)
+    except Exception:
+        return False
+    return True
+
+
+def _load_cached(config_path: Path) -> LoglerConfig | None:
+    key = str(config_path)
+    try:
+        stamp = _stamp(config_path)
+    except OSError:
+        return None
+    cached = _config_cache.get(key)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    try:
+        config: LoglerConfig | None = load_config(config_path)
+    except Exception:
+        config = None
+    _config_cache[key] = (stamp, config)
+    return config
+
+
+def format_for_file(path: str | Path) -> FormatConfig | None:
+    """The format that parses this file, or ``None`` for the built-in detection.
+
+    This is the one place that decides which format a file gets: the first format of the
+    ``.logler/formats.yaml`` found from the file's own directory whose ``file_patterns`` match
+    the file's name. ``None`` also when there is no config, the config cannot be loaded, or
+    the Rust engine cannot compile the matched format's regex: such a format is skipped and the
+    file loads with the built-in detection. (Whether a broken format file should be an error
+    instead is an open question for the user; it is kept as it was.)
+    """
+    config_path = find_config(Path(path).resolve().parent)
+    if config_path is None:
+        return None
+    config = _load_cached(config_path)
+    if config is None:
+        return None
+    fmt = get_format_for_file(config, path)
+    if fmt is None or not _rust_accepts(fmt.regex):
+        return None
+    return fmt

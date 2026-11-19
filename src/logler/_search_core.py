@@ -14,8 +14,8 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from collections import defaultdict
 
+from ._loading import load_files
 from .cache import get_cached_investigator
-from .safe_regex import try_compile
 
 # ---------------------------------------------------------------------------
 # Rust backend initialisation
@@ -76,63 +76,6 @@ def _normalize_search_result_levels(result: Dict[str, Any]) -> None:
         _normalize_entry(item)
     for item in result.get("context_after", []):
         _normalize_entry(item)
-
-
-def _apply_custom_regex_to_results(result: Dict[str, Any], custom_regex: Optional[str]) -> None:
-    """Apply custom regex to fill missing fields in search results."""
-    if not custom_regex:
-        return
-    compiled = try_compile(custom_regex)
-    if not compiled:
-        return
-    for item in result.get("results", []):
-        _apply_custom_regex_to_entry(item.get("entry", {}), compiled)
-    # Also apply to pattern examples if present
-    for pattern in result.get("patterns", []):
-        for example in pattern.get("examples", []):
-            _apply_custom_regex_to_entry(example, compiled)
-
-
-def _apply_custom_regex_to_entry(entry: Dict[str, Any], compiled_regex) -> None:
-    """Apply a compiled regex to a single entry to fill missing fields."""
-    message = entry.get("raw_line") or entry.get("message") or ""
-    if not message:
-        return
-    match = compiled_regex.search(message)
-    if not match:
-        return
-    groups = match.groupdict()
-    for key, value in groups.items():
-        if value is not None:
-            # Only fill if the entry field is missing or empty
-            if key == "level":
-                if not entry.get("level"):
-                    entry["level"] = value.upper()
-            elif key == "timestamp":
-                if not entry.get("timestamp"):
-                    entry["timestamp"] = value
-            elif key == "thread_id":
-                if not entry.get("thread_id"):
-                    entry["thread_id"] = value
-            elif key == "correlation_id":
-                if not entry.get("correlation_id"):
-                    entry["correlation_id"] = value
-            elif key == "trace_id":
-                if not entry.get("trace_id"):
-                    entry["trace_id"] = value
-            elif key == "service_name":
-                if not entry.get("service_name"):
-                    entry["service_name"] = value
-            elif key == "message":
-                if not entry.get("message") or entry["message"] == message:
-                    entry["message"] = value
-            else:
-                # Put in fields dict
-                fields = entry.setdefault("fields", {})
-                if key not in fields:
-                    fields[key] = value
-    # Re-normalize after regex application
-    _normalize_entry(entry)
 
 
 def _normalize_pattern_examples(result: Dict[str, Any]) -> None:
@@ -353,7 +296,7 @@ def search(
 
     if parser_format or custom_regex:
         investigator = logler_rs.PyInvestigator()
-        _load_files_with_config(investigator, files, parser_format, custom_regex)
+        load_files(investigator, files, parser_format, custom_regex)
     else:
         investigator = get_cached_investigator(files)
 
@@ -419,7 +362,6 @@ def search(
     result_json = investigator.search(json.dumps(query_dict))
     result = json.loads(result_json)
     _normalize_search_result_levels(result)
-    _apply_custom_regex_to_results(result, custom_regex)
 
     # Field projection
     if fields and output_format == "full":
@@ -627,7 +569,6 @@ def find_patterns(
     result_json = investigator.find_patterns(files, min_occurrences)
     result = json.loads(result_json)
     _normalize_pattern_examples(result)
-    _apply_custom_regex_to_results(result, custom_regex)
     return result
 
 
@@ -865,74 +806,3 @@ def _select_diverse_samples(results: List[Dict], max_samples: int = 5) -> List[D
                 indices_used.add(idx)
 
     return samples[:max_samples]
-
-
-# ---------------------------------------------------------------------------
-# File loading with config
-# ---------------------------------------------------------------------------
-
-
-def _load_files_with_config(
-    inv: Any,
-    files: List[str],
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-):
-    """Load files with optional parser config; falls back to plain load if config not supported.
-
-    When no explicit parser_format or custom_regex is given, auto-discovers
-    .logler/formats.yaml and matches file patterns to select the right format.
-    """
-    # Auto-discover config when no explicit format is given
-    if not parser_format and not custom_regex and files:
-        custom_regex = _auto_detect_format_from_config(files)
-
-    try:
-        if parser_format or custom_regex:
-            return inv.load_files_with_config(files, parser_format, custom_regex)
-    except Exception:
-        # Fall back silently to default loader if enhanced path fails
-        pass
-    return inv.load_files(files)
-
-
-def _auto_detect_format_from_config(files: List[str]) -> Optional[str]:
-    """Try to find a matching format in .logler/formats.yaml for the given files.
-
-    Searches from the directory of the first file. If a config is found and
-    any file matches a format's file_patterns, returns that format's regex.
-    Only returns a regex if ALL files match the SAME format (or have no match).
-    """
-    try:
-        from pathlib import Path as _Path
-
-        from .config import find_config, get_format_for_file, load_config
-
-        if not files:
-            return None
-
-        # Search from the directory of the first file
-        start_dir = _Path(files[0]).resolve().parent
-        config_path = find_config(start_dir)
-        if not config_path:
-            return None
-
-        config = load_config(config_path)
-        if not config.formats:
-            return None
-
-        # Find format for the first file that has a match
-        matched_regex = None
-        for f in files:
-            fmt = get_format_for_file(config, f)
-            if fmt:
-                if matched_regex is None:
-                    matched_regex = fmt.regex
-                elif matched_regex != fmt.regex:
-                    # Multiple files match different formats — don't auto-select
-                    return None
-
-        return matched_regex
-    except Exception:
-        # Config loading should never break file loading
-        return None

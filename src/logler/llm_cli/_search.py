@@ -44,8 +44,6 @@ def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, p
 
     with _db_file_source(files, db_path) as file_list:
         try:
-            parser = LogParser()
-
             # Track schema information
             field_presence = defaultdict(int)
             level_values = defaultdict(int)
@@ -58,6 +56,7 @@ def schema(files: tuple, db_path: Optional[str], sample_size: int, full: bool, p
 
             for file_path in file_list:
                 try:
+                    parser = LogParser.for_file(file_path)
                     with open(file_path, "r", errors="replace") as f:
                         for i, line in enumerate(f):
                             if not full and i >= sample_size:
@@ -777,8 +776,6 @@ def summarize(
             time_start, time_end = _resolve_time_filters(last_duration, after, before)
             svc_set = {s.strip() for s in service.split(",")} if service else None
 
-            parser = LogParser()
-
             # Collect stats
             total = 0
             by_level = defaultdict(int)
@@ -790,6 +787,7 @@ def summarize(
 
             for file_path in file_list:
                 try:
+                    parser = LogParser.for_file(file_path)
                     with open(file_path, "r", errors="replace") as f:
                         for i, line in enumerate(f):
                             line = line.rstrip()
@@ -968,7 +966,6 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
                 # read_csv() (230x faster than executemany at scale).
                 from ..parser import LogParser
 
-                parser = LogParser()
                 total_entries = 0
 
                 with tempfile.TemporaryDirectory() as tmpdir:
@@ -978,6 +975,7 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
 
                         for file_path in file_list:
                             try:
+                                parser = LogParser.for_file(file_path)
                                 with open(file_path, "r", errors="replace") as f:
                                     for i, line in enumerate(f):
                                         line = line.rstrip()

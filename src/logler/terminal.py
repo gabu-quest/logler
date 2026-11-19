@@ -32,7 +32,6 @@ class TerminalViewer:
         self.console = Console(
             force_terminal=use_colors, color_system="auto" if use_colors else None
         )
-        self.parser = LogParser()
 
     async def view_file(
         self,
@@ -57,8 +56,9 @@ class TerminalViewer:
         with open(file_path, "r") as f:
             all_lines = f.readlines()
 
-        # Parse entries
-        entries = [self.parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(all_lines)]
+        # Parse entries, each file with the format that names it
+        parser = LogParser.for_file(file_path)
+        entries = [parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(all_lines)]
 
         # Apply filters
         entries = self._apply_filters(entries, level_filter, pattern, thread_filter)
@@ -70,7 +70,12 @@ class TerminalViewer:
         # Display entries
         if follow:
             await self._follow_mode(
-                path, entries[-lines:] if lines else entries, level_filter, pattern, thread_filter
+                path,
+                entries[-lines:] if lines else entries,
+                level_filter,
+                pattern,
+                thread_filter,
+                parser,
             )
         else:
             self._display_entries(entries)
@@ -159,6 +164,7 @@ class TerminalViewer:
         level_filter: Optional[str],
         pattern: Optional[str],
         thread_filter: Optional[str],
+        parser: LogParser,
     ):
         """Follow log file in real-time."""
         # Display initial entries
@@ -175,7 +181,7 @@ class TerminalViewer:
                 line = f.readline()
                 if line:
                     line_number += 1
-                    entry = self.parser.parse_line(line_number, line.rstrip())
+                    entry = parser.parse_line(line_number, line.rstrip())
 
                     # Apply filters
                     filtered = self._apply_filters([entry], level_filter, pattern, thread_filter)

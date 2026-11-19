@@ -90,9 +90,8 @@ def stats(files: tuple, output_json: bool):
     from rich.table import Table
 
     console = Console()
-    parser = LogParser()
-
     for file_path in files:
+        parser = LogParser.for_file(file_path)
         with open(file_path, "r") as f:
             entries = [parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(f)]
 

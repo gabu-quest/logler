@@ -58,8 +58,6 @@ def verify_pattern(
             except (re.error, RegexTimeoutError, RegexPatternTooLongError) as e:
                 _error_json(f"Invalid regex pattern: {e}")
 
-            parser = LogParser()
-
             matches = []
             total_entries = 0
             group_values = defaultdict(lambda: defaultdict(int))
@@ -69,6 +67,7 @@ def verify_pattern(
 
             for file_path in file_list:
                 try:
+                    parser = LogParser.for_file(file_path)
                     with open(file_path, "r", errors="replace") as f:
                         for i, line in enumerate(f):
                             line = line.rstrip()
@@ -204,8 +203,6 @@ def emit(
 
     with _db_file_source(files, db_path) as file_list:
         try:
-            parser = LogParser()
-
             # Parse field list
             include_fields = None
             if fields:
@@ -247,6 +244,7 @@ def emit(
 
             for file_path in file_list:
                 try:
+                    parser = LogParser.for_file(file_path)
                     with open(file_path, "r", errors="replace") as f:
                         for i, line in enumerate(f):
                             line = line.rstrip()

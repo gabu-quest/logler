@@ -37,6 +37,7 @@ from typing import List, Optional, Dict, Any
 # ---------------------------------------------------------------------------
 # Core search / navigation (private module)
 # ---------------------------------------------------------------------------
+from ._loading import load_files
 from ._search_core import (  # noqa: F401
     RUST_AVAILABLE,
     search,
@@ -49,8 +50,6 @@ from ._search_core import (  # noqa: F401
     _normalize_entry,
     _normalize_entries,
     _normalize_search_result_levels,
-    _apply_custom_regex_to_results,
-    _apply_custom_regex_to_entry,
     _normalize_pattern_examples,
     _infer_syslog_level,
     _parse_timestamp_flex,
@@ -61,8 +60,6 @@ from ._search_core import (  # noqa: F401
     _format_as_count,
     _format_as_compact,
     _select_diverse_samples,
-    _load_files_with_config,
-    _auto_detect_format_from_config,
 )
 
 # ---------------------------------------------------------------------------
@@ -158,7 +155,6 @@ class Investigator:
 
         self._investigator = logler_rs.PyInvestigator()
         self._files: List[str] = []
-        self._custom_regex: Optional[str] = None
         self._db_temp_files: List[str] = []
         self._sql_engine = None
         self._sql_db_path = sql_db_path
@@ -170,9 +166,8 @@ class Investigator:
         custom_regex: Optional[str] = None,
     ):
         """Load log files and build index."""
-        _load_files_with_config(self._investigator, files, parser_format, custom_regex)
+        load_files(self._investigator, files, parser_format, custom_regex)
         self._files = files
-        self._custom_regex = custom_regex
         # Invalidate cached SQL engine so next query rebuilds with new data
         if self._sql_engine is not None:
             self._sql_engine.close()
@@ -293,7 +288,6 @@ class Investigator:
         result_json = self._investigator.search(json.dumps(query_dict))
         result = json.loads(result_json)
         _normalize_search_result_levels(result)
-        _apply_custom_regex_to_results(result, self._custom_regex)
         return result
 
     def sql_query(self, query: str) -> List[Dict[str, Any]]:
@@ -449,7 +443,7 @@ class Investigator:
 
         jsonl_path = db_to_jsonl(db_path, mappings)
         self._db_temp_files.append(jsonl_path)
-        _load_files_with_config(self._investigator, [jsonl_path], None, None)
+        load_files(self._investigator, [jsonl_path])
         self._files.append(jsonl_path)
 
     def close(self) -> None:
