@@ -4,7 +4,10 @@ import os
 import time
 from collections import deque
 from collections.abc import Iterator
+from itertools import islice
 from pathlib import Path
+
+from .parser import cut_newline, read_lines
 
 
 class CompleteLines:
@@ -14,12 +17,14 @@ class CompleteLines:
     lines the handle has from where it stands, as text, then stops. The start of a line still
     being written is kept, and the line comes out whole on a later pass: a line is decoded
     only when it is complete, so a character written in two parts is read as one. A byte that
-    is not UTF-8 becomes the replacement character.
+    is not UTF-8 becomes the replacement character. A byte-order mark at the start of the
+    file is not part of line 1, whenever it is written.
     """
 
     def __init__(self, f):
         self._f = f
         self._unfinished = b""
+        self._at_file_start = f.tell() == 0
 
     def __iter__(self):
         for data in iter(self._f.readline, b""):
@@ -28,14 +33,15 @@ class CompleteLines:
                 return
             yield self._text(self._unfinished + data)
             self._unfinished = b""
+            self._at_file_start = False
 
     def unfinished(self) -> str:
         """The start of the line still being written, "" when the file ends in a newline."""
         return self._text(self._unfinished)
 
-    @staticmethod
-    def _text(data: bytes) -> str:
-        return data.decode("utf-8", errors="replace")
+    def _text(self, data: bytes) -> str:
+        # utf-8-sig drops a byte-order mark, which only the file's first line can have
+        return data.decode("utf-8-sig" if self._at_file_start else "utf-8", errors="replace")
 
 
 class LogReader:
@@ -82,8 +88,6 @@ class LogReader:
     ) -> Iterator[str]:
         """Read lines forward from the file, cut and numbered as search cuts them
         (``parser.read_lines``): ``start_line`` counts from 0."""
-        from .parser import read_lines
-
         lines_read = 0
         for number, line in read_lines(str(self.file_path)):
             if number - 1 >= start_line:
@@ -96,64 +100,45 @@ class LogReader:
     def _read_lines_reverse(
         self, start_line: int = 0, max_lines: int | None = None
     ) -> Iterator[str]:
-        """
-        Read lines in reverse order using an efficient algorithm.
+        """Read lines from the end, cut as ``parser.read_lines`` cuts them, in reverse.
 
-        This reads the file from the end in chunks to avoid loading
-        the entire file into memory.
+        The file is read backwards one ``buffer_size`` chunk at a time, only as far as the
+        lines asked for need. ``start_line`` lines are skipped from the end.
         """
+        lines = self._lines_backward()
+        stop = None if not max_lines else start_line + max_lines
+        yield from islice(lines, start_line, stop)
+
+    def _lines_backward(self) -> Iterator[str]:
+        def text(data: bytes, terminated: bool, first: bool) -> str:
+            # utf-8-sig drops a byte-order mark, which only line 1 of the file can have
+            line = data.decode("utf-8-sig" if first else "utf-8", errors="replace")
+            return cut_newline(line + "\n") if terminated else line
+
         with open(self.file_path, "rb") as f:
-            # Seek to end of file
-            f.seek(0, os.SEEK_END)
-            file_size = f.tell()
-
-            # Read in chunks from the end
-            buffer = b""
-            position = file_size
-            lines: list[str] = []
-
+            position = f.seek(0, os.SEEK_END)
+            # The start of the line being read, as pieces: the piece latest in the file first.
+            pieces: list[bytes] = []
+            terminated = False  # what follows the file's last "\n" has no newline of its own
             while position > 0:
-                # Determine chunk size
-                chunk_size = min(self.buffer_size, position)
-                position -= chunk_size
-
-                # Read chunk
+                size = min(self.buffer_size, position)
+                position -= size
                 f.seek(position)
-                chunk = f.read(chunk_size)
-
-                # Combine with previous buffer
-                buffer = chunk + buffer
-
-                # Split into lines
-                chunk_lines = buffer.split(b"\n")
-
-                # Keep the first incomplete line in buffer
-                buffer = chunk_lines[0]
-                chunk_lines = chunk_lines[1:]
-
-                # Add lines in reverse
-                for line in reversed(chunk_lines):
-                    if line or lines:  # Skip empty lines at the end
-                        try:
-                            decoded = line.decode("utf-8", errors="replace")
-                            lines.append(decoded.rstrip("\r"))
-                        except UnicodeDecodeError:
-                            continue
-
-            # Add the first line if buffer has content
-            if buffer:
-                try:
-                    decoded = buffer.decode("utf-8", errors="replace")
-                    lines.append(decoded.rstrip("\r"))
-                except UnicodeDecodeError:
-                    pass
-
-            # Apply start_line and max_lines
-            lines_to_yield = lines[start_line:]
-            if max_lines:
-                lines_to_yield = lines_to_yield[:max_lines]
-
-            yield from lines_to_yield
+                chunk = f.read(size)
+                if b"\n" not in chunk:
+                    pieces.append(chunk)
+                    continue
+                head, *rest = chunk.split(b"\n")
+                for data in reversed(rest):
+                    line = data + b"".join(reversed(pieces))
+                    pieces = []
+                    if terminated or line:
+                        yield text(line, terminated, False)
+                    terminated = True
+                pieces = [head]
+            first_line = text(b"".join(reversed(pieces)), terminated, True)
+            if terminated or first_line:  # a byte-order mark and nothing else is no line
+                yield first_line
 
     def tail(
         self, num_lines: int = 10, follow: bool = False, sleep_interval: float = 0.1
@@ -170,8 +155,8 @@ class LogReader:
             Log lines as strings
         """
         if not follow:
-            lines = list(self._read_lines_reverse(max_lines=num_lines))
-            yield from reversed(lines)
+            if num_lines > 0:
+                yield from reversed(list(self._read_lines_reverse(max_lines=num_lines)))
             return
 
         # One handle serves the first lines and the follow, so they share one position:
@@ -179,11 +164,11 @@ class LogReader:
         with open(self.file_path, "rb") as f:
             complete = CompleteLines(f)
             for line in deque(complete, maxlen=num_lines):
-                yield line.rstrip("\n\r")
+                yield cut_newline(line)
 
             while True:
                 for line in complete:
-                    yield line.rstrip("\n\r")
+                    yield cut_newline(line)
 
                 if os.fstat(f.fileno()).st_size < f.tell():
                     # File was truncated (log rotation), start from beginning
@@ -233,18 +218,14 @@ class LogReader:
             else:
                 match_func = make_case_sensitive_matcher(pattern)
 
-        with open(self.file_path, encoding="utf-8", errors="replace") as f:
-            matches_found = 0
+        matches_found = 0
+        for line_num, line in read_lines(str(self.file_path)):
+            if match_func(line):
+                yield (line_num, line)
+                matches_found += 1
 
-            for line_num, line in enumerate(f, 1):
-                line = line.rstrip("\n\r")
-
-                if match_func(line):
-                    yield (line_num, line)
-                    matches_found += 1
-
-                    if max_lines and matches_found >= max_lines:
-                        break
+                if max_lines and matches_found >= max_lines:
+                    break
 
     def get_file_info(self) -> dict:
         """

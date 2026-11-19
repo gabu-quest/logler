@@ -60,8 +60,6 @@ class TerminalViewer:
         # One handle and one reader serve the first read and the follow, so they share the
         # position. Only the follow waits for the newline of a last line still being written.
         with open(file_path, "rb") as f:  # noqa: ASYNC230 - the view reads in this task; moving it to a thread changes the order of output
-            if f.read(3) != b"\xef\xbb\xbf":  # a byte-order mark is not part of line 1
-                f.seek(0)
             growing = CompleteLines(f)
             all_lines = list(growing)
             if not follow and growing.unfinished():
