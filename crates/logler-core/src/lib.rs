@@ -38,8 +38,6 @@ pub mod hierarchy;
 pub mod index;
 pub mod investigate;
 pub mod parser;
-#[cfg(feature = "async")]
-pub mod reader;
 pub mod stats;
 pub mod thread_tracker;
 pub mod trace;
@@ -49,8 +47,6 @@ pub use filter::LogFilter;
 pub use index::{IndexStats, LogIndex};
 pub use investigate::Investigator;
 pub use parser::{LogParser, ParserConfig};
-#[cfg(feature = "async")]
-pub use reader::LogReader;
 pub use stats::LogStats;
 pub use thread_tracker::ThreadTracker;
 pub use trace::TraceExporter;

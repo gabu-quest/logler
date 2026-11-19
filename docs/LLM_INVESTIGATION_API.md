@@ -457,7 +457,6 @@ Get information about log files.
 ### PyO3 Bindings (`logler`)
 - Python wrapper around Rust core
 - Exposes all investigation tools as Python functions
-- Async support with `tokio` and `asyncio`
 
 ### MCP Server (`logler-mcp`)
 - Implements Model Context Protocol
