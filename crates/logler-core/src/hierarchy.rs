@@ -505,12 +505,17 @@ impl HierarchyBuilder {
     /// Find child entries for given parent entries
     fn find_children(&self, parent_entries: &[&LogEntry]) -> HashMap<String, Vec<&LogEntry>> {
         let mut children: HashMap<String, Vec<&LogEntry>> = HashMap::new();
+        // A span with several log lines yields the same child once per line.
+        let mut seen: HashSet<Uuid> = HashSet::new();
 
         // O(1) lookup via children_by_parent index instead of scanning all entries
         for parent in parent_entries {
             if let Some(span_id) = &parent.span_id {
                 if let Some(child_ids) = self.children_by_parent.get(span_id) {
                     for child_id in child_ids {
+                        if !seen.insert(*child_id) {
+                            continue;
+                        }
                         if let Some(entry) = self.entries_by_id.get(child_id) {
                             let key = if let Some(sid) = &entry.span_id {
                                 format!("span:{}", sid)
@@ -558,6 +563,9 @@ impl HierarchyBuilder {
         parent_entries: &[&LogEntry],
     ) -> HashMap<String, Vec<&LogEntry>> {
         let mut children: HashMap<String, Vec<&LogEntry>> = HashMap::new();
+        // One entry is one line of its node, however many parent lines, separators
+        // or id maps lead to it.
+        let mut seen: HashSet<(String, Uuid)> = HashSet::new();
 
         for parent in parent_entries {
             let parent_id = parent
@@ -580,6 +588,9 @@ impl HierarchyBuilder {
                             if let Some(entry_ids) = self.thread_entries.get(candidate_id.as_str())
                             {
                                 for eid in entry_ids {
+                                    if !seen.insert((key.clone(), *eid)) {
+                                        continue;
+                                    }
                                     if let Some(entry) = self.entries_by_id.get(eid) {
                                         children.entry(key.clone()).or_default().push(entry);
                                     }
@@ -587,6 +598,9 @@ impl HierarchyBuilder {
                             }
                             if let Some(entry_ids) = self.span_entries.get(candidate_id.as_str()) {
                                 for eid in entry_ids {
+                                    if !seen.insert((key.clone(), *eid)) {
+                                        continue;
+                                    }
                                     if let Some(entry) = self.entries_by_id.get(eid) {
                                         children.entry(key.clone()).or_default().push(entry);
                                     }
@@ -980,6 +994,64 @@ mod tests {
             service_name: None,
             fields,
         }
+    }
+
+    fn span_entry(thread: &str, span: &str, parent: Option<&str>, level: LogLevel) -> LogEntry {
+        let mut e = make_entry_with_fields(None, HashMap::new());
+        e.thread_id = Some(thread.to_string());
+        e.span_id = Some(span.to_string());
+        e.parent_span_id = parent.map(str::to_string);
+        e.level = Some(level);
+        e
+    }
+
+    fn find_span<'a>(node: &'a SpanNode, id: &str) -> Option<&'a SpanNode> {
+        if node.id == id {
+            return Some(node);
+        }
+        node.children.iter().find_map(|c| find_span(c, id))
+    }
+
+    #[test]
+    fn a_child_span_counts_each_log_line_once_when_the_parent_has_two_lines() {
+        let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let a1 = span_entry("req-123", "a", None, LogLevel::Info);
+        let b1 = span_entry("req-123", "b", Some("a"), LogLevel::Info);
+        let b2 = span_entry("req-123", "b", Some("a"), LogLevel::Info);
+        let c1 = span_entry("req-123", "c", Some("a"), LogLevel::Error);
+        let a2 = span_entry("req-123", "a", None, LogLevel::Info);
+        let c1_id = c1.id;
+        for e in [a1, b1, b2, c1, a2] {
+            builder.add_entry(e);
+        }
+        let tree = builder.build("req-123").expect("tree");
+        let root = find_span(&tree.roots[0], "a").expect("root span a");
+        assert_eq!(root.entry_count, 2, "root span a has two log lines");
+        let b = find_span(root, "b").expect("span b");
+        assert_eq!(b.entry_count, 2, "span b has two log lines");
+        assert_eq!(b.entry_ids.len(), 2, "span b lists each line once");
+        let c = find_span(root, "c").expect("span c");
+        assert_eq!(c.entry_count, 1, "span c has one log line");
+        assert_eq!(c.error_count, 1, "span c has one error line");
+        assert_eq!(c.level_counts, HashMap::from([("ERROR".to_string(), 1)]));
+        assert_eq!(c.entry_ids, vec![c1_id], "span c lists its line once");
+    }
+
+    #[test]
+    fn a_naming_inferred_child_counts_each_log_line_once() {
+        let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+        // thread id and span id are the same string, so the candidate is in both maps
+        let p1 = span_entry("worker-1", "worker-1", None, LogLevel::Info);
+        let p2 = span_entry("worker-1", "worker-1", None, LogLevel::Info);
+        let k = span_entry("worker-1.task", "worker-1.task", None, LogLevel::Error);
+        for e in [p1, p2, k] {
+            builder.add_entry(e);
+        }
+        let tree = builder.build("worker-1").expect("tree");
+        let child = find_span(&tree.roots[0], "worker-1.task").expect("inferred child");
+        assert_eq!(child.entry_count, 1, "one log line");
+        assert_eq!(child.entry_ids.len(), 1, "id listed once");
+        assert_eq!(child.error_count, 1, "one error line");
     }
 
     #[test]

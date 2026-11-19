@@ -22,6 +22,7 @@ try:
     from logler.investigate import (
         RUST_AVAILABLE,
         analyze_bottlenecks,
+        follow_thread_hierarchy,
         get_hierarchy_summary,
     )
     from logler.tree_formatter import format_tree, format_waterfall
@@ -399,3 +400,30 @@ class TestHierarchyEntryCount:
         assert total == expected_total, (
             f"Total direct entries should be {expected_total}, got {total}"
         )
+
+
+class TestHierarchyEachLogLineOnce:
+    """A request tree counts each log line once, however many lines its parent span has."""
+
+    LINES = (
+        '{"timestamp":"2026-11-14T10:00:00.000Z","level":"INFO","message":"request start","thread_id":"req-123","span_id":"a","service":"api"}',
+        '{"timestamp":"2026-11-14T10:00:00.050Z","level":"INFO","message":"auth ok","thread_id":"req-123","span_id":"b","parent_span_id":"a","service":"auth"}',
+        '{"timestamp":"2026-11-14T10:00:00.450Z","level":"ERROR","message":"Redis connection refused","thread_id":"req-123","span_id":"c","parent_span_id":"a","service":"cache"}',
+        '{"timestamp":"2026-11-14T10:00:00.520Z","level":"INFO","message":"request done","thread_id":"req-123","span_id":"a","service":"api"}',
+        '{"timestamp":"2026-11-14T10:00:01.000Z","level":"ERROR","message":"timeout talking to db","thread_id":"req-124","span_id":"d","service":"api"}',
+    )
+
+    def test_child_spans_of_a_two_line_parent_count_their_one_line_once(self, tmp_path):
+        log = tmp_path / "app.log"
+        log.write_text("\n".join(self.LINES) + "\n")
+        tree = follow_thread_hierarchy([str(log)], root_identifier="req-123")
+
+        root = find_node(tree, "a")
+        span_b = find_node(tree, "b")
+        span_c = find_node(tree, "c")
+        assert root["entry_count"] == 2
+        assert span_b["entry_count"] == 1
+        assert span_c["entry_count"] == 1
+        assert span_c["error_count"] == 1
+        assert span_c["level_counts"] == {"ERROR": 1}
+        assert len(span_c["entry_ids"]) == 1
