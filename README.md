@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/logler/"><img src="https://img.shields.io/pypi/v/logler.svg?logo=pypi&logoColor=white" alt="PyPI"></a>
-  <a href="https://pypi.org/project/logler/"><img src="https://img.shields.io/pypi/pyversions/logler.svg?logo=python&logoColor=white" alt="Python 3.9+"></a>
+  <a href="https://pypi.org/project/logler/"><img src="https://img.shields.io/pypi/pyversions/logler.svg?logo=python&logoColor=white" alt="Python 3.12+"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT"></a>
   <a href="https://github.com/gabu-quest/logler/actions"><img src="https://img.shields.io/github/actions/workflow/status/gabu-quest/logler/ci.yml?logo=github&label=CI" alt="CI"></a>
 </p>
@@ -34,7 +34,7 @@ Built for AI agents: 25 JSON CLI commands purpose-built for LLM consumption. Als
 pip install logler
 ```
 
-Python 3.9+. Pre-built wheels include the Rust backend -- no compiler needed.
+Python 3.12+. Pre-built wheels include the Rust backend -- no compiler needed.
 
 ## Quick Start
 
