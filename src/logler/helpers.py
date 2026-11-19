@@ -73,7 +73,8 @@ def trace_request(files: list[str], correlation_id: str) -> dict[str, Any]:
     - entries: List of all log entries for this request
     - duration_ms: Total request duration, or None when it cannot be told
     - error_count: Number of errors in this request
-    - services: Sorted list of the ``service`` fields of its entries (may be empty)
+    - services: Sorted list of the services its entries carry: ``service_name``, or the
+      ``service`` field where a line keeps it there (may be empty)
     - total_entries: Number of entries of this request
 
     Example:
@@ -89,8 +90,9 @@ def trace_request(files: list[str], correlation_id: str) -> dict[str, Any]:
     # Extract unique services if available
     services = set()
     for entry in timeline["entries"]:
-        if "service" in entry.get("fields", {}):
-            services.add(entry["fields"]["service"])
+        service = entry.get("service_name") or (entry.get("fields") or {}).get("service")
+        if service:
+            services.add(service)
 
     return {
         "entries": timeline["entries"],

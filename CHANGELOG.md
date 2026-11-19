@@ -48,6 +48,7 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 - **The context lines of a search result carry the same level text as every other entry.** With `--context` or `context_lines`, the entries before and after a match read `Info`, and null for a line with no level, where the match itself read `INFO` and `UNKNOWN`.
 - **`analyze_bottlenecks`** ranks its secondary bottlenecks by self-time, as it ranks the primary one.
 - **Reading a thread does not break the tracker.** `ThreadTracker.get_thread()` replaced the thread's set of correlation ids with a list, so the next line tracked for that thread failed. It returns a sorted copy.
+- **`trace_request()` names the services of a JSON log.** It read only a `service` field of the entry, which a JSON line does not keep there.
 - A failed SQL load no longer leaves its temporary CSV behind.
 
 ### Changed
