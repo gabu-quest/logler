@@ -11,8 +11,10 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
+
+from .parser import format_time
 
 
 @dataclass
@@ -348,8 +350,8 @@ def aggregate_time_buckets(
         end = start + delta
         result.append(
             Bucket(
-                start=start.isoformat(),
-                end=end.isoformat(),
+                start=format_time(start),
+                end=format_time(end),
                 min=min(values),
                 max=max(values),
                 avg=round(sum(values) / len(values), 6),
@@ -361,13 +363,14 @@ def aggregate_time_buckets(
 
 
 def _parse_ts(ts_str: Optional[str]) -> Optional[datetime]:
-    """Parse an ISO8601 timestamp string to datetime."""
+    """An ISO 8601 time as an aware datetime; one with no zone is UTC, as a log line's is."""
     if not ts_str:
         return None
     try:
-        return datetime.fromisoformat(ts_str)
+        ts = datetime.fromisoformat(ts_str)
     except (ValueError, TypeError):
         return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
 
 def _parse_bucket_duration(duration: str) -> timedelta:

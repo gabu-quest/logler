@@ -588,22 +588,24 @@ class TestTimeBucketing:
         with pytest.raises(ValueError, match="Invalid bucket size"):
             aggregate_time_buckets(points, bucket_size="bogus")
 
-    def test_bucket_boundaries_are_iso(self):
-        points = [
-            DataPoint(
-                timestamp="2024-01-15T10:00:00+00:00",
-                value=1.0,
-                file="test.log",
-                line_number=1,
-            )
-        ]
-        buckets = aggregate_time_buckets(points, bucket_size="1s")
-        assert len(buckets) == 1
-        # Verify start/end are valid ISO strings
-        from datetime import datetime
+    @pytest.mark.parametrize(
+        "stamp",
+        [
+            "2024-01-15T10:00:00Z",
+            "2024-01-15T10:00:00+00:00",
+            "2024-01-15T19:00:00+09:00",
+            "2024-01-15T10:00:00",
+        ],
+    )
+    def test_bucket_bounds_are_spelled_as_an_entry_time(self, stamp):
+        """UTC with a Z, as `search` writes a time; a time with no zone is UTC."""
+        points = [DataPoint(timestamp=stamp, value=1.0, file="test.log", line_number=1)]
 
-        datetime.fromisoformat(buckets[0].start)
-        datetime.fromisoformat(buckets[0].end)
+        buckets = aggregate_time_buckets(points, bucket_size="5s")
+
+        assert [(b.start, b.end) for b in buckets] == [
+            ("2024-01-15T10:00:00Z", "2024-01-15T10:00:05Z")
+        ]
 
 
 # ============================================================================
