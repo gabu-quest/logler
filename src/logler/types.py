@@ -43,6 +43,29 @@ class LogEntryDict(TypedDict):
     fields: dict[str, Any]
 
 
+class ProjectedLogEntryDict(TypedDict):
+    """A log entry cut down by ``search(fields=[...])``: only the asked keys are present.
+
+    The keys are those of :class:`LogEntryDict`; every one is optional.
+    """
+
+    id: NotRequired[str]
+    line_number: NotRequired[int]
+    raw: NotRequired[str]
+    format: NotRequired[str]
+    timestamp: NotRequired[str | None]
+    level: NotRequired[str]
+    message: NotRequired[str]
+    thread_id: NotRequired[str | None]
+    correlation_id: NotRequired[str | None]
+    trace_id: NotRequired[str | None]
+    span_id: NotRequired[str | None]
+    parent_span_id: NotRequired[str | None]
+    service_name: NotRequired[str | None]
+    file: NotRequired[str]
+    fields: NotRequired[dict[str, Any]]
+
+
 class SearchResultItem(TypedDict):
     """One hit inside ``SearchResult.results``."""
 
@@ -58,6 +81,23 @@ class SearchResult(TypedDict):
     total_matches: int
     search_time_ms: int
     results: list[SearchResultItem]
+
+
+class ProjectedSearchResultItem(TypedDict):
+    """One hit of a search with ``fields=[...]``: the entry is projected, its context is not."""
+
+    entry: ProjectedLogEntryDict
+    context_before: list[LogEntryDict]
+    context_after: list[LogEntryDict]
+    relevance_score: float
+
+
+class ProjectedSearchResult(TypedDict):
+    """Return type of :func:`search` with ``output_format="full"`` and ``fields=[...]``."""
+
+    total_matches: int
+    search_time_ms: int
+    results: list[ProjectedSearchResultItem]
 
 
 class SearchSummaryResult(TypedDict):

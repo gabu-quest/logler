@@ -278,6 +278,8 @@ def search(
                 "search_time_ms": int
             }
 
+        With ``fields=[...]`` the shape is ``ProjectedSearchResult``: the same, but each
+        ``entry`` holds only the asked keys (the context entries stay whole).
         Every entry, the context entries included, has its level in upper case (``INFO``);
         a line with no level reads ``UNKNOWN``.
         ``"summary"``, ``"count"`` and ``"compact"`` return the shapes of

@@ -656,6 +656,20 @@ def test_typed_search_full(files):
     assert by_line[2]["context_before"][0]["level"] == "INFO"
 
 
+def test_typed_search_projection(files):
+    """`fields=[...]` keeps only the asked keys of `entry` (the context entries stay whole);
+    a name no entry has leaves an empty entry; `fields=[]` projects nothing."""
+    data = investigate.search(files=files, fields=["line_number", "message", "no_such_field"])
+    assert_typed(wire.ProjectedSearchResult, data)
+    assert len(data["results"]) == 7
+    assert all(set(item["entry"]) == {"line_number", "message"} for item in data["results"])
+    assert any(item["context_after"] for item in data["results"])
+    nothing = investigate.search(files=files, fields=["no_such_field"])
+    assert_typed(wire.ProjectedSearchResult, nothing)
+    assert [item["entry"] for item in nothing["results"]] == [{}] * 7
+    assert_typed(wire.SearchResult, investigate.search(files=files, fields=[]))
+
+
 def test_typed_search_summary(files):
     """`by_file` and `full_results_available` are returned only when something matched."""
     full = investigate.search(files=files, output_format="summary")

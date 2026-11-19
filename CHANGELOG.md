@@ -49,6 +49,7 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 - **`analyze_bottlenecks`** ranks its secondary bottlenecks by self-time, as it ranks the primary one.
 - **Reading a thread does not break the tracker.** `ThreadTracker.get_thread()` replaced the thread's set of correlation ids with a list, so the next line tracked for that thread failed. It returns a sorted copy.
 - **`trace_request()` names the services of a JSON log.** It read only a `service` field of the entry, which a JSON line does not keep there.
+- **`ProjectedSearchResult` describes `search(fields=[...])`**, whose entries hold only the asked keys; `LogEntryDict` still describes a whole entry.
 - A failed SQL load no longer leaves its temporary CSV behind.
 
 ### Changed
