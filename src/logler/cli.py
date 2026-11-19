@@ -218,6 +218,7 @@ def investigate(
         logler investigate app.log --output summary    # Token-efficient output
     """
     from rich.console import Console
+    from rich.markup import escape
     from rich.table import Table
 
     from .investigate import (
@@ -328,7 +329,7 @@ def investigate(
                 except FormatFileError:
                     raise
                 except Exception as e:
-                    console.print(f"[red]❌ Error building hierarchy: {e}[/red]")
+                    console.print(f"[red]❌ Error building hierarchy: {escape(str(e))}[/red]")
                     console.print("[yellow]Falling back to regular thread following...[/yellow]\n")
                     hierarchy = False  # Fall through to regular mode
 
@@ -451,7 +452,7 @@ def investigate(
     except FormatFileError:
         raise
     except Exception as e:
-        console.print(f"[red]❌ Error:[/red] {e}", err=True)
+        Console(stderr=True).print(f"[red]❌ Error:[/red] {escape(str(e))}")
         if "--debug" in sys.argv:
             import traceback
 
