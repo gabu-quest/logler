@@ -96,49 +96,46 @@ class SqlEngine:
 
         # Bulk-load entries via temp CSV + read_csv() (230x faster than
         # executemany at scale — DuckDB parses CSV in C++, zero Python overhead).
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
-        try:
-            writer = csv.writer(tmp, lineterminator="\n")
-            row_count = 0
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "logs.csv")
+            with open(csv_path, "w", newline="") as tmp:
+                writer = csv.writer(tmp, lineterminator="\n")
+                row_count = 0
 
-            for file_path, entries in materialized.items():
-                for entry in entries:
-                    ts = getattr(entry, "timestamp", None)
-                    if ts is not None:
-                        if isinstance(ts, datetime):
-                            ts = ts.isoformat()
-                        elif hasattr(ts, "to_rfc3339"):
-                            ts = ts.to_rfc3339()
+                for file_path, entries in materialized.items():
+                    for entry in entries:
+                        ts = getattr(entry, "timestamp", None)
+                        if ts is not None:
+                            if isinstance(ts, datetime):
+                                ts = ts.isoformat()
+                            elif hasattr(ts, "to_rfc3339"):
+                                ts = ts.to_rfc3339()
 
-                    level = getattr(entry, "level", None)
-                    if level is not None and hasattr(level, "value"):
-                        level = level.value
-                    elif level is not None and not isinstance(level, str):
-                        level = str(level)
+                        level = getattr(entry, "level", None)
+                        if level is not None and hasattr(level, "value"):
+                            level = level.value
+                        elif level is not None and not isinstance(level, str):
+                            level = str(level)
 
-                    writer.writerow(
-                        [
-                            file_path,
-                            getattr(entry, "line_number", None),
-                            ts,
-                            level,
-                            getattr(entry, "message", None),
-                            getattr(entry, "thread_id", None),
-                            getattr(entry, "correlation_id", None),
-                            getattr(entry, "trace_id", None),
-                            getattr(entry, "span_id", None),
-                            getattr(entry, "raw", None),
-                        ]
-                    )
-                    row_count += 1
+                        writer.writerow(
+                            [
+                                file_path,
+                                getattr(entry, "line_number", None),
+                                ts,
+                                level,
+                                getattr(entry, "message", None),
+                                getattr(entry, "thread_id", None),
+                                getattr(entry, "correlation_id", None),
+                                getattr(entry, "trace_id", None),
+                                getattr(entry, "span_id", None),
+                                getattr(entry, "raw", None),
+                            ]
+                        )
+                        row_count += 1
 
-        finally:
-            tmp.close()
-
-        try:
             if row_count > 0:
                 self.conn.execute(
-                    f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
+                    f"INSERT INTO logs SELECT * FROM read_csv('{csv_path}', "
                     "header=false, nullstr='', columns={"
                     "'file': 'TEXT', 'line_number': 'INTEGER', "
                     "'timestamp': 'TIMESTAMP', 'level': 'TEXT', "
@@ -146,8 +143,6 @@ class SqlEngine:
                     "'correlation_id': 'TEXT', 'trace_id': 'TEXT', "
                     "'span_id': 'TEXT', 'raw': 'TEXT'})"
                 )
-        finally:
-            os.unlink(tmp.name)
 
         if "logs" not in self._tables_loaded:
             self._tables_loaded.append("logs")
@@ -202,66 +197,61 @@ class SqlEngine:
         )
 
         # Collect all metric points across all files, then bulk-load via CSV.
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
-        try:
-            writer = csv.writer(tmp, lineterminator="\n")
-            row_count = 0
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "metrics.csv")
+            with open(csv_path, "w", newline="") as tmp:
+                writer = csv.writer(tmp, lineterminator="\n")
+                row_count = 0
 
-            for file_path, entries in source.items():
-                if not entries:
-                    continue
+                for file_path, entries in source.items():
+                    if not entries:
+                        continue
 
-                entry_dicts = []
-                for entry in entries:
-                    ts = getattr(entry, "timestamp", None)
-                    if ts is not None:
-                        if isinstance(ts, datetime):
-                            ts = ts.isoformat()
-                        elif hasattr(ts, "to_rfc3339"):
-                            ts = ts.to_rfc3339()
+                    entry_dicts = []
+                    for entry in entries:
+                        ts = getattr(entry, "timestamp", None)
+                        if ts is not None:
+                            if isinstance(ts, datetime):
+                                ts = ts.isoformat()
+                            elif hasattr(ts, "to_rfc3339"):
+                                ts = ts.to_rfc3339()
 
-                    entry_dicts.append(
-                        {
-                            "file": file_path,
-                            "line_number": getattr(entry, "line_number", None),
-                            "timestamp": ts,
-                            "message": getattr(entry, "message", None)
-                            or getattr(entry, "raw", None)
-                            or "",
-                            "fields": getattr(entry, "fields", None) or {},
-                        }
-                    )
-
-                all_series = extract_numeric_fields(entry_dicts)
-
-                for field_name, points in all_series.items():
-                    for point in points:
-                        writer.writerow(
-                            [
-                                point.file,
-                                point.line_number,
-                                point.timestamp,
-                                field_name,
-                                point.value,
-                                point.unit,
-                            ]
+                        entry_dicts.append(
+                            {
+                                "file": file_path,
+                                "line_number": getattr(entry, "line_number", None),
+                                "timestamp": ts,
+                                "message": getattr(entry, "message", None)
+                                or getattr(entry, "raw", None)
+                                or "",
+                                "fields": getattr(entry, "fields", None) or {},
+                            }
                         )
-                        row_count += 1
 
-        finally:
-            tmp.close()
+                    all_series = extract_numeric_fields(entry_dicts)
 
-        try:
+                    for field_name, points in all_series.items():
+                        for point in points:
+                            writer.writerow(
+                                [
+                                    point.file,
+                                    point.line_number,
+                                    point.timestamp,
+                                    field_name,
+                                    point.value,
+                                    point.unit,
+                                ]
+                            )
+                            row_count += 1
+
             if row_count > 0:
                 self.conn.execute(
-                    f"INSERT INTO metrics SELECT * FROM read_csv('{tmp.name}', "
+                    f"INSERT INTO metrics SELECT * FROM read_csv('{csv_path}', "
                     "header=false, nullstr='', columns={"
                     "'file': 'TEXT', 'line_number': 'INTEGER', "
                     "'timestamp': 'TIMESTAMP', 'field_name': 'TEXT', "
                     "'value': 'DOUBLE', 'unit': 'TEXT'})"
                 )
-        finally:
-            os.unlink(tmp.name)
 
         if "metrics" not in self._tables_loaded:
             self._tables_loaded.append("metrics")

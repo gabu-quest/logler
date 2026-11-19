@@ -971,44 +971,41 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
                 parser = LogParser()
                 total_entries = 0
 
-                tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
-                try:
-                    writer = csv.writer(tmp, lineterminator="\n")
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    csv_path = os.path.join(tmpdir, "logs.csv")
+                    with open(csv_path, "w", newline="") as tmp:
+                        writer = csv.writer(tmp, lineterminator="\n")
 
-                    for file_path in file_list:
-                        try:
-                            with open(file_path, "r", errors="replace") as f:
-                                for i, line in enumerate(f):
-                                    line = line.rstrip()
-                                    if not line:
-                                        continue
+                        for file_path in file_list:
+                            try:
+                                with open(file_path, "r", errors="replace") as f:
+                                    for i, line in enumerate(f):
+                                        line = line.rstrip()
+                                        if not line:
+                                            continue
 
-                                    entry = parser.parse_line(i + 1, line)
-                                    writer.writerow(
-                                        [
-                                            i + 1,
-                                            str(entry.timestamp) if entry.timestamp else None,
-                                            str(entry.level).upper() if entry.level else None,
-                                            entry.message,
-                                            entry.thread_id,
-                                            entry.correlation_id,
-                                            getattr(entry, "trace_id", None),
-                                            getattr(entry, "span_id", None),
-                                            file_path,
-                                            line,
-                                        ]
-                                    )
-                                    total_entries += 1
-                        except (FileNotFoundError, PermissionError) as e:
-                            _error_json(f"Cannot read file {file_path}: {e}")
+                                        entry = parser.parse_line(i + 1, line)
+                                        writer.writerow(
+                                            [
+                                                i + 1,
+                                                str(entry.timestamp) if entry.timestamp else None,
+                                                str(entry.level).upper() if entry.level else None,
+                                                entry.message,
+                                                entry.thread_id,
+                                                entry.correlation_id,
+                                                getattr(entry, "trace_id", None),
+                                                getattr(entry, "span_id", None),
+                                                file_path,
+                                                line,
+                                            ]
+                                        )
+                                        total_entries += 1
+                            except (FileNotFoundError, PermissionError) as e:
+                                _error_json(f"Cannot read file {file_path}: {e}")
 
-                finally:
-                    tmp.close()
-
-                try:
                     if total_entries > 0:
                         conn.execute(
-                            f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
+                            f"INSERT INTO logs SELECT * FROM read_csv('{csv_path}', "
                             "header=false, nullstr='', columns={"
                             "'line_number': 'INTEGER', 'timestamp': 'VARCHAR', "
                             "'level': 'VARCHAR', 'message': 'VARCHAR', "
@@ -1016,8 +1013,6 @@ def sql(query: Optional[str], files: tuple, db_path: Optional[str], stdin: bool,
                             "'trace_id': 'VARCHAR', 'span_id': 'VARCHAR', "
                             "'file': 'VARCHAR', 'raw': 'VARCHAR'})"
                         )
-                finally:
-                    os.unlink(tmp.name)
 
                 # Lock filesystem access before running user SQL
                 conn.execute("SET enable_external_access = false")
