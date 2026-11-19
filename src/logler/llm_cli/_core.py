@@ -70,7 +70,10 @@ def command(
     Registers the function on ``group`` (default ``llm``) under ``name``, gives it the
     ``--pretty`` option (passed to it as ``pretty``) and turns an exception it does not
     handle into the JSON internal error with exit code 3, except a formats.yaml that cannot
-    be used (``FormatFileError``), which is the user's error (exit code 2). ``sys.exit`` passes through.
+    be used (``FormatFileError``) and a file that cannot be opened, read or written (an
+    ``OSError`` that names a file), which are the user's to put right (exit code 2, the message
+    is the file and the reason).
+    ``sys.exit`` passes through.
     ``stream=True`` is for a command whose stdout is a stream of one JSON object per line:
     it has no ``--pretty``, and that error goes to stderr.
     """
@@ -82,6 +85,10 @@ def command(
                 return fn(*args, **kwargs)
             except FormatFileError as e:
                 _error_json(f"Unusable format file: {e}", err=stream)
+            except OSError as e:
+                if e.filename and e.strerror:
+                    _error_json(f"{e.filename}: {e.strerror}", err=stream)
+                _error_json(f"Internal error: {e}", EXIT_INTERNAL_ERROR, err=stream)
             except Exception as e:
                 _error_json(f"Internal error: {e}", EXIT_INTERNAL_ERROR, err=stream)
 

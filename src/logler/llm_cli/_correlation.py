@@ -323,7 +323,7 @@ def correlate_events_cmd(
                         break
                 if anchor_entry is None:
                     _error_json(f"Could not find entry at {anchor_file}:{anchor_line}")
-            except RuntimeError as e:  # what the engine raises for a file it cannot read
+            except (RuntimeError, OSError) as e:  # OSError: a file the engine cannot read
                 _error_json(f"Failed to read anchor file: {e}")
 
         # Build trigger dict if trigger options specified

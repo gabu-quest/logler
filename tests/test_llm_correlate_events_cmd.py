@@ -308,3 +308,23 @@ class TestCorrelateEventsCmd:
         assert result.exit_code == EXIT_USER_ERROR, result.output
         error = json.loads(result.output)["error"]
         assert error.startswith(f"Unusable format file: {formats}: Invalid YAML")
+
+    def test_anchor_file_that_cannot_be_read_keeps_its_own_wording(
+        self, runner, log_files, tmp_path
+    ):
+        gone = str(tmp_path / "gone.log")
+        result = runner.invoke(
+            llm,
+            [
+                "correlate-events",
+                "-f",
+                log_files["plc"],
+                "--anchor-file",
+                gone,
+                "--anchor-line",
+                "3",
+            ],
+        )
+        assert result.exit_code == EXIT_USER_ERROR, result.output
+        error = json.loads(result.output)["error"]
+        assert error == f"Failed to read anchor file: [Errno 2] No such file or directory: '{gone}'"

@@ -12,6 +12,16 @@ const BATCH_LINES: usize = 16_384;
 const BATCH_BYTES: usize = 8 << 20;
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
+/// A log file that could not be opened or read: the file's path with the `std::io::Error`.
+/// A caller that wants the error code downcasts the `anyhow::Error` to this type.
+#[derive(Debug, thiserror::Error)]
+#[error("{}: {source}", path.display())]
+pub struct LoadError {
+    pub path: std::path::PathBuf,
+    #[source]
+    pub source: std::io::Error,
+}
+
 type LineBatch = Vec<(usize, String)>;
 
 /// Cut a file into numbered lines on bytes and send them in batches, in file order. A line
@@ -136,7 +146,11 @@ impl LogIndex {
         // One pass over the file, in file order. Lines are cut on bytes and decoded lossily;
         // they are parsed in parallel a batch at a time, and a batch is bounded in lines and
         // in bytes. `par_iter().collect()` keeps the batch's order.
-        let file = File::open(path)?;
+        let load_error = |source| LoadError {
+            path: path.to_path_buf(),
+            source,
+        };
+        let file = File::open(path).map_err(load_error)?;
         let mut entries: Vec<LogEntry> = Vec::new();
         let mut total_lines = 0usize;
         // A reader thread cuts the file into batches of lines while this thread parses the
@@ -145,13 +159,13 @@ impl LogIndex {
         std::thread::scope(|scope| {
             scope.spawn(move || read_batches(file, &sender));
             for batch in receiver {
-                let mut batch = batch?;
+                let mut batch = batch.map_err(load_error)?;
                 if let Some((last, _)) = batch.last() {
                     total_lines = *last;
                 }
                 parse_batch(&parser, &mut batch, &mut entries);
             }
-            Ok::<(), std::io::Error>(())
+            Ok::<(), LoadError>(())
         })?;
 
         // The five indexes are built side by side, each walking the entries in file order.
