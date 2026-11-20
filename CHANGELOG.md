@@ -2,7 +2,7 @@
 
 All notable changes to logler will be documented in this file.
 
-## [Unreleased]
+## [2.0.0] — 2026-11-20
 
 Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13, 3.14 and later (the extension is built against CPython's stable ABI).
 
