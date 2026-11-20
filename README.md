@@ -2,7 +2,7 @@
   <img src="assets/logler-logo.png" width="200" alt="logler">
 </p>
 
-<h3 align="center">Log investigation for people and AI agents, with a Rust parser</h3>
+<h3 align="center">Find out why it failed, from the log files. For people and AI agents, with a Rust parser</h3>
 
 <p align="center">
   <a href="https://pypi.org/project/logler/"><img src="https://img.shields.io/pypi/v/logler.svg?logo=pypi&logoColor=white" alt="PyPI"></a>
@@ -16,7 +16,7 @@
 
 ---
 
-logler reads log files where they are and answers questions about them: which requests failed, what a request did across services, where the time went. It sits between `grep`, which finds strings and knows no structure, and a log platform, which needs servers. Nothing is uploaded and nothing runs in the background.
+logler is for the hour after something went wrong. It reads the log files where they are and helps you work out why: which requests failed, what one of them did across services, how it differs from a request that worked, and where the time went. It sits between `grep`, which finds strings and knows no structure, and a log platform, which needs servers. Nothing is uploaded and nothing runs in the background.
 
 Every investigation command has a JSON form under `logler llm`, made for an AI agent to call; the same engine is a Python library and a terminal viewer.
 
@@ -71,20 +71,21 @@ for hit in results["results"]:
 tree = follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
 ```
 
-## What it can do
+## An investigation, step by step
 
-| | |
-|---|---|
-| **Search** | Filter by level, time, thread, service or pattern; page through results or only count them |
-| **Request trees** | Build the parent and child spans of one request, and find the slowest branch |
-| **Error flow** | From an error, the path it travelled and the spans it affected |
-| **Across services** | One request's timeline across several log files |
-| **Compare** | Two requests, or two time periods, side by side |
-| **Sample** | A representative sample of a large file |
-| **Metrics** | Numbers pulled from log lines, with statistics and outliers |
-| **Formats** | Detect the format; mine recurring message templates |
-| **SQL** | Query log files with DuckDB |
-| **Sessions** | A saved investigation with notes and a report |
+| | The question | What answers it |
+|---|---|---|
+| 1 | How bad is it, and since when? | `triage`, `summarize` |
+| 2 | Which requests failed? | `search --level ERROR`, `ids` |
+| 3 | What did one failed request do, and where did its time go? | `hierarchy`, `bottleneck`, `correlate` across several services' files |
+| 4 | How did the error travel? | `analyze_error_flow()`: from an error, the path it took and the spans it affected |
+| 5 | What differs from a request that worked, or from yesterday? | `compare` for two requests or two time periods, `diff` |
+| 6 | Does the evidence fit the suspected cause? | `verify-pattern`, `metrics`, `sql` |
+| 7 | What did we find? | `session note`, `session conclude`: a saved investigation with notes and a report |
+
+Steps 3 to 5 follow ids, so the lines need a request, thread, trace or span id. Without ids, steps 1, 2 and 6 still work.
+
+Also there: a representative sample of a large file (`sample`), format detection and recurring message templates (`detect`, `templates`), and export of a trace to Jaeger or Zipkin (`export`).
 
 Formats read without configuration: JSON (the most reliable), syslog (RFC 3164 and 5424), logfmt, Apache common log format, plain text. A format of your own is a regex in `.logler/formats.yaml` ([docs/CONFIGURATION.md](docs/CONFIGURATION.md)).
 
@@ -117,9 +118,9 @@ Full reference: [docs/LLM_CLI_REFERENCE.md](docs/LLM_CLI_REFERENCE.md)
 
 ## When to use it
 
-Good for: an incident where the evidence is log files on a disk; an agent that has to investigate logs; following one request through several services' files.
+Good for: working out the cause of an incident when the evidence is log files on a disk; an agent that has to investigate logs; following one request through several services' files; comparing a failing case with one that worked.
 
-Use something else when you need to store and aggregate logs (Loki, ELK, Datadog), alert in real time (Prometheus with Alertmanager), or only search text (ripgrep).
+Use something else when you need to watch logs live in a terminal (gonzo, lnav), store and aggregate them (Loki, ELK, Datadog), alert in real time (Prometheus with Alertmanager), or only search text (ripgrep).
 
 ## Interactive tours
 
