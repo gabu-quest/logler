@@ -166,8 +166,8 @@ def verify_pattern(
 @click.option(
     "--exclude-level", help="Exclude log levels (comma-separated)", callback=_check_level_words
 )
-@click.option("--query", help="Filter by pattern")
-@click.option("--exclude-query", help="Regex pattern to exclude matching entries")
+@click.option("--query", help="Regex to match in the whole line (case ignored)")
+@click.option("--exclude-query", help="Regex of lines to exclude (case ignored)")
 @click.option("--service", help="Filter by service name")
 @click.option("--fields", help="Comma-separated fields to include")
 @click.option("--compact", is_flag=True, help="Minimal JSON (short keys)")
@@ -217,14 +217,14 @@ def emit(
             try:
                 query_regex = safe_compile(query, re.IGNORECASE)
             except (re.error, RegexTimeoutError, RegexPatternTooLongError) as e:
-                _error_json(f"Invalid regex pattern: {e}")
+                _error_json(f'Invalid query pattern "{query}": {e}')
 
         exclude_regex = None
         if exclude_query:
             try:
                 exclude_regex = safe_compile(exclude_query, re.IGNORECASE)
             except (re.error, RegexTimeoutError, RegexPatternTooLongError) as e:
-                _error_json(f"Invalid exclude regex: {e}")
+                _error_json(f'Invalid exclude pattern "{exclude_query}": {e}')
 
         # Collect entries (for tail mode we need to buffer)
         emitted = 0
@@ -255,17 +255,17 @@ def emit(
                     if _outside_bounds(entry.timestamp, time_start, time_end):
                         continue
 
-                    # Apply query filter
+                    # Apply query filter: the line as written, or the message as read from it
                     if (
                         query_regex
-                        and not query_regex.search(entry.message or "")
                         and not query_regex.search(line)
+                        and not query_regex.search(entry.message or "")
                     ):
                         continue
 
                     # Apply exclude query filter
                     if exclude_regex and (
-                        exclude_regex.search(entry.message or "") or exclude_regex.search(line)
+                        exclude_regex.search(line) or exclude_regex.search(entry.message or "")
                     ):
                         continue
 

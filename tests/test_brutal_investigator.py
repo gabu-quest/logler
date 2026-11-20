@@ -669,11 +669,15 @@ class TestSpecialCharacterHandling:
         assert total >= 1, "Should find entry containing 'SELECT *'"
 
     def test_search_with_caret(self, special_char_file):
-        """Search with caret - should find regex entry"""
-        result = search(files=[special_char_file], query="^[a-z]")
-        assert "results" in result or "total_matches" in result
-        total = result.get("total_matches", len(result.get("results", [])))
-        assert total >= 1, "Should find entry containing '^[a-z]'"
+        """A query is a regex: the escaped pattern finds the text, the bare one anchors"""
+        literal = search(files=[special_char_file], query=r"\^\[a-z\]")
+        assert literal["total_matches"] == 1
+        assert literal["results"][0]["entry"]["message"] == "Regex: ^[a-z]+$"
+        # The caret holds at the start of the line or of the message: one message starts so
+        anchored = search(files=[special_char_file], query="^regex")
+        assert anchored["total_matches"] == 1
+        assert anchored["results"][0]["entry"]["message"] == "Regex: ^[a-z]+$"
+        assert search(files=[special_char_file], query="^[a-z]+$")["total_matches"] == 0
 
     def test_search_with_unicode(self, special_char_file):
         """Search with unicode characters - should find Japanese text"""

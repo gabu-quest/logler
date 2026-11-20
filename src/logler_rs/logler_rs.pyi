@@ -7,6 +7,9 @@ Every method that returns JSON returns the text: callers decode it with `json.lo
 class LineNotFoundError(ValueError):
     """A line number that has no entry in the file; the text is `<file>: no entry at line <n>`."""
 
+class InvalidPatternError(ValueError):
+    """A `query` or `exclude_query` that is not a valid regex; the text names the flag, the pattern and the reason."""
+
 class PyInvestigator:
     def __init__(self) -> None: ...
     def load_files(self, files: list[str]) -> None: ...

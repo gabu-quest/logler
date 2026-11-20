@@ -93,6 +93,11 @@ results = investigate.search(
 )
 ```
 
+`query` and `exclude_query` are each one regex, matched without regard to letter case against
+the whole line as written in the file (a JSON line: its keys and other fields too) and against
+the message read from it. A pattern that is not a regex raises `ValueError`. Use `a|b` to ask
+for either of two words.
+
 **Output:**
 ```json
 {
@@ -109,7 +114,7 @@ results = investigate.search(
       },
       "context_before": [...],
       "context_after": [...],
-      "relevance_score": 0.95
+      "relevance_score": 1.0
     }
   ],
   "total_matches": 247,
@@ -300,7 +305,7 @@ time and memory. Files of 1 GB and more are not benchmarked.
 
 1. **Fast responses**: Results in milliseconds, not seconds
 2. **Structured output**: All results are JSON for easy parsing
-3. **Relevance**: Each search result carries a relevance score
+3. **Order**: Results come in time order; `relevance_score` is 1.0 on every result
 4. **Context included**: Get surrounding log lines automatically
 5. **Hierarchy visualization**: Tree views with bottleneck detection
 6. **Statistics**: Get aggregate insights for better understanding

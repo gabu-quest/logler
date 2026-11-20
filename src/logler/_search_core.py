@@ -27,13 +27,16 @@ BUILD_HINT = "maturin develop --release -m crates/logler-py/Cargo.toml"
 
 try:
     import logler_rs
-    from logler_rs import LineNotFoundError
+    from logler_rs import InvalidPatternError, LineNotFoundError
 
     RUST_AVAILABLE = True
 except ImportError as _exc:
     RUST_AVAILABLE = False
 
     class LineNotFoundError(ValueError):  # type: ignore[no-redef]
+        """Stands in for the extension's error of that name, which cannot be raised here."""
+
+    class InvalidPatternError(ValueError):  # type: ignore[no-redef]
         """Stands in for the extension's error of that name, which cannot be raised here."""
 
     warnings.warn(
@@ -234,15 +237,18 @@ def search(
 
     Args:
         files: Log file paths to search.  Supports glob patterns.
-        query: Regex pattern to match against log messages.
+        query: A regex, matched without regard to letter case against the whole line as
+            written in the file (a JSON line: its keys and other fields too) and against
+            the message read from it. A pattern that is not a regex raises
+            ``InvalidPatternError`` (a ``ValueError``). An empty query is no filter.
         level: Comma-separated log levels to include (e.g. ``"ERROR,WARN"``).
         exclude_level: Comma-separated log levels to exclude.
-        exclude_query: Regex pattern to exclude matching entries.
+        exclude_query: A regex of lines to leave out, read as ``query`` is.
         thread_id: Filter by thread ID (comma-separated for multi).
         correlation_id: Filter by correlation ID (comma-separated for multi).
         trace_id: Filter by trace ID (comma-separated for multi).
         service_name: Filter by service name (comma-separated for multi).
-        limit: Maximum number of results (first *N* by relevance).
+        limit: Maximum number of results (the first *N* in time order).
             ``0`` means no cap (bypasses ``DEFAULT_MAX_RESULTS``).
             ``None`` applies the safety cap (10K).
         tail: Return last *N* matches by timestamp.

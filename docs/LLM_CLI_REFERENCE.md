@@ -39,7 +39,7 @@ All commands use consistent exit codes for automation:
 |------|---------|
 | 0 | Success with results |
 | 1 | Success but no results found |
-| 2 | User error (invalid arguments, a file that is missing or cannot be read, a line number the file has no entry for, a formats file that cannot be used) |
+| 2 | User error (invalid arguments, a file that is missing or cannot be read, a line number the file has no entry for, a formats file that cannot be used, a `--query` or `--exclude-query` that is not a regex) |
 | 3 | Internal error |
 
 An error is a JSON object `{"error": "<text>", "code": <exit code>}`. When the error is a file the command could not open, read or write, the object also has a `file` key with that file's name, and `error` is `<file>: <reason>`:
@@ -121,8 +121,8 @@ logler llm search app.log --after=-1h --before=-30m    # Relative time window
 **Options:**
 - `--level LEVEL` - Filter by log level (comma-separated: `ERROR,WARN`)
 - `--exclude-level LEVEL` - Exclude log levels (comma-separated: `DEBUG,INFO`)
-- `--query PATTERN` - Regex pattern to match in message
-- `--exclude-query PATTERN` - Regex pattern to exclude from results
+- `--query PATTERN` - A regex; a line is a result when it matches (see **Patterns** below)
+- `--exclude-query PATTERN` - A regex; a line it matches is left out
 - `--thread ID` - Filter by thread ID (comma-separated for multiple)
 - `--correlation ID` - Filter by correlation ID (comma-separated for multiple)
 - `--trace ID` - Filter by trace ID
@@ -130,7 +130,7 @@ logler llm search app.log --after=-1h --before=-30m    # Relative time window
 - `--after TIME` - Only entries after this time (ISO8601 or relative: `-1h`, `-30m`)
 - `--before TIME` - Only entries before this time (ISO8601 or relative: `-1h`, `-30m`)
 - `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
-- `--limit N` / `--head N` - Limit number of results (first N by relevance)
+- `--limit N` / `--head N` - Limit number of results (the first N in time order)
 - `--tail N` - Return last N entries by timestamp
 - `--offset N` - Skip first N results (for pagination, use with `--limit`)
 - `--count-only` - Return only match count, no results array
@@ -142,6 +142,8 @@ logler llm search app.log --after=-1h --before=-30m    # Relative time window
 - `--include-raw/--no-raw` - Include raw log line (default: yes)
 - `--aggregate/--no-aggregate` - Include aggregations (default: yes)
 - `--pretty` - Pretty-print JSON output
+
+**Patterns:** `--query` and `--exclude-query` are each one regex, matched without regard to letter case (a `(?-i)` at the start of the pattern turns that off), against the whole line as it is written in the file and against the message read from it. On a JSON line the first includes the keys and every field, not the message alone: `--query "A-17"` finds a line whose `order` field is `A-17`, and `--query "level"` matches every JSON line. There is no word fallback: `--query "connection timeout"` finds only lines that hold that text, and `--query "timeout|refused"` asks for either. The message is read as well because a JSON line may spell it differently: a quote is written `\"`, and many loggers write `ä` as `\u00e4`. `--query 'said "no"'` and `--query "ärger"` find such a message; in a field beside the message the text is found as it is written (`\\u00e4rger`). `^` and `$` hold at the ends of the line and at the ends of the message. A pattern that is not a regex is exit 2 with the pattern and the reason, for both flags in `search` and `emit`; an empty `--query` is no filter. Every result of a query has `relevance_score` 1.0 and results come in time order, as they do without a query. `search` reads patterns with Rust's regex engine, `emit` with Python's `re`; they differ in that look-behind, look-ahead and back-references exist only in Python's, so only `emit` accepts them, and `emit` refuses a pattern longer than 1000 characters.
 
 **Pagination Pattern:**
 ```bash
@@ -891,8 +893,8 @@ logler llm emit app.log --exclude-level DEBUG --exclude-query "health"
 **Options:**
 - `--level LEVEL` - Filter by level (comma-separated: `ERROR,WARN`)
 - `--exclude-level LEVEL` - Exclude log levels (comma-separated)
-- `--query PATTERN` - Filter by pattern
-- `--exclude-query PATTERN` - Exclude entries matching regex pattern
+- `--query PATTERN` - A regex a line must match, read as in `search` (**Patterns** above)
+- `--exclude-query PATTERN` - A regex; a line it matches is left out
 - `--service NAME` - Filter by service name (comma-separated)
 - `--fields LIST` - Comma-separated fields to include
 - `--compact` - Minimal JSON (short keys: `ln`, `ts`, `lv`, `msg`, `th`)

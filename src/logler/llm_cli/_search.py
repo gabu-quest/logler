@@ -175,8 +175,8 @@ def schema(files: tuple, db_path: str | None, sample_size: int, full: bool, pret
 @click.option(
     "--exclude-level", help="Exclude log levels (comma-separated)", callback=_check_level_words
 )
-@click.option("--query", help="Regex pattern to match in message")
-@click.option("--exclude-query", help="Regex pattern to exclude matching entries")
+@click.option("--query", help="Regex to match in the whole line (case ignored)")
+@click.option("--exclude-query", help="Regex of lines to exclude (case ignored)")
 @click.option("--thread", help="Filter by thread ID (comma-separated for multi)")
 @click.option("--correlation", help="Filter by correlation ID (comma-separated)")
 @click.option("--trace", help="Filter by trace ID (comma-separated)")

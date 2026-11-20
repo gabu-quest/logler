@@ -165,6 +165,9 @@ impl LogLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchQuery {
     pub files: Vec<PathBuf>,
+    /// One regex, matched without regard to letter case against the whole line as written
+    /// in the file and against the message read from it. Every match scores 1.0; results
+    /// are in time order. Empty: no filter.
     pub query: Option<String>,
     pub filters: SearchFilters,
     pub limit: Option<usize>,
@@ -216,6 +219,7 @@ pub struct SearchFilters {
     #[serde(default)]
     pub service_names: Option<Vec<String>>,
     pub has_correlation_id: Option<bool>,
+    /// A regex of entries to leave out, read as `SearchQuery::query` is.
     #[serde(default)]
     pub exclude_pattern: Option<String>,
 }
@@ -302,7 +306,7 @@ impl<'de> Deserialize<'de> for OrderedCounts {
 }
 
 /// What the summary and count formats report, counted over every match of a search in
-/// the order the search sorts them (by relevance then time; with `tail`, by time).
+/// the order the search sorts them (by time).
 ///
 /// A level is its text in capitals (`LogLevel::as_str`); a line with no level is
 /// `UNKNOWN`. A message is the entry's message with white space cut from both ends.

@@ -3,8 +3,8 @@ use crate::parser::ParserConfig;
 use crate::types::*;
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
-use regex::Regex;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use regex::{Regex, RegexBuilder};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::hash::{BuildHasher, RandomState};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -18,6 +18,41 @@ use std::time::Instant;
 pub struct NoEntryAtLine {
     pub file: String,
     pub line: i64,
+}
+
+/// A `query` or `exclude_pattern` that is not a valid regex: the caller's input is wrong.
+/// `which` is `"query"` or `"exclude"`, `reason` the engine's one-line reason. A caller that
+/// wants the kind downcasts the `anyhow::Error` to this type.
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid {which} pattern \"{pattern}\": {reason}")]
+pub struct InvalidPattern {
+    pub which: &'static str,
+    pub pattern: String,
+    pub reason: String,
+}
+
+/// Compile a search pattern: one regex, letter case ignored unless the pattern says
+/// otherwise with its own flag (`(?-i)`).
+fn compile_pattern(which: &'static str, pattern: &str) -> Result<Regex, InvalidPattern> {
+    RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .build()
+        .map_err(|e| {
+            let text = e.to_string();
+            let last = text.lines().last().unwrap_or(&text);
+            InvalidPattern {
+                which,
+                pattern: pattern.to_string(),
+                reason: last.strip_prefix("error: ").unwrap_or(last).to_string(),
+            }
+        })
+}
+
+/// Whether a search pattern matches an entry: in the line as written in the file, or in the
+/// message as read from it. The two differ where the line holds the message in another
+/// spelling: a JSON line writes a quote as `\"` and may write `ä` as `\u00e4`.
+fn pattern_matches(regex: &Regex, entry: &LogEntry) -> bool {
+    regex.is_match(&entry.raw) || regex.is_match(&entry.message)
 }
 
 /// Safety cap: maximum results returned when no limit/tail is specified.
@@ -38,7 +73,6 @@ struct MatchCandidate {
     entry_idx: usize,
     entry_line_number: usize,
     timestamp: Option<DateTime<Utc>>,
-    relevance_score: f64,
 }
 
 /// How many messages `SearchAggregates::top_messages` holds at most.
@@ -455,15 +489,17 @@ impl Investigator {
     pub fn search(&self, query: &SearchQuery) -> anyhow::Result<SearchResults> {
         let start = Instant::now();
 
-        // Pre-compile exclude_pattern regex once
-        let exclude_regex = if let Some(ref pattern) = query.filters.exclude_pattern {
-            Some(
-                Regex::new(pattern)
-                    .map_err(|e| anyhow::anyhow!("Invalid exclude_pattern regex: {}", e))?,
-            )
-        } else {
-            None
+        // Compile both patterns once, before any line is read. An empty query is no filter.
+        let query_regex = match query.query.as_deref() {
+            Some(pattern) if !pattern.is_empty() => Some(compile_pattern("query", pattern)?),
+            _ => None,
         };
+        let exclude_regex = query
+            .filters
+            .exclude_pattern
+            .as_deref()
+            .map(|pattern| compile_pattern("exclude", pattern))
+            .transpose()?;
 
         // Build file list for stable indexing between phases
         let file_list: Vec<(&String, &LogIndex)> = self
@@ -484,8 +520,13 @@ impl Investigator {
         // Phase 1: Collect lightweight candidates (no cloning, no context fetching)
         let mut all_candidates = Vec::new();
         for (file_key, (_, index)) in file_list.iter().enumerate() {
-            let candidates =
-                self.collect_candidates(file_key, index, query, exclude_regex.as_ref())?;
+            let candidates = self.collect_candidates(
+                file_key,
+                index,
+                query,
+                query_regex.as_ref(),
+                exclude_regex.as_ref(),
+            )?;
             all_candidates.extend(candidates);
         }
 
@@ -513,16 +554,12 @@ impl Investigator {
                 (None, None) => a.entry_line_number.cmp(&b.entry_line_number),
             });
         } else {
-            // Sort by relevance and timestamp
-            all_candidates.sort_by(|a, b| {
-                b.relevance_score
-                    .total_cmp(&a.relevance_score)
-                    .then_with(|| match (&a.timestamp, &b.timestamp) {
-                        (Some(t1), Some(t2)) => t1.cmp(t2),
-                        (Some(_), None) => std::cmp::Ordering::Less,
-                        (None, Some(_)) => std::cmp::Ordering::Greater,
-                        (None, None) => std::cmp::Ordering::Equal,
-                    })
+            // Sort by timestamp; entries with none keep file order after the timed ones
+            all_candidates.sort_by(|a, b| match (&a.timestamp, &b.timestamp) {
+                (Some(t1), Some(t2)) => t1.cmp(t2),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
             });
         }
         let aggregates = query.aggregate.map(|what| {
@@ -567,7 +604,7 @@ impl Investigator {
                     entry: entry.clone(),
                     context_before,
                     context_after,
-                    relevance_score: candidate.relevance_score,
+                    relevance_score: 1.0,
                 }
             })
             .collect();
@@ -587,6 +624,7 @@ impl Investigator {
         file_key: usize,
         index: &LogIndex,
         query: &SearchQuery,
+        query_regex: Option<&Regex>,
         exclude_regex: Option<&Regex>,
     ) -> anyhow::Result<Vec<MatchCandidate>> {
         let entries = index
@@ -598,19 +636,12 @@ impl Investigator {
             .par_iter()
             .enumerate()
             .filter(|(_, entry)| self.matches_filters(entry, &query.filters, exclude_regex))
-            .filter_map(|(idx, entry)| {
-                let score = self.calculate_relevance(entry, query);
-                if score > 0.0 {
-                    Some(MatchCandidate {
-                        file_key,
-                        entry_idx: idx,
-                        entry_line_number: entry.line_number,
-                        timestamp: entry.timestamp,
-                        relevance_score: score,
-                    })
-                } else {
-                    None
-                }
+            .filter(|(_, entry)| query_regex.is_none_or(|regex| pattern_matches(regex, entry)))
+            .map(|(idx, entry)| MatchCandidate {
+                file_key,
+                entry_idx: idx,
+                entry_line_number: entry.line_number,
+                timestamp: entry.timestamp,
             })
             .collect();
 
@@ -741,43 +772,12 @@ impl Investigator {
 
         // Exclude pattern filter (regex pre-compiled, passed in)
         if let Some(regex) = exclude_regex {
-            if regex.is_match(&entry.message) || regex.is_match(&entry.raw) {
+            if pattern_matches(regex, entry) {
                 return false;
             }
         }
 
         true
-    }
-
-    /// Calculate relevance score for a log entry
-    fn calculate_relevance(&self, entry: &LogEntry, query: &SearchQuery) -> f64 {
-        if let Some(ref query_str) = query.query {
-            let query_lower = query_str.to_lowercase();
-            let message_lower = entry.message.to_lowercase();
-
-            if message_lower.contains(&query_lower) {
-                // Exact match
-                if message_lower == query_lower {
-                    return 1.0;
-                }
-                // Contains query
-                return 0.7;
-            }
-
-            // Fuzzy match (simple word overlap)
-            let query_words: HashSet<_> = query_lower.split_whitespace().collect();
-            let message_words: HashSet<_> = message_lower.split_whitespace().collect();
-            let overlap = query_words.intersection(&message_words).count();
-
-            if overlap > 0 {
-                return (overlap as f64) / (query_words.len() as f64) * 0.5;
-            }
-
-            0.0
-        } else {
-            // No query string, matches filters
-            1.0
-        }
     }
 
     /// Return a page of raw entries by slicing the in-memory index directly.
@@ -1743,6 +1743,78 @@ mod tests {
         let results = inv.search(&q).unwrap();
         assert_eq!(results.results.len(), 10);
         assert_eq!(results.total_matches, 100);
+    }
+
+    #[test]
+    fn a_query_is_one_case_blind_regex_over_the_whole_line() {
+        let lines = [
+            r#"{"time":"2024-01-15T10:00:00Z","level":"error","msg":"payment failed","err":"connection refused","order":"A-17"}"#,
+            r#"{"time":"2024-01-15T10:00:01Z","level":"info","msg":"payment ok","order":"A-18"}"#,
+            r#"{"time":"2024-01-15T10:00:02Z","level":"info","msg":"connection refused by peer"}"#,
+        ];
+        let file = make_test_file(&lines);
+        let inv = build_investigator(&file);
+        let found = |pattern: &str| -> Vec<usize> {
+            let q = make_query(&file, SearchFilters::default(), Some(pattern.to_string()));
+            let out = inv.search(&q).unwrap();
+            out.results.iter().map(|r| r.entry.line_number).collect()
+        };
+        assert_eq!(found("A-17"), vec![1]);
+        assert_eq!(found("CONNECTION REFUSED"), vec![1, 3]);
+        assert_eq!(found("connection timeout"), Vec::<usize>::new());
+        assert_eq!(found("timeout|ok"), vec![2]);
+        assert_eq!(found("(?-i)PAYMENT"), Vec::<usize>::new());
+        assert_eq!(found(""), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn a_pattern_also_reads_the_message_a_json_line_holds_with_escapes() {
+        let lines = [
+            r#"{"time":"2024-01-15T10:00:00Z","level":"info","msg":"user said \"no\"","n":1}"#,
+            r#"{"time":"2024-01-15T10:00:01Z","level":"info","msg":"viel \u00e4rger","n":2}"#,
+        ];
+        let file = make_test_file(&lines);
+        let inv = build_investigator(&file);
+        let found = |query: Option<&str>, exclude: Option<&str>| -> Vec<usize> {
+            let filters = SearchFilters {
+                exclude_pattern: exclude.map(str::to_string),
+                ..Default::default()
+            };
+            let q = make_query(&file, filters, query.map(str::to_string));
+            let out = inv.search(&q).unwrap();
+            out.results.iter().map(|r| r.entry.line_number).collect()
+        };
+        assert_eq!(found(Some(r#"said "no""#), None), vec![1]);
+        assert_eq!(found(Some("ÄRGER"), None), vec![2]);
+        assert_eq!(found(Some(r"\\u00e4"), None), vec![2]);
+        assert_eq!(found(Some("^viel"), None), vec![2]);
+        assert_eq!(found(None, Some(r#"said "no""#)), vec![2]);
+        assert_eq!(found(None, Some("ärger")), vec![1]);
+    }
+
+    #[test]
+    fn a_pattern_that_is_not_a_regex_is_the_callers_error() {
+        let file = make_test_file(&[r#"{"time":"2024-01-15T10:00:00Z","level":"info","msg":"a"}"#]);
+        let inv = build_investigator(&file);
+
+        let q = make_query(&file, SearchFilters::default(), Some("(".to_string()));
+        let err = inv.search(&q).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Invalid query pattern \"(\": unclosed group"
+        );
+        assert!(err.downcast_ref::<InvalidPattern>().is_some());
+
+        let filters = SearchFilters {
+            exclude_pattern: Some("[".to_string()),
+            ..Default::default()
+        };
+        let q = make_query(&file, filters, None);
+        let err = inv.search(&q).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Invalid exclude pattern \"[\": unclosed character class"
+        );
     }
 
     #[test]

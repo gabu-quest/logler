@@ -115,11 +115,19 @@ class TestOtherErrorsKeepTheirType:
 
     def test_engine_error_that_is_not_io_is_runtime_error_not_os_error(self, tmp_path):
         inv, path = self._loaded(tmp_path)
-        query = {"files": [path], "filters": {"exclude_pattern": "("}}
         with pytest.raises(RuntimeError) as info:
-            inv.search(json.dumps(query))
+            inv.get_context(path + ".other", 1, 0, 0, False)
         assert not isinstance(info.value, OSError)
-        assert "Invalid exclude_pattern regex" in str(info.value)
+        assert str(info.value) == f"File not indexed: {path}.other"
+
+    def test_a_pattern_that_is_not_a_regex_is_a_value_error(self, tmp_path):
+        inv, path = self._loaded(tmp_path)
+        query = {"files": [path], "filters": {"exclude_pattern": "("}}
+        with pytest.raises(logler_rs.InvalidPatternError) as info:
+            inv.search(json.dumps(query))
+        assert isinstance(info.value, ValueError)
+        assert not isinstance(info.value, RuntimeError)
+        assert str(info.value) == 'Invalid exclude pattern "(": unclosed group'
 
 
 class TestLlmSearchExitCodes:
@@ -169,11 +177,16 @@ class TestLlmSearchExitCodes:
     def test_non_io_engine_error_stays_exit_3(self, tmp_path):
         path = tmp_path / "ok.log"
         path.write_text(LINE)
-        result = CliRunner().invoke(main, ["llm", "search", str(path), "--exclude-query", "("])
-        # a bad regex is the engine's non-I/O error: still an internal error, never exit 2
+        with mock.patch(
+            "logler.investigate.search", side_effect=RuntimeError("File not indexed: ok.log")
+        ):
+            result = CliRunner().invoke(main, ["llm", "search", str(path)])
+        # an engine error that is not I/O and not the caller's input: an internal error
         assert result.exit_code == 3, result.output
-        assert json.loads(result.output)["code"] == 3
-        assert "file" not in json.loads(result.output)
+        assert json.loads(result.output) == {
+            "error": "Internal error: File not indexed: ok.log",
+            "code": 3,
+        }
 
     def test_an_os_error_with_no_file_name_is_exit_3_and_has_no_file_key(self):
         group = click.Group()
@@ -250,6 +263,7 @@ def test_module_level_functions_nothing_calls_are_gone():
     ):
         assert not hasattr(logler_rs, name), name
     assert sorted(n for n in dir(logler_rs) if not n.startswith("_") and n != "logler_rs") == [
+        "InvalidPatternError",
         "LineNotFoundError",
         "PyInvestigator",
         "PyLineParser",

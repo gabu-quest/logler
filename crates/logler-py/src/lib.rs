@@ -1,7 +1,7 @@
 #![allow(non_local_definitions)]
 
 use logler_core::index::LoadError;
-use logler_core::investigate::NoEntryAtLine;
+use logler_core::investigate::{InvalidPattern, NoEntryAtLine};
 use logler_core::*;
 use pyo3::create_exception;
 use pyo3::exceptions::PyValueError;
@@ -15,6 +15,13 @@ create_exception!(
     LineNotFoundError,
     PyValueError,
     "A line number that has no entry in the file: the caller's error."
+);
+
+create_exception!(
+    logler_rs,
+    InvalidPatternError,
+    PyValueError,
+    "A `query` or `exclude_query` that is not a valid regex: the caller's error."
 );
 
 /// Python wrapper for Investigator
@@ -219,10 +226,14 @@ fn to_json<T: serde::Serialize>(result: anyhow::Result<T>) -> anyhow::Result<Str
 /// opened or read becomes `OSError(errno, strerror, filename)`, which Python turns into
 /// `FileNotFoundError`, `PermissionError`, `IsADirectoryError` and the like; every other
 /// engine error is a `RuntimeError`, except a line number with no entry, which is
-/// `LineNotFoundError` (a `ValueError`).
+/// `LineNotFoundError` and a pattern that is not a regex is `InvalidPatternError` (both
+/// `ValueError`s).
 fn engine_err(e: anyhow::Error) -> PyErr {
     if let Some(none) = e.downcast_ref::<NoEntryAtLine>() {
         return LineNotFoundError::new_err(none.to_string());
+    }
+    if let Some(bad) = e.downcast_ref::<InvalidPattern>() {
+        return InvalidPatternError::new_err(bad.to_string());
     }
     if let Some(load) = e.downcast_ref::<LoadError>() {
         if let Some(code) = load.source.raw_os_error() {
@@ -286,6 +297,10 @@ fn logler_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyInvestigator>()?;
     m.add_class::<PyLineParser>()?;
     m.add("LineNotFoundError", m.py().get_type::<LineNotFoundError>())?;
+    m.add(
+        "InvalidPatternError",
+        m.py().get_type::<InvalidPatternError>(),
+    )?;
     m.add_function(wrap_pyfunction!(level_name, m)?)?;
     Ok(())
 }

@@ -141,7 +141,7 @@ All investigation functions return plain dicts with TypedDict definitions in
 
 | Function | Return keys |
 |----------|------------|
-| `search()` | `results`, `total_matches`, `search_time_ms` |
+| `search()` | `results`, `total_matches`, `search_time_ms` (`query` and `exclude_query` are regexes read without regard to letter case over the whole line and the message; a pattern that is not a regex raises `ValueError`; every result has `relevance_score` 1.0, in time order) |
 | `compare_threads()` | `summary`, `thread_a`, `thread_b`, `differences` |
 | `cross_service_timeline()` | `timeline`, `services`, `total_entries`, `duration_ms`, `service_breakdown` |
 | `smart_sample()` | `samples`, `total_population`, `sample_size`, `strategy`, `coverage` |
