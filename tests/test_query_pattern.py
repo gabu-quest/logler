@@ -283,3 +283,13 @@ class TestSearchAndEmitAgree:
         assert _lines(path, query=pattern) == lines
         result = CliRunner().invoke(main, ["llm", "emit", path, "--query", pattern, "--compact"])
         assert [json.loads(line)["ln"] for line in result.output.splitlines()] == lines
+
+    @pytest.mark.parametrize(
+        ("pattern", "lines"),
+        [("(?-i:timeout)", []), ("(?-i:Timeout)", [2]), ("(?-i:connection) REFUSED", [1])],
+    )
+    def test_both_keep_letter_case_inside_a_group_that_says_so(self, tmp_path, pattern, lines):
+        path = _write(tmp_path, PLAIN_LOG)
+        assert _lines(path, query=pattern) == lines
+        result = CliRunner().invoke(main, ["llm", "emit", path, "--query", pattern, "--compact"])
+        assert [json.loads(line)["ln"] for line in result.output.splitlines()] == lines
