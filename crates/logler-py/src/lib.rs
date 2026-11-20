@@ -304,6 +304,13 @@ fn level_name(word: &str) -> Option<String> {
     serde_json::to_value(level).ok()?.as_str().map(String::from)
 }
 
+/// The names under which a line's timestamp is looked for, in the order tried: the key of a
+/// JSON or logfmt line and the group of a custom format's regex. The parser's own list.
+#[pyfunction]
+fn timestamp_keys() -> Vec<&'static str> {
+    logler_core::parser::TIMESTAMP_KEYS.to_vec()
+}
+
 /// Python module
 #[pymodule]
 fn logler_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -315,6 +322,7 @@ fn logler_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.py().get_type::<InvalidPatternError>(),
     )?;
     m.add_function(wrap_pyfunction!(level_name, m)?)?;
+    m.add_function(wrap_pyfunction!(timestamp_keys, m)?)?;
     Ok(())
 }
 

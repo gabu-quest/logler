@@ -8,8 +8,14 @@ from typing import Any
 import click
 
 from ..builtin_formats import get_builtin_format, get_builtin_formats
-from ..config import FormatFileError, config_for_file, find_config, load_usable_config
-from ..parser import read_entry_lines
+from ..config import (
+    FormatFileError,
+    config_for_file,
+    find_config,
+    load_usable_config,
+    timestamp_group_names,
+)
+from ..parser import LogParser, read_entry_lines
 from ..safe_regex import RegexPatternTooLongError, RegexTimeoutError, safe_compile
 from ._core import (
     EXIT_NO_RESULTS,
@@ -94,7 +100,9 @@ def format_test(
     """Test a format regex against log files.
 
     Provide either --regex with a pattern, or --name for a built-in/user format.
-    Shows which lines match and the extracted named groups.
+    Shows which lines match, the extracted named groups and the time the engine reads
+    for each line: with the format's regex and timestamp_format for --name, with the
+    regex alone for --regex.
     """
     file_list = _expand_globs(list(files))
     if not file_list:
@@ -103,22 +111,23 @@ def format_test(
     # Resolve the regex to test
     test_regex = None
     format_source = None
+    timestamp_format: str | None = None
 
     if regex:
         test_regex = regex
         format_source = "inline"
     elif name:
-        # Try built-in first
+        # The formats file first: its format is the one every command reads a file with
+        config = config_for_file(file_list[0])
         fmt = get_builtin_format(name)
-        if fmt:
+        if config and name in config.formats:
+            test_regex = config.formats[name].regex
+            timestamp_format = config.formats[name].timestamp_format
+            format_source = "user_config"
+        elif fmt:
             test_regex = fmt.regex
+            timestamp_format = fmt.timestamp_format
             format_source = "builtin"
-        else:
-            # Try user config
-            config = config_for_file(file_list[0])
-            if config and name in config.formats:
-                test_regex = config.formats[name].regex
-                format_source = "user_config"
 
         if not test_regex:
             _error_json(f"Format '{name}' not found in built-in or user config")
@@ -134,24 +143,42 @@ def format_test(
     if not compiled.groupindex:
         _error_json("Regex must have at least one named group (?P<name>...)")
 
+    # The engine is what reads a file, so it reads each line too
+    try:
+        engine = LogParser(custom_regex=test_regex, timestamp_format=timestamp_format)
+    except ValueError as e:
+        _error_json(f"The regex cannot be compiled by the Rust engine: {e}")
+
     # Test against files
     results: list[dict[str, Any]] = []
     total_lines = 0
     matched_lines = 0
+    matched_with_timestamp = 0
+    engine_unmatched = 0
 
     for file_path in file_list:
         try:
             for number, line in read_entry_lines(file_path):
                 total_lines += 1
-                match = compiled.match(line)
+                # anywhere in the line, as the engine looks for it
+                match = compiled.search(line)
                 if match:
                     matched_lines += 1
+                    entry = engine.parse_entry(number, line)
+                    engine_matched = entry["format"] == "Custom"
+                    timestamp = entry["timestamp"] if engine_matched else None
+                    if not engine_matched:
+                        engine_unmatched += 1
+                    elif timestamp is not None:
+                        matched_with_timestamp += 1
                     if len(results) < limit:
                         results.append(
                             {
                                 "file": file_path,
                                 "line_number": number,
                                 "matched": True,
+                                "engine_matched": engine_matched,
+                                "timestamp": timestamp,
                                 "groups": match.groupdict(),
                                 "raw": line[:500],
                             }
@@ -180,10 +207,13 @@ def format_test(
         "regex": test_regex,
         "format_source": format_source,
         "named_groups": list(compiled.groupindex.keys()),
+        "timestamp_format": timestamp_format,
         "files_tested": file_list,
         "total_lines": total_lines,
         "matched_lines": matched_lines,
         "match_rate_percent": round(match_rate, 1),
+        "matched_lines_with_timestamp": matched_with_timestamp,
+        "engine_unmatched_lines": engine_unmatched,
         "results": results,
     }
 
@@ -237,6 +267,8 @@ def format_validate(
         # Check for recommended groups
         recommended = {"message", "timestamp", "level"}
         present = set(named_groups)
+        if timestamp_group_names(named_groups):
+            present.add("timestamp")
         missing_recommended = recommended - present
         if missing_recommended:
             issues.append(
@@ -291,7 +323,7 @@ def format_validate(
 
         if "message" not in named_groups:
             fmt_issues.append("Missing recommended 'message' group")
-        if "timestamp" not in named_groups:
+        if not timestamp_group_names(named_groups):
             fmt_issues.append("Missing recommended 'timestamp' group")
         if not fmt.file_patterns:
             fmt_issues.append("No file_patterns defined (format won't auto-match)")

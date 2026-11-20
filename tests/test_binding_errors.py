@@ -268,6 +268,7 @@ def test_module_level_functions_nothing_calls_are_gone():
         "PyInvestigator",
         "PyLineParser",
         "level_name",
+        "timestamp_keys",
     ]
 
 

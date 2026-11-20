@@ -23,7 +23,8 @@ const TIMESTAMP_PATTERN: &str =
     r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?";
 
 // One list of keys per field, read by the JSON and the logfmt branch; the first key present wins.
-const TIMESTAMP_KEYS: &[&str] = &["timestamp", "time", "@timestamp", "ts", "datetime"];
+/// Public so that a caller names the same keys the parser reads (a custom format's group too).
+pub const TIMESTAMP_KEYS: &[&str] = &["timestamp", "time", "@timestamp", "ts", "datetime"];
 const LEVEL_KEYS: &[&str] = &["level", "severity", "log_level", "loglevel", "lvl"];
 const MESSAGE_KEYS: &[&str] = &["message", "msg", "text", "content"];
 const THREAD_KEYS: &[&str] = &[

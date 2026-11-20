@@ -11,6 +11,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+from collections.abc import Iterable
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -414,6 +415,27 @@ def _rust_timestamp_format_error(regex: str, timestamp_format: str) -> str | Non
     return None
 
 
+@lru_cache(maxsize=1)
+def _timestamp_keys() -> tuple[str, ...]:
+    """The names the Rust engine reads a line's timestamp under: its own list, so no second
+    list here can drift from the parser's."""
+    import logler_rs
+
+    return tuple(logler_rs.timestamp_keys())
+
+
+def _timestamp_group_choices() -> str:
+    """The engine's timestamp names a regex group can have (`@timestamp` cannot), as words."""
+    names = [key for key in _timestamp_keys() if key.isidentifier()]
+    return f"{', '.join(names[:-1])} or {names[-1]}"
+
+
+def timestamp_group_names(groups: Iterable[str]) -> list[str]:
+    """The group names, in the order given, that the Rust engine reads as a line's timestamp."""
+    keys = _timestamp_keys()
+    return [group for group in groups if group in keys]
+
+
 def load_usable_config(path: str | Path) -> LoglerConfig:
     """The one decision whether a formats.yaml can be used: ``load_config`` plus the Rust
     engine's compile of every format's regex and ``timestamp_format``, so the verdict is for
@@ -441,6 +463,14 @@ def load_usable_config(path: str | Path) -> LoglerConfig:
                 path,
                 f"format '{name}': the timestamp_format {fmt.timestamp_format!r} cannot be "
                 f"used: {error}",
+            )
+        groups = list(safe_compile(fmt.regex).groupindex)
+        if not timestamp_group_names(groups):
+            raise FormatFileError(
+                path,
+                f"format '{name}': the timestamp_format {fmt.timestamp_format!r} cannot be "
+                f"used: the regex has no group the engine reads as a timestamp "
+                f"(its groups: {', '.join(groups)}); name the group {_timestamp_group_choices()}",
             )
     return config
 

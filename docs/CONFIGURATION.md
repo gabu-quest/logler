@@ -91,17 +91,28 @@ it with `%z`), the words read in the machine's language (`%a`, `%A`, `%c`, `%x`,
 and every other word (`%I`, `%j`, ...). So does a format with no date, a part given by two
 words (`%m` and `%b`), or a `%` at the end.
 
+The regex of a format with `timestamp_format` needs a group the engine reads as a timestamp:
+`timestamp`, `time`, `ts` or `datetime`. A format without one can never use its
+`timestamp_format`, so it stops the formats file like a word that cannot be read, naming the
+format, its groups and the four names. The built-in formats are not affected.
+
 A formats file that cannot be used stops the command instead of being skipped: broken
 YAML, an unknown key, a regex that does not compile or a `timestamp_format` that cannot be
-read is exit code 2 with the file and the problem. From the Python API it is `FormatFileError`, a `ValueError`.
+read, or a regex with no timestamp group beside it, is exit code 2 with the file and the problem. From the Python API it is `FormatFileError`, a `ValueError`.
 
 Commands for working on a format:
 
 ```bash
 logler llm format list                                  # built-in formats and the ones in your file
-logler llm format test -f my-app-1.log --name my-app    # which lines match, and the groups
+logler llm format test -f my-app-1.log --name my-app    # which lines match, the groups, and the time read
 logler llm format validate                              # check the formats file
 ```
+
+`format test` also shows, for each matched line, the time the engine reads with the format's
+regex and `timestamp_format` (`timestamp`, ISO 8601 or `null`), and counts the matched lines
+that have one (`matched_lines_with_timestamp`). A line Python's `re` matches and the engine's
+regex does not has `engine_matched: false`. With `--regex` alone the engine reads with no
+`timestamp_format`.
 
 These three look for the formats file from the current folder, or from `--config-dir`.
 

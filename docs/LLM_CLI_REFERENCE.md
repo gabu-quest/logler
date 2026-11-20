@@ -1008,6 +1008,42 @@ A root span has no `parentSpanId`; a span with errors has `"status": {"code": 2}
 
 ---
 
+### format test
+
+**Test a format's regex against log files, and see the time the engine reads.**
+
+```bash
+logler llm format test -f "plc_*.log" --name plc
+logler llm format test -f app.log --regex '^(?P<timestamp>\S+ \S+) (?P<message>.*)$' --limit 5
+```
+
+**Options:**
+- `--files, -f FILE` - Log files to test (required, repeatable)
+- `--regex, -r REGEX` - A regex with named groups
+- `--name, -n NAME` - A format of the `.logler/formats.yaml` found from the first file, or a built-in format when the file has none of that name
+- `--limit N` - Lines to show (default 20); the counts cover every line
+
+The regex is looked for anywhere in a line, as the engine looks for it (write `^` to tie it
+to the start). A line is matched with Python's `re`, and each matched line is then read by
+the engine, which reads the files of every command, with the regex and, for `--name`, the
+format's `timestamp_format` (with `--regex` alone, no format). A built-in format is shown for
+your own test: it reads a log only once it is copied into the formats file. Each matched line carries `engine_matched` (false when the
+engine's regex does not match a line Python's matches) and `timestamp`, the time the engine
+reads as ISO 8601, or `null`. The summary adds `timestamp_format` (or `null`),
+`matched_lines_with_timestamp` and `engine_unmatched_lines`.
+
+A regex the engine cannot compile (a look-around, for one) is exit 2 with
+`The regex cannot be compiled by the Rust engine: <reason>`. With `--name`, a formats file that
+cannot be used, among others a `timestamp_format` whose regex has no group the engine reads as a timestamp
+(`timestamp`, `time`, `ts`, `datetime`), is exit 2 with the file and the format.
+
+### format validate
+
+Checks the formats file, or one regex with `--regex`. A format is flagged for a missing
+timestamp group only when none of the names the engine reads as a timestamp is a group.
+
+---
+
 ### session
 
 **Stateful investigation sessions for complex analyses.**
