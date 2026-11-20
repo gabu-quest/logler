@@ -276,8 +276,8 @@ class TestSqlOneLogsTable:
             ]
 
     def test_the_same_lines_through_both_doors(self, tmp_path):
-        """A line ends at "\\n" or "\\r\\n" and nothing else is trimmed or skipped: a blank
-        line and a line of spaces are rows, trailing spaces stay, and a carriage return
+        """A line ends at "\\n" or "\\r\\n" and nothing else is trimmed: a blank line and
+        a line of spaces are no rows but keep their numbers, trailing spaces stay, and a carriage return
         inside a line (a progress display) is part of that line."""
         path = tmp_path / "lines.log"
         path.write_bytes(
@@ -294,11 +294,9 @@ class TestSqlOneLogsTable:
         api = self._api(query, str(path))
 
         assert command["results"] == api
-        assert command["total_entries"] == 6
+        assert command["total_entries"] == 4
         assert [(r["line_number"], r["raw"]) for r in api] == [
             (1, "2024-01-15T10:00:00Z INFO one"),
-            (2, None),
-            (3, "   "),
             (4, "2024-01-15T10:00:01Z INFO two  "),
             (5, "2024-01-15T10:00:02Z INFO 10%\r20%"),
             (6, "2024-01-15T10:00:03Z INFO last, no newline\r"),

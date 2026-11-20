@@ -216,7 +216,7 @@ def diff(
     Example:
         logler llm diff app.log --baseline 1h
     """
-    from ..parser import LogParser, format_time, read_lines, to_utc
+    from ..parser import LogParser, format_time, read_entry_lines, to_utc
 
     with _db_file_source(files, db_path) as file_list:
         # Parse time periods
@@ -251,10 +251,7 @@ def diff(
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                for number, line in read_lines(file_path):
-                    if not line.strip():
-                        continue
-
+                for number, line in read_entry_lines(file_path):
                     entry = parser.parse_line(number, line)
 
                     if not entry.timestamp:

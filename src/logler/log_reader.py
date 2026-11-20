@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from itertools import islice
 from pathlib import Path
 
-from .parser import cut_newline, read_lines
+from .parser import cut_newline, is_blank_line, read_entry_lines
 
 
 class CompleteLines:
@@ -87,9 +87,10 @@ class LogReader:
         self, start_line: int = 0, max_lines: int | None = None
     ) -> Iterator[str]:
         """Read lines forward from the file, cut and numbered as search cuts them
-        (``parser.read_lines``): ``start_line`` counts from 0."""
+        (``parser.read_lines``), a blank line left out: ``start_line`` counts from 0 in the
+        file's lines."""
         lines_read = 0
-        for number, line in read_lines(str(self.file_path)):
+        for number, line in read_entry_lines(str(self.file_path)):
             if number - 1 >= start_line:
                 yield line
                 lines_read += 1
@@ -100,14 +101,17 @@ class LogReader:
     def _read_lines_reverse(
         self, start_line: int = 0, max_lines: int | None = None
     ) -> Iterator[str]:
-        """Read lines from the end, cut as ``parser.read_lines`` cuts them, in reverse.
+        """Read lines from the end, cut as ``parser.read_lines`` cuts them, in reverse, a blank
+        line left out.
 
         The file is read backwards one ``buffer_size`` chunk at a time, only as far as the
-        lines asked for need. ``start_line`` lines are skipped from the end.
+        lines asked for need. ``start_line`` counts lines of the file from the end, blank ones
+        too, as a forward read counts them from the start; ``max_lines`` counts the lines
+        given back.
         """
-        lines = self._lines_backward()
-        stop = None if not max_lines else start_line + max_lines
-        yield from islice(lines, start_line, stop)
+        lines = islice(self._lines_backward(), start_line, None)
+        entries = (line for line in lines if not is_blank_line(line))
+        yield from islice(entries, max_lines or None)
 
     def _lines_backward(self) -> Iterator[str]:
         def text(data: bytes, terminated: bool, first: bool) -> str:
@@ -163,12 +167,13 @@ class LogReader:
         # the first lines end where the follow begins, at the end of the last complete line.
         with open(self.file_path, "rb") as f:
             complete = CompleteLines(f)
-            for line in deque(complete, maxlen=num_lines):
-                yield cut_newline(line)
+            entries = (text for line in complete if not is_blank_line(text := cut_newline(line)))
+            yield from deque(entries, maxlen=num_lines)
 
             while True:
                 for line in complete:
-                    yield cut_newline(line)
+                    if not is_blank_line(text := cut_newline(line)):
+                        yield text
 
                 if os.fstat(f.fileno()).st_size < f.tell():
                     # File was truncated (log rotation), start from beginning
@@ -219,7 +224,7 @@ class LogReader:
                 match_func = make_case_sensitive_matcher(pattern)
 
         matches_found = 0
-        for line_num, line in read_lines(str(self.file_path)):
+        for line_num, line in read_entry_lines(str(self.file_path)):
             if match_func(line):
                 yield (line_num, line)
                 matches_found += 1
@@ -256,7 +261,7 @@ class LogReader:
 
     def count_lines(self) -> int:
         """
-        Count total number of lines in the file.
+        Count the lines of the file, blank ones too: the highest line number in it.
 
         Returns:
             Number of lines

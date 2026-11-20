@@ -353,11 +353,13 @@ class TestEmptyAndSingleLineFiles:
         path = tmp_path / "tiny.log"
         path.write_bytes(data)
         reader = LogReader(path)
+        # the parser cuts every line; a reader leaves out a blank one
+        entries = [line for line in lines if line.strip()]
         assert _parser_lines(path) == lines
-        assert list(reader.read_lines()) == lines
-        assert list(reader.read_lines(reverse=True)) == lines
-        assert list(reader.tail(num_lines=5)) == lines
-        assert [text for _, text in reader.search("", regex=True)] == lines
+        assert list(reader.read_lines()) == entries
+        assert list(reader.read_lines(reverse=True)) == entries
+        assert list(reader.tail(num_lines=5)) == entries
+        assert [text for _, text in reader.search("", regex=True)] == entries
 
     def test_a_lone_unterminated_line_is_not_followed_until_complete(self, tmp_path):
         path = tmp_path / "tiny.log"
@@ -411,8 +413,9 @@ class TestReverseReadChunkBorders:
         path = tmp_path / "odd.log"
         path.write_bytes(ODD_BYTES + b"\n\n" + "x\u00e9\U0001f600".encode() * 20 + b"\r\nz\r\n")
         reader = LogReader(path, buffer_size=buffer_size)
-        assert list(reader.read_lines(reverse=True)) == _parser_lines(path)[::-1]
-        assert list(reader.tail(num_lines=3)) == _parser_lines(path)[-3:]
+        entries = [line for line in _parser_lines(path) if line.strip()]
+        assert list(reader.read_lines(reverse=True)) == entries[::-1]
+        assert list(reader.tail(num_lines=3)) == entries[-3:]
 
     def test_a_chunk_border_between_the_return_and_the_newline(self, tmp_path):
         path = tmp_path / "crlf.log"

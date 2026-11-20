@@ -136,6 +136,7 @@ def test_get_metadata(files):
     assert_declares(models.FileMetadata, data)
     meta = models.FileMetadata.model_validate(data)
     assert meta.lines == 7
+    assert meta.entry_count == 7
     assert meta.log_levels == {"UNKNOWN": 1, "ERROR": 2, "INFO": 4}
     assert meta.unique_threads == 2
 

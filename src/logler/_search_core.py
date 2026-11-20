@@ -552,7 +552,7 @@ def get_metadata(files: list[str]) -> list[dict[str, Any]]:
         List of file metadata dicts with shape::
 
             [{
-                "path": str, "size_bytes": int, "lines": int, "format": str,
+                "path": str, "size_bytes": int, "lines": int, "entry_count": int, "format": str,
                 "time_range": {"start": str, "end": str} | None,
                 "available_fields": [str, ...],
                 "unique_threads": int, "unique_correlation_ids": int,
@@ -562,7 +562,10 @@ def get_metadata(files: list[str]) -> list[dict[str, Any]]:
     Example::
 
         >>> meta = get_metadata(["app.log"])
-        >>> print(f"Total lines: {sum(f['lines'] for f in meta)}")
+        >>> print(f"Total entries: {sum(f['entry_count'] for f in meta)}")
+
+    ``lines`` counts the lines of the file, blank ones too; ``entry_count`` counts its entries
+    (a blank line is none), and ``log_levels`` adds up to it.
     """
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")

@@ -137,7 +137,7 @@ logler llm search app.log --after=-1h --before=-30m    # Relative time window
 - `--compact` - Use short field names (`ln`/`ts`/`lv`/`msg`/`src`/`th`/`cid`/`trc`/`sid`/`svc`)
 - `--metadata-only` - Return aggregations only, no results array
 - `--fields LIST` - Comma-separated fields to include in output (e.g., `timestamp,level,message`)
-- `--context N` - Include N context lines around each match
+- `--context N` - Include N entries before and after each match (a blank line is no entry)
 - `--max-bytes N` - Maximum output size in bytes (truncates results to fit)
 - `--include-raw/--no-raw` - Include raw log line (default: yes)
 - `--aggregate/--no-aggregate` - Include aggregations (default: yes)
@@ -846,8 +846,10 @@ logler llm context app.log 1523 --before 20 --after 10
 **Options:**
 - `FILE` - Log file path
 - `LINE` - Line number
-- `--before/-B N` - Lines before (default: 10)
-- `--after/-A N` - Lines after (default: 10)
+- `--before/-B N` - Entries before (default: 10)
+- `--after/-A N` - Entries after (default: 10)
+
+Context is counted in entries: a blank line is no entry and takes no place in it.
 - `--pretty` - Pretty-print JSON output
 
 A line number the file has no entry for (0, a negative number, past the end, an empty file)

@@ -18,10 +18,11 @@ def quick_summary(files: list[str]) -> dict[str, Any]:
     Get a quick summary of log files.
 
     Returns a dictionary with:
-    - total_lines: Total number of log entries
+    - total_entries: Number of log entries (a blank line is none)
+    - total_lines: Number of lines in the file, blank ones too
     - time_range: ``{"start": str, "end": str}``, or None when no entry has a timestamp
     - log_levels: Count of each log level
-    - error_rate: Percentage of ERROR/FATAL/CRITICAL logs
+    - error_rate: Percentage of the entries that are ERROR/FATAL/CRITICAL
     - unique_threads: Number of distinct thread ids
     - unique_correlations: Number of distinct correlation ids
 
@@ -36,14 +37,15 @@ def quick_summary(files: list[str]) -> dict[str, Any]:
         return {}
 
     meta = metadata[0]
-    total = meta["lines"]
+    total = meta["entry_count"]
     levels = meta.get("log_levels", {})
 
     errors = levels.get("ERROR", 0) + levels.get("FATAL", 0) + levels.get("CRITICAL", 0)
     error_rate = (errors / total * 100) if total > 0 else 0
 
     return {
-        "total_lines": total,
+        "total_entries": total,
+        "total_lines": meta["lines"],
         "time_range": meta.get("time_range"),
         "log_levels": levels,
         "error_rate": error_rate,

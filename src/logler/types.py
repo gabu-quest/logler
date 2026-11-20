@@ -452,6 +452,7 @@ class FileMetadataInfo(TypedDict):
     path: str
     size_bytes: int
     lines: int
+    entry_count: int
     format: str
     time_range: dict[str, str] | None
     available_fields: list[str]

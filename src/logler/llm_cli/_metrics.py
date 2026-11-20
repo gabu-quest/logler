@@ -51,7 +51,7 @@ def verify_pattern(
     Example:
         logler llm verify-pattern app.log --pattern "timeout after (\\d+)ms" --extract-groups
     """
-    from ..parser import LogParser, read_lines
+    from ..parser import LogParser, read_entry_lines
 
     with _db_file_source(files, db_path) as file_list:
         try:
@@ -71,10 +71,7 @@ def verify_pattern(
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                for number, line in read_lines(file_path):
-                    if not line.strip():
-                        continue
-
+                for number, line in read_entry_lines(file_path):
                     total_entries += 1
                     entry = parser.parse_line(number, line)
 
@@ -199,7 +196,7 @@ def emit(
     Example:
         logler llm emit app.log --level ERROR --last 1h --limit 100
     """
-    from ..parser import LogParser, read_lines
+    from ..parser import LogParser, read_entry_lines
 
     with _db_file_source(files, db_path) as file_list:
         # Parse field list
@@ -233,10 +230,7 @@ def emit(
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                for number, line in read_lines(file_path):
-                    if not line.strip():
-                        continue
-
+                for number, line in read_entry_lines(file_path):
                     entry = parser.parse_line(number, line)
 
                     # Apply level filter (comma-separated)

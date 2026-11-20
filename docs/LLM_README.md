@@ -88,7 +88,7 @@ results = investigate.search(
     tail=20,                        # Last 20 by timestamp
     time_start="2024-01-15T10:00:00Z",  # Time range
     time_end="2024-01-15T11:00:00Z",
-    context_lines=3,                # Include 3 lines before/after
+    context_lines=3,                # Include 3 entries before/after
     fields=["timestamp", "level", "message"],  # Project fields
 )
 ```
@@ -159,7 +159,8 @@ metadata = investigate.get_metadata(files=["app.log"])
   {
     "path": "app.log",
     "size_bytes": 10485760,
-    "lines": 52341,
+    "lines": 52400,    # lines of the file, blank ones too
+    "entry_count": 52341,  # a blank line is no entry
     "format": "Json",
     "time_range": {
       "start": "2024-01-15T00:00:00Z",
@@ -220,7 +221,7 @@ import logler.investigate as investigate
 
 # Step 1: Get overview
 metadata = investigate.get_metadata(files=["app.log"])
-print(f"Analyzing {metadata[0]['lines']} log entries")
+print(f"Analyzing {metadata[0]['entry_count']} log entries")
 print(f"Time range: {metadata[0]['time_range']['start']} to {metadata[0]['time_range']['end']}")
 print(f"Error count: {metadata[0]['log_levels']['ERROR']}")
 

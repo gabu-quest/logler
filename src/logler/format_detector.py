@@ -16,6 +16,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from .parser import is_blank_line
+
 # ============================================================================
 # Format Detection (M6.1 + M6.2)
 # ============================================================================
@@ -63,12 +65,12 @@ def detect_format(
 ) -> FormatDetection:
     """Detect the log format of a file by sampling lines.
 
-    Reads up to sample_size non-empty lines and scores each against
+    Reads up to sample_size non-blank lines and scores each against
     known format patterns. Returns the best match with confidence.
 
     Args:
         file_path: Path to the log file.
-        sample_size: Number of non-empty lines to sample.
+        sample_size: Number of non-blank lines to sample.
         custom_formats: Optional dict of {name: {regex: str}} from config.
 
     Returns:
@@ -154,13 +156,14 @@ def detect_format(
 
 
 def _read_sample_lines(file_path: str, max_lines: int) -> list[str]:
-    """Read up to max_lines non-empty, non-comment lines from a file."""
+    """Read up to max_lines lines of a file that are neither blank (no entry, by the one
+    rule of ``parser.is_blank_line``) nor a ``#`` comment."""
     lines: list[str] = []
     try:
         with open(file_path, errors="replace") as f:
             for raw in f:
                 stripped = raw.rstrip("\n\r")
-                if not stripped or stripped.startswith("#"):
+                if is_blank_line(stripped) or stripped.startswith("#"):
                     continue
                 lines.append(stripped)
                 if len(lines) >= max_lines:

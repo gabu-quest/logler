@@ -119,12 +119,12 @@ def stats(files: tuple, output_json: bool):
     from rich.console import Console
     from rich.table import Table
 
-    from .parser import LogParser, read_lines
+    from .parser import LogParser, read_entry_lines
 
     console = Console()
     for file_path in files:
         parser = LogParser.for_file(file_path)
-        entries = [parser.parse_line(number, line) for number, line in read_lines(file_path)]
+        entries = [parser.parse_line(number, line) for number, line in read_entry_lines(file_path)]
 
         stats_data: dict[str, Any] = {
             "total": len(entries),

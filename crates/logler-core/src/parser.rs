@@ -46,6 +46,14 @@ const SPAN_KEYS: &[&str] = &["span_id", "spanId"];
 const PARENT_SPAN_KEYS: &[&str] = &["parent_span_id", "parentSpanId"];
 const SERVICE_KEYS: &[&str] = &["service", "service_name", "serviceName"];
 
+/// Whether a line is empty or holds only white space, and so is no entry. White space is what
+/// Python's `str.strip()` removes: Unicode white space and the four separators U+001C to
+/// U+001F, which `char::is_whitespace` leaves out.
+pub fn is_blank_line(line: &str) -> bool {
+    line.chars()
+        .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
+}
+
 /// The object a line holds when, trimmed, it is one JSON object and nothing else.
 fn json_object(line: &str) -> Option<Map<String, Value>> {
     let trimmed = line.trim();

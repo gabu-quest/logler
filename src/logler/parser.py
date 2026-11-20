@@ -61,6 +61,24 @@ def read_lines(path: str) -> Iterator[tuple[int, str]]:
             yield number, cut_newline(line)
 
 
+def is_blank_line(line: str) -> bool:
+    """Whether a line is empty or holds only white space, and so is no entry.
+
+    White space is what ``str.strip()`` removes; the Rust index cuts the same way
+    (``is_blank_line`` in ``logler-core``). The one rule of every reader that does not go
+    through the index.
+    """
+    return not line.strip()
+
+
+def read_entry_lines(path: str) -> Iterator[tuple[int, str]]:
+    """The lines of a file that are entries: ``read_lines`` without the blank ones. A number is
+    still the line's place in the file, so a blank line is skipped and its number not reused."""
+    for number, line in read_lines(path):
+        if not is_blank_line(line):
+            yield number, line
+
+
 _LEAP_SECOND = re.compile(r"(\d\d:\d\d):60")
 
 

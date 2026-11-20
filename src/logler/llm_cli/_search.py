@@ -46,7 +46,7 @@ def schema(files: tuple, db_path: str | None, sample_size: int, full: bool, pret
     Example:
         logler llm schema app.log worker.log
     """
-    from ..parser import LogParser, read_lines
+    from ..parser import LogParser, read_entry_lines
 
     with _db_file_source(files, db_path) as file_list:
         # Track schema information
@@ -62,12 +62,9 @@ def schema(files: tuple, db_path: str | None, sample_size: int, full: bool, pret
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                for number, line in read_lines(file_path):
+                for number, line in read_entry_lines(file_path):
                     if not full and number > sample_size:
                         break
-
-                    if not line.strip():
-                        continue
 
                     entry = parser.parse_line(number, line)
                     total_entries += 1
@@ -760,7 +757,7 @@ def summarize(
     Example:
         logler llm summarize app.log --focus errors
     """
-    from ..parser import LogParser, read_lines
+    from ..parser import LogParser, read_entry_lines
 
     with _db_file_source(files, db_path) as file_list:
         # Resolve time and service filters
@@ -779,10 +776,7 @@ def summarize(
         for file_path in file_list:
             try:
                 parser = LogParser.for_file(file_path)
-                for number, line in read_lines(file_path):
-                    if not line.strip():
-                        continue
-
+                for number, line in read_entry_lines(file_path):
                     entry = parser.parse_line(number, line)
 
                     # Apply time filters
@@ -909,14 +903,14 @@ def sql(query: str | None, files: tuple, db_path: str | None, stdin: bool, prett
     """
     import duckdb
 
-    from ..parser import LogParser, read_lines
+    from ..parser import LogParser, read_entry_lines
     from ..sql import SqlEngine
 
     def entries(file_list):
         """The files' lines as engine entry dicts, one at a time."""
         for file_path in file_list:
             parser = LogParser.for_file(file_path)
-            for number, line in read_lines(file_path):
+            for number, line in read_entry_lines(file_path):
                 yield parser.parse_entry(number, line, file_path)
 
     with _db_file_source(files, db_path, default_glob="*.log") as file_list:

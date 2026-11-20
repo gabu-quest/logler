@@ -688,9 +688,8 @@ class TestPerLineReadersNumberLinesAsSearchDoes:
         result = CliRunner().invoke(main, ["stats", carriage_return_log, "--json"])
         assert json.loads(result.stdout)["total"] == 4
 
-    def test_blank_lines_keep_their_present_treatment(self, tmp_path):
-        """The five that skip a blank line still skip it (and a line of spaces); the line
-        numbers still count it."""
+    def test_a_blank_line_and_a_line_of_spaces_are_no_entry(self, tmp_path):
+        """A blank line and a line of spaces are no entry; the line numbers still count them."""
         path = tmp_path / "blank.log"
         path.write_bytes(
             b"2024-01-15T10:00:00Z ERROR one\n\n   \n2024-01-15T10:00:03Z ERROR four\n"
@@ -719,16 +718,15 @@ class TestPerLineReadersNumberLinesAsSearchDoes:
         )
         assert json.loads(stdout)["comparison"]["before"]["total"] == 2
 
-    def test_format_test_skips_an_empty_line_and_keeps_a_line_of_spaces(self, tmp_path):
+    def test_format_test_skips_an_empty_line_and_a_line_of_spaces(self, tmp_path):
         path = tmp_path / "blank.log"
         path.write_bytes(
             b"2024-01-15T10:00:00Z ERROR one\n\n   \n2024-01-15T10:00:03Z ERROR four\n"
         )
         _, stdout, _ = invoke(["format", "test", "-f", str(path), "--regex", r"(?P<ts>\S+) .*"])
         data = json.loads(stdout)
-        assert data["total_lines"] == 3
+        assert data["total_lines"] == 2
         assert [(r["line_number"], r["matched"]) for r in data["results"]] == [
             (1, True),
-            (3, False),
             (4, True),
         ]

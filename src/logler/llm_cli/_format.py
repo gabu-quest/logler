@@ -9,7 +9,7 @@ import click
 
 from ..builtin_formats import get_builtin_format, get_builtin_formats
 from ..config import FormatFileError, config_for_file, find_config, load_usable_config
-from ..parser import read_lines
+from ..parser import read_entry_lines
 from ..safe_regex import RegexPatternTooLongError, RegexTimeoutError, safe_compile
 from ._core import (
     EXIT_NO_RESULTS,
@@ -141,9 +141,7 @@ def format_test(
 
     for file_path in file_list:
         try:
-            for number, line in read_lines(file_path):
-                if not line:
-                    continue
+            for number, line in read_entry_lines(file_path):
                 total_lines += 1
                 match = compiled.match(line)
                 if match:

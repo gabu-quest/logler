@@ -13,7 +13,7 @@ from rich.text import Text
 
 from ._search_core import level_name, level_text
 from .log_reader import CompleteLines
-from .parser import LogEntry, LogParser, cut_newline
+from .parser import LogEntry, LogParser, cut_newline, is_blank_line
 
 
 class TerminalViewer:
@@ -67,7 +67,9 @@ class TerminalViewer:
 
             # Parse entries, each file with the format that names it
             entries = [
-                parser.parse_line(i + 1, cut_newline(line)) for i, line in enumerate(all_lines)
+                parser.parse_line(i + 1, text)
+                for i, line in enumerate(all_lines)
+                if not is_blank_line(text := cut_newline(line))
             ]
 
             # Apply filters
@@ -180,15 +182,31 @@ class TerminalViewer:
         self.console.print("\n[bold green]📡 Following log file... (Ctrl+C to stop)[/bold green]\n")
 
         while True:
-            for line in growing:
-                line_number += 1
-                entry = parser.parse_line(line_number, cut_newline(line))
-
-                # Apply filters
-                filtered = self._apply_filters([entry], level_filter, pattern, thread_filter)
-                if filtered:
-                    self._print_entry(entry)
+            line_number = self._print_new_lines(
+                growing, line_number, level_filter, pattern, thread_filter, parser
+            )
             await asyncio.sleep(0.1)
+
+    def _print_new_lines(
+        self,
+        growing: CompleteLines,
+        line_number: int,
+        level_filter: str | None,
+        pattern: str | None,
+        thread_filter: str | None,
+        parser: LogParser,
+    ) -> int:
+        """Print the entries among the lines written since the last pass: a blank line prints
+        nothing but has its number. Returns the number of the last line read."""
+        for line in growing:
+            line_number += 1
+            text = cut_newline(line)
+            if is_blank_line(text):
+                continue
+            entry = parser.parse_line(line_number, text)
+            if self._apply_filters([entry], level_filter, pattern, thread_filter):
+                self._print_entry(entry)
+        return line_number
 
     def display_thread_view(self, entries: list):
         """Display beautiful thread-correlated view."""

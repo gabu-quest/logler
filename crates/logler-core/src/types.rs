@@ -515,7 +515,10 @@ pub struct Percentiles {
 pub struct FileMetadata {
     pub path: String,
     pub size_bytes: u64,
+    /// The lines of the file, blank ones too: the highest line number an entry can have.
     pub lines: usize,
+    /// The entries of the file: its lines but the blank ones. The level counts add up to it.
+    pub entry_count: usize,
     pub format: LogFormat,
     pub time_range: Option<TimeRange>,
     pub available_fields: Vec<String>,

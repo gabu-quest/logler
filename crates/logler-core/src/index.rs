@@ -1,4 +1,4 @@
-use crate::parser::ParserConfig;
+use crate::parser::{is_blank_line, ParserConfig};
 use crate::types::{LogEntry, LogLevel};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -73,6 +73,7 @@ fn read_batches(file: File, sender: &std::sync::mpsc::SyncSender<std::io::Result
 }
 
 /// Parse a batch of numbered lines in parallel and append the entries, in order, to `entries`.
+/// A blank line is no entry; its number is not reused.
 fn parse_batch(
     parser: &crate::parser::LogParser,
     batch: &mut LineBatch,
@@ -80,6 +81,7 @@ fn parse_batch(
 ) {
     let parsed: Vec<LogEntry> = batch
         .par_iter()
+        .filter(|(_, line)| !is_blank_line(line))
         .filter_map(|(line_number, line)| parser.parse_line(*line_number, line).ok())
         .collect();
     batch.clear();
@@ -112,7 +114,7 @@ where
 pub struct LogIndex {
     /// File path
     pub file_path: String,
-    /// Number of lines in the file (every line, whether or not it parsed)
+    /// Number of lines in the file (every line, blank ones too)
     pub total_lines: usize,
     /// Thread ID -> line numbers
     pub thread_index: HashMap<String, Vec<usize>>,
@@ -264,7 +266,7 @@ impl LogIndex {
         }
     }
 
-    /// Get context around a line number
+    /// Get the `before` entries before a line number and the `after` entries after it
     pub fn get_context(
         &self,
         line_number: usize,
@@ -276,15 +278,17 @@ impl LogIndex {
             None => return (Vec::new(), Vec::new()),
         };
 
-        let start_line = line_number.saturating_sub(before);
-        let end_line = line_number.saturating_add(after);
-
-        // Entries are in file order, so each range is a slice. `upto(n)` is the position after
-        // the last entry on line `n` or before it.
+        // Entries are in file order, so each range is a slice. Context is counted in entries,
+        // not in lines: a blank line between two entries is no entry, so it takes no place in it.
+        // `from(n)` is the position of the first entry on line `n` or after it; `upto(n)` the
+        // position after the last entry on line `n` or before it.
         let from = |line: usize| entries.partition_point(|e| e.line_number < line);
         let upto = |line: usize| entries.partition_point(|e| e.line_number <= line);
-        let before_entries = entries[from(start_line)..from(line_number)].to_vec();
-        let after_entries = entries[upto(line_number)..upto(end_line)].to_vec();
+        let here = from(line_number);
+        let after_from = upto(line_number);
+        let before_entries = entries[here.saturating_sub(before)..here].to_vec();
+        let after_entries =
+            entries[after_from..after_from.saturating_add(after).min(entries.len())].to_vec();
 
         (before_entries, after_entries)
     }
@@ -426,8 +430,9 @@ mod tests {
         assert_eq!(lines(before), vec![1]);
         assert_eq!(lines(after), vec![3, 4]);
 
+        // a line past the end of the file: the entry before it is the last one
         let (before, after) = index.get_context(usize::MAX, 1, 1);
-        assert_eq!(lines(before), Vec::<usize>::new());
+        assert_eq!(lines(before), vec![4]);
         assert_eq!(lines(after), Vec::<usize>::new());
     }
 
@@ -478,15 +483,48 @@ mod tests {
         let index = index_of(b"a  \r\n\n   \nb\rc\nlast");
         assert_eq!(
             raws(&index),
-            vec![
-                (1, "a  ".into()),
-                (2, "".into()),
-                (3, "   ".into()),
-                (4, "b\rc".into()),
-                (5, "last".into()),
-            ]
+            vec![(1, "a  ".into()), (4, "b\rc".into()), (5, "last".into()),]
         );
         assert_eq!(index.total_lines, 5);
+    }
+
+    #[test]
+    fn a_line_of_white_space_is_not_an_entry_and_the_numbers_still_count_it() {
+        // empty, three spaces, one tab, a carriage return alone, a no-break space, an
+        // ideographic space, a form feed, a file separator (Python strips it, Rust's
+        // `char::is_whitespace` does not)
+        let index = index_of(b"a\n\n   \n\t\n\r\n\xc2\xa0\n\xe3\x80\x80\n\x0c\n\x1c\nb\n\n");
+        assert_eq!(raws(&index), vec![(1, "a".into()), (10, "b".into())]);
+        assert_eq!(index.total_lines, 11);
+        let stats = index.get_stats();
+        assert_eq!(stats.total_entries, 2);
+        assert_eq!(stats.total_lines, 11);
+        assert_eq!(stats.level_counts.values().sum::<usize>(), 2);
+    }
+
+    #[test]
+    fn a_file_of_blank_lines_has_no_entries_and_context_counts_entries() {
+        let blank = index_of(b"\n  \n\t\n");
+        assert!(blank.entries.as_ref().unwrap().is_empty());
+        assert_eq!(blank.total_lines, 3);
+        assert_eq!(blank.get_stats().total_entries, 0);
+
+        let index = index_of(b"a\n\n   \n\t\nb\n");
+        let lines = |entries: Vec<LogEntry>| -> Vec<usize> {
+            entries.iter().map(|e| e.line_number).collect()
+        };
+        let (before, after) = index.get_context(5, 1, 1);
+        assert_eq!(lines(before), vec![1]);
+        assert_eq!(lines(after), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn a_blank_line_inside_a_stack_trace_leaves_the_other_numbers_alone() {
+        let index = index_of(b"Traceback:\n  File x\n\n  File y\nValueError: z\n");
+        assert_eq!(
+            raws(&index).iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            vec![1, 2, 4, 5]
+        );
     }
 
     #[test]

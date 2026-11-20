@@ -1069,6 +1069,7 @@ impl Investigator {
                 path: file_path.clone(),
                 size_bytes,
                 lines: stats.total_lines,
+                entry_count: stats.total_entries,
                 format,
                 time_range,
                 available_fields: available_fields.into_iter().collect(),
