@@ -1472,3 +1472,105 @@ class TestBuildEntryFallbacks:
         )
         entry = _build_entry({"_id": 1, "ts": "2024-01-15T10:00:00Z"}, mapping, 0)
         assert entry["level"] == "INFO"
+
+
+class TestRowLineHoldsItsText:
+    """A row's line holds its text as read, not as \\uXXXX escapes."""
+
+    @staticmethod
+    def _db(tmp_path: Path, documents: list[str]) -> str:
+        db_path = str(tmp_path / "text.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE notes (_id INTEGER PRIMARY KEY AUTOINCREMENT, data JSON NOT NULL)"
+        )
+        for document in documents:
+            conn.execute("INSERT INTO notes (data) VALUES (?)", (document,))
+        conn.commit()
+        conn.close()
+        return db_path
+
+    @staticmethod
+    def _mapping() -> DbTableMapping:
+        return DbTableMapping(
+            table="notes",
+            timestamp_field="at",
+            timestamp_format="iso",
+            level_field=None,
+            message_template="{title}",
+            correlation_id_field=None,
+            extra_fields=["note"],
+        )
+
+    def _lines(self, tmp_path: Path, documents: list[str]) -> list[str]:
+        path = db_to_jsonl(self._db(tmp_path, documents), [self._mapping()])
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        finally:
+            os.unlink(path)
+        assert raw.endswith(b"\n")
+        return raw[:-1].decode("utf-8").split("\n")
+
+    def test_a_line_holds_japanese_and_emoji_text_itself(self, tmp_path: Path):
+        document = json.dumps({"at": "2024-01-15T10:00:00Z", "title": "日本語", "note": "ok 🎉"})
+        (line,) = self._lines(tmp_path, [document])
+        assert '"message": "日本語"' in line
+        assert '"note": "ok 🎉"' in line
+        assert "\\u" not in line
+
+    def test_a_query_finds_text_in_a_field_beside_the_message(self, tmp_path: Path):
+        from logler.investigate import Investigator
+
+        document = json.dumps({"at": "2024-01-15T10:00:00Z", "title": "plain", "note": "日本語"})
+        db_path = self._db(tmp_path, [document])
+        inv = Investigator()
+        inv.load_from_db(db_path, [self._mapping()])
+        try:
+            results = inv.search(query="日本語")
+        finally:
+            inv.close()
+        assert [r["entry"]["message"] for r in results["results"]] == ["plain"]
+
+    def test_a_lone_surrogate_is_written_as_the_replacement_character(self, tmp_path: Path):
+        document = '{"at": "2024-01-15T10:00:00Z", "title": "日本", "note": "cut \\ud83d end"}'
+        (line,) = self._lines(tmp_path, [document])
+        assert '"message": "日本"' in line
+        assert '"note": "cut \ufffd end"' in line
+        assert "\\u" not in line
+
+    def test_a_row_with_a_lone_surrogate_is_still_read_as_its_fields(self, tmp_path: Path):
+        from logler.investigate import Investigator
+
+        document = '{"at": "2024-01-15T10:00:00Z", "title": "日本", "note": "cut \\ud83d end"}'
+        db_path = self._db(tmp_path, [document])
+        inv = Investigator()
+        inv.load_from_db(db_path, [self._mapping()])
+        try:
+            results = inv.search(query="cut")
+        finally:
+            inv.close()
+        entries = [r["entry"] for r in results["results"]]
+        assert [(e["format"], e["message"], e["thread_id"]) for e in entries] == [
+            ("Json", "日本", "notes")
+        ]
+        assert entries[0]["fields"]["note"] == "cut \ufffd end"
+
+    def test_line_breaking_characters_in_a_value_keep_one_line_a_row(self, tmp_path: Path):
+        breaks = "a\u2028b\u2029c\x85d\ne"
+        documents = [
+            json.dumps({"at": "2024-01-15T10:00:00Z", "title": breaks, "note": "1"}),
+            json.dumps({"at": "2024-01-15T10:00:00Z", "title": "second", "note": "2"}),
+        ]
+        lines = self._lines(tmp_path, documents)
+        assert len(lines) == 2
+        assert len(lines[0].splitlines()) == 1
+        assert json.loads(lines[0])["message"] == breaks
+
+    def test_a_quote_and_a_backslash_round_trip(self, tmp_path: Path):
+        document = json.dumps(
+            {"at": "2024-01-15T10:00:00Z", "title": 'say "hi" \\ 日本', "note": "n"}
+        )
+        (line,) = self._lines(tmp_path, [document])
+        assert json.loads(line)["message"] == 'say "hi" \\ 日本'
+        assert '\\"hi\\" \\\\ 日本' in line

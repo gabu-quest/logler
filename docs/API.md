@@ -154,7 +154,7 @@ These functions are part of the public API but not yet covered by contract tests
 
 | Function | Purpose |
 |----------|---------|
-| `extract_ids()` | Find all thread/correlation/trace IDs in log files |
+| `extract_ids()` | Find all thread/correlation/trace IDs in log files. An all-zero trace, span or parent span id (16 or 32 characters of `0`, what OpenTelemetry writes outside a span) means no id and is never listed |
 | `follow_thread()` | Reconstruct a single thread's timeline |
 | `get_context()` | Get surrounding log lines for a specific entry; a line number the file has no entry for raises `ValueError` |
 | `find_patterns()` | Detect repeated log patterns with frequency |

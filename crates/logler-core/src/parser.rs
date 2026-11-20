@@ -93,6 +93,13 @@ fn first_by<T>(keys: &[&str], read: impl Fn(&str) -> Option<T>) -> Option<T> {
     keys.iter().find_map(|key| read(key))
 }
 
+/// An all-zero id of 16 or 32 characters is the id OpenTelemetry writes for a line made outside
+/// a span; W3C trace context and B3 call it invalid. It names nothing, so an entry has no id
+/// there. Any other id, zeros or not, is kept as written.
+fn is_no_id(id: &str) -> bool {
+    matches!(id.len(), 16 | 32) && id.bytes().all(|byte| byte == b'0')
+}
+
 /// Like `first_by`, and the key that gave the value is noted in `taken`.
 fn take_first<'k, T>(
     keys: &[&'k str],
@@ -705,6 +712,10 @@ impl LogParser {
                 }
             }
         }
+
+        entry.trace_id = entry.trace_id.filter(|id| !is_no_id(id));
+        entry.span_id = entry.span_id.filter(|id| !is_no_id(id));
+        entry.parent_span_id = entry.parent_span_id.filter(|id| !is_no_id(id));
 
         Ok(entry)
     }
@@ -1603,6 +1614,48 @@ mod tests {
             entry.span_id.as_deref(),
             Some("00000042"),
             "span id keeps its zeros"
+        );
+    }
+
+    #[test]
+    fn test_an_all_zero_trace_span_or_parent_span_id_is_no_id() {
+        let zero32 = "0".repeat(32);
+        let zero16 = "0".repeat(16);
+        let none = (None, None, None);
+        let ids = |entry: &LogEntry| {
+            (
+                entry.trace_id.clone(),
+                entry.span_id.clone(),
+                entry.parent_span_id.clone(),
+            )
+        };
+
+        let entry = parse(&format!(
+            r#"{{"msg":"x","trace_id":"{zero32}","span_id":"{zero16}","parent_span_id":"{zero16}"}}"#
+        ));
+        assert_eq!(ids(&entry), none, "json");
+
+        let entry = parse(&format!(
+            r#"level=info trace_id={zero32} span_id={zero16} parent_span_id={zero16} msg="x""#
+        ));
+        assert_eq!(ids(&entry), none, "logfmt");
+
+        let entry = parse(&format!(
+            "2024-01-01 00:00:00 INFO trace_id={zero32} span_id={zero16} hello"
+        ));
+        assert_eq!(ids(&entry), none, "plain");
+
+        let entry = parse(&format!(
+            r#"{{"msg":"x","trace_id":"ab12ab12ab12ab12","span_id":"{zero16}","parent_span_id":"0"}}"#
+        ));
+        assert_eq!(
+            ids(&entry),
+            (
+                Some("ab12ab12ab12ab12".to_string()),
+                None,
+                Some("0".to_string())
+            ),
+            "a real trace id stays; a single zero is not the zero id"
         );
     }
 

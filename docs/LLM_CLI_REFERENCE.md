@@ -54,6 +54,8 @@ An error that names no file has no `file` key.
 
 ## Command Reference
 
+With `--db`, each row of the database is one line of JSON that holds its text as read: `日本語` is written as itself, so a `--query` pattern finds it in the line and in the message. A lone surrogate in a stored document (a cut emoji) is written as U+FFFD, the replacement character, and the row keeps its fields.
+
 ### triage
 
 **Quick severity assessment for incident response.**
@@ -197,6 +199,8 @@ logler llm search app.log --limit 25 --offset 25
 **Discover all unique IDs (threads, correlations, traces, services) in log files.**
 
 Useful for understanding what's in a log file before querying. Returns counts and time ranges for each ID.
+
+An all-zero trace, span or parent span id (16 or 32 characters of `0`, which OpenTelemetry writes for a line made outside a span) means no id: it is never listed, searched by or shown in a hierarchy as an id. A logfmt line keeps the key in its `fields`. Any other id is kept as written.
 
 ```bash
 logler llm ids app.log

@@ -24,12 +24,33 @@ import contextlib
 import dataclasses
 import json
 import os
+import re
 import sqlite3
 import string
 import tempfile
 import urllib.parse
 from collections.abc import Iterator
 from datetime import UTC, datetime
+
+# A lone surrogate (a cut emoji in a stored document) is no text: it cannot be written as UTF-8, and
+# the engine reads a line that holds its escape as plain text, not as JSON.
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+
+# Characters that stay escaped in a row's line: they end a line for readers that split on more
+# than "\n".
+_ESCAPED_IN_LINE = re.compile("[\x85\u2028\u2029]")
+
+
+def _row_line(entry: dict) -> str:
+    """One row as one line of JSON that holds its text as read.
+
+    ``ensure_ascii=False`` writes ``日本語`` as itself, so a query pattern finds it in the line.
+    A lone surrogate becomes U+FFFD, as an invalid byte of a log file does, so the row is still
+    read as JSON with its fields. U+0085, U+2028 and U+2029 stay ``\\uXXXX``: a row is always one
+    line.
+    """
+    line = _LONE_SURROGATE.sub("\ufffd", json.dumps(entry, ensure_ascii=False))
+    return _ESCAPED_IN_LINE.sub(lambda match: f"\\u{ord(match.group()):04x}", line)
 
 
 def _safe_identifier(name: str) -> str:
@@ -168,7 +189,7 @@ def db_to_jsonl(
             for mapping in mappings:
                 rows = _read_sqler_table(conn, mapping)
                 for entry in rows:
-                    tmp.write(json.dumps(entry) + "\n")
+                    tmp.write(_row_line(entry) + "\n")
                     row_count += 1
         except Exception:
             tmp.close()
