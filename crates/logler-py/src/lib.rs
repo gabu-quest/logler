@@ -323,6 +323,26 @@ fn logler_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add_function(wrap_pyfunction!(level_name, m)?)?;
     m.add_function(wrap_pyfunction!(timestamp_keys, m)?)?;
+    start_a_new_id_run_in_every_forked_child(m)?;
+    Ok(())
+}
+
+/// A process made by `os.fork` (a `multiprocessing` worker started by fork) has a copy of its
+/// parent's id counters. Python runs this in the child, so the child's entry ids differ from
+/// its parent's and from every other child's.
+#[pyfunction]
+fn _start_new_id_run() {
+    logler_core::parser::start_new_id_run();
+}
+
+fn start_a_new_id_run_in_every_forked_child(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let os = m.py().import("os")?;
+    // Windows has no fork and no `register_at_fork`.
+    if let Ok(register_at_fork) = os.getattr("register_at_fork") {
+        let kwargs = pyo3::types::PyDict::new(m.py());
+        kwargs.set_item("after_in_child", wrap_pyfunction!(_start_new_id_run, m)?)?;
+        register_at_fork.call((), Some(&kwargs))?;
+    }
     Ok(())
 }
 

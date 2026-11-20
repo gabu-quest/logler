@@ -464,7 +464,7 @@ impl HierarchyBuilder {
     /// Put sibling nodes in one fixed order: by start time, a node with no start time
     /// last; nodes that start together in the order of their first line. They are
     /// collected from hash maps, whose order differs from run to run, and a node made
-    /// from one line is named by that line's random id, so the id comes last.
+    /// from one line is named by that line's own id, so the id comes last.
     fn sort_siblings(&self, nodes: &mut [SpanNode]) {
         nodes.sort_by_cached_key(|node| {
             let first_line = node

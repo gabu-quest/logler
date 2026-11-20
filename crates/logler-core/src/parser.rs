@@ -2,9 +2,74 @@ use crate::types::{LogEntry, LogFormat, LogLevel};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use regex::Regex;
 use serde_json::{Map, Value};
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use uuid::Uuid;
+
+/// Entry ids come from a counter, not from random bytes. An id is a version 4 shaped UUID: a
+/// 60 bit count in bytes 0 to 7 (around the version mark) and the run's 62 random bits in bytes
+/// 8 to 15 (after the variant mark). A thread takes a block of counts from `NEXT_BLOCK`, which
+/// hands out each block once, and counts inside its own block with no shared write: no two
+/// entries of one process share an id, whichever parser or thread made them.
+///
+/// A process made by fork starts with a copy of these counters, so it must call
+/// `start_new_id_run` before it makes an id: its ids then differ from its parent's and from
+/// those of every other child. The Python module does so in every child `os.fork` makes.
+const ID_BLOCK: u64 = 4096;
+const ID_COUNT_MASK: u64 = (1 << 60) - 1;
+static NEXT_BLOCK: AtomicU64 = AtomicU64::new(0);
+/// Bytes 8 to 15 of every id of this run. 0 means not drawn yet: the variant mark makes a drawn
+/// value non-zero.
+static RUN_BITS: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    /// The next count this thread uses and the end of its block.
+    static ID_BLOCK_RANGE: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+}
+
+/// Forget the run's random bits, so the next id draws new ones.
+pub fn start_new_id_run() {
+    RUN_BITS.store(0, Ordering::Relaxed);
+}
+
+fn run_bits() -> u64 {
+    match RUN_BITS.load(Ordering::Relaxed) {
+        0 => draw_run_bits(),
+        bits => bits,
+    }
+}
+
+#[cold]
+fn draw_run_bits() -> u64 {
+    let random = Uuid::new_v4();
+    let mut tail = [0u8; 8];
+    tail.copy_from_slice(&random.as_bytes()[8..16]);
+    let drawn = u64::from_be_bytes(tail);
+    match RUN_BITS.compare_exchange(0, drawn, Ordering::Relaxed, Ordering::Relaxed) {
+        Ok(_) => drawn,
+        Err(first) => first,
+    }
+}
+
+fn next_entry_id() -> Uuid {
+    let count = ID_BLOCK_RANGE.with(|range| {
+        let (mut next, mut end) = range.get();
+        if next == end {
+            next = NEXT_BLOCK.fetch_add(ID_BLOCK, Ordering::Relaxed);
+            end = next + ID_BLOCK;
+        }
+        range.set((next + 1, end));
+        next & ID_COUNT_MASK
+    });
+    let mut bytes = [0u8; 16];
+    bytes[0..6].copy_from_slice(&(count >> 12).to_be_bytes()[2..8]);
+    bytes[6] = 0x40 | ((count >> 8) & 0x0F) as u8;
+    bytes[7] = (count & 0xFF) as u8;
+    bytes[8..16].copy_from_slice(&run_bits().to_be_bytes());
+    Uuid::from_bytes(bytes)
+}
 
 static TIMESTAMP_RE: OnceLock<Regex> = OnceLock::new();
 static LOG_LEVEL_RE: OnceLock<Regex> = OnceLock::new();
@@ -762,7 +827,7 @@ impl LogParser {
 
     fn base_entry(&self, line_number: usize, raw: &str, format: LogFormat) -> LogEntry {
         LogEntry {
-            id: Uuid::new_v4(),
+            id: next_entry_id(),
             file: self.file_name.clone(),
             line_number,
             raw: raw.to_string(),
@@ -2647,5 +2712,95 @@ mod tests {
         let entry = parser.parse_line(1, "15.01.2024/10:30 hello").unwrap();
         assert_eq!(entry.timestamp, utc("2024-01-15T10:30:00Z"));
         assert_eq!(entry.message, "hello");
+    }
+
+    fn ids_of(parser: &LogParser, count: usize) -> Vec<Uuid> {
+        (1..=count)
+            .map(|n| parser.parse_line(n, "plain line").unwrap().id)
+            .collect()
+    }
+
+    /// The 60 counter bits of an id: bytes 0 to 5, the low half of byte 6, byte 7.
+    fn entry_id_count(id: Uuid) -> u64 {
+        let bytes = id.as_bytes();
+        let mut count = 0u64;
+        for byte in &bytes[0..6] {
+            count = (count << 8) | u64::from(*byte);
+        }
+        count = (count << 4) | u64::from(bytes[6] & 0x0F);
+        (count << 8) | u64::from(bytes[7])
+    }
+
+    /// Held by the tests that read or change the run's random bits, which the whole process shares.
+    static ID_RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_ids_of_one_run_count_up_inside_one_block() {
+        let _run = ID_RUN.lock().unwrap();
+        let parser = LogParser::new("a.log");
+        let ids = ids_of(&parser, 100);
+        for pair in ids.windows(2) {
+            // Only the counter bits differ between two ids of one run.
+            assert_eq!(pair[0].as_bytes()[8..], pair[1].as_bytes()[8..]);
+        }
+        let counts: Vec<u64> = ids.iter().map(|id| entry_id_count(*id)).collect();
+        for pair in counts.windows(2) {
+            assert_eq!(pair[1], pair[0] + 1);
+        }
+    }
+
+    #[test]
+    fn test_ids_are_uuid_version_4_shaped() {
+        let parser = LogParser::new("a.log");
+        for id in ids_of(&parser, 50) {
+            assert_eq!(id.get_version_num(), 4);
+            assert_eq!(id.get_variant(), uuid::Variant::RFC4122);
+            assert_eq!(id.to_string().len(), 36);
+        }
+    }
+
+    #[test]
+    fn test_two_parsers_and_many_threads_never_share_an_id() {
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            handles.push(std::thread::spawn(|| {
+                let first = LogParser::new("same.log");
+                let second = LogParser::new("same.log");
+                let mut ids = ids_of(&first, 3000);
+                ids.extend(ids_of(&second, 3000));
+                ids
+            }));
+        }
+        let mut all = std::collections::HashSet::new();
+        let mut total = 0;
+        for handle in handles {
+            for id in handle.join().unwrap() {
+                total += 1;
+                all.insert(id);
+            }
+        }
+        assert_eq!(total, 48_000);
+        assert_eq!(all.len(), 48_000);
+    }
+
+    #[test]
+    fn test_a_new_id_run_draws_new_random_bits() {
+        let _run = ID_RUN.lock().unwrap();
+        let parser = LogParser::new("a.log");
+        let before = ids_of(&parser, 1)[0];
+        start_new_id_run();
+        let after = ids_of(&parser, 1)[0];
+        assert_ne!(before.as_bytes()[8..], after.as_bytes()[8..]);
+        assert_eq!(after.get_version_num(), 4);
+        assert_eq!(after.get_variant(), uuid::Variant::RFC4122);
+        assert_eq!(entry_id_count(after), entry_id_count(before) + 1);
+    }
+
+    #[test]
+    fn test_the_same_line_number_read_twice_gets_two_ids() {
+        let parser = LogParser::new("a.log");
+        let first = parser.parse_line(7, "plain line").unwrap();
+        let second = parser.parse_line(7, "plain line").unwrap();
+        assert_ne!(first.id, second.id);
     }
 }

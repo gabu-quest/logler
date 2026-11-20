@@ -437,8 +437,9 @@ logler llm hierarchy span-001 --min-confidence 0.8
 
 The example is shortened to two nodes. `id` is the span ID (or the thread ID of a node that has
 no span). `entry_count`, `error_count` and `level_counts` count the node's own log lines, each
-line once. Sibling nodes come in order of start time. `entry_ids` are internal IDs that change
-from run to run.
+line once. Sibling nodes come in order of start time. `entry_ids` are internal IDs: each is unique
+among the entries of one run, and none is a stable name for a line (the same line gets another ID in
+the next run, and again when it is read again).
 
 ---
 

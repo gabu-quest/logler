@@ -74,7 +74,7 @@ Requires Python 3.12 or later. One compiled wheel per platform serves 3.12, 3.13
 
 - **A long search no longer blocks the other threads of a Python program:** the engine releases the GIL while it works.
 - **The built-in `postgresql` format's `timestamp_format` is `%Y-%m-%d %H:%M:%S.%f UTC`**, where it was `... %Z`: a zone name is not read, so the format reads a server that logs in UTC and leaves other zone names to the known shapes.
-- **Parsing is faster:** a JSON line is parsed once (about 30% less time a line), and a plain line costs less than it did in 1.3.
+- **Parsing is faster:** a JSON line is parsed once (about 30% less time a line), and a plain line costs less than it did in 1.3. An entry's ID is a counter under a random prefix, still a UUID in the JSON, where it was a random UUID: a plain line takes about a third less time.
 - **The `count` format, and `llm export`, are faster.** On 1,000,000 lines a count took a quarter of the time; `llm export` no longer reads every line a second time to find the services, and took a quarter of the time and three fifths of the peak memory.
 - The unused Rust `ThreadTracker` (not the Python one) and the `dashmap` dependency are removed.
 - The index reads each file once, in file order, with bounded memory per batch.
