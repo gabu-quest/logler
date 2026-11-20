@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from logler.config import (
     CorrelationGroup,
     CorrelationsConfig,
@@ -18,7 +17,6 @@ from logler.correlator import (
     _matches_file_pattern,
     correlate_by_rules,
 )
-
 
 # =============================================================================
 # Helpers
@@ -400,6 +398,35 @@ class TestTemporalCorrelation:
 
     def _make_config(self, *rules) -> CorrelationsConfig:
         return CorrelationsConfig(correlations={"test-group": CorrelationGroup(rules=list(rules))})
+
+    def test_anchor_time_is_the_entrys_own_text(self):
+        """A nanosecond stamp is printed with its nine digits, as the entry holds it."""
+        entries = [
+            _make_entry(
+                file="sensor.log",
+                timestamp="2024-01-15T10:00:03.123456789Z",
+                level="WARN",
+                message="Pressure drop",
+                fields={"pressure": 1.5},
+            ),
+            _make_entry(
+                file="plc.log",
+                timestamp="2024-01-15T10:00:04Z",
+                level="ERROR",
+                message="Motor stall detected",
+            ),
+        ]
+        config = self._make_config(
+            TemporalRule(
+                type="temporal",
+                anchor=EventCondition(field="pressure", condition="< 2.0"),
+                window="5s",
+            )
+        )
+        result = correlate_by_rules(entries, config)
+        assert [c["anchor_timestamp"] for c in result["clusters"]] == [
+            "2024-01-15T10:00:03.123456789Z"
+        ]
 
     def test_basic_temporal_window(self):
         """Entries within the time window of an anchor are correlated."""
@@ -784,12 +811,12 @@ class TestManufacturingCorrelation:
         assert len(b042_clusters) == 2
 
         # First rule: MES↔PLC for B-042
-        plc_cluster = [c for c in b042_clusters if c["target_field"] == "lot_number"][0]
+        plc_cluster = next(c for c in b042_clusters if c["target_field"] == "lot_number")
         assert plc_cluster["source_count"] == 2  # 2 MES entries
         assert plc_cluster["target_count"] == 2  # 2 PLC entries
 
         # Second rule: MES↔Robot for B-042
-        robot_cluster = [c for c in b042_clusters if c["target_field"] == "work_order"][0]
+        robot_cluster = next(c for c in b042_clusters if c["target_field"] == "work_order")
         assert robot_cluster["source_count"] == 2  # 2 MES entries
         assert robot_cluster["target_count"] == 1  # 1 Robot entry
 

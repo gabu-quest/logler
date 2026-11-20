@@ -4,19 +4,22 @@ Beautiful terminal output using Rich.
 
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import ClassVar
+
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
-from .parser import LogParser, LogEntry
+from ._search_core import level_name, level_text
+from .log_reader import CompleteLines
+from .parser import LogEntry, LogParser, cut_newline, is_blank_line
 
 
 class TerminalViewer:
     """Beautiful terminal log viewer with Rich."""
 
-    LEVEL_COLORS = {
+    LEVEL_COLORS: ClassVar[dict[str, str]] = {
         "TRACE": "bright_black",
         "DEBUG": "cyan",
         "INFO": "green",
@@ -32,61 +35,71 @@ class TerminalViewer:
         self.console = Console(
             force_terminal=use_colors, color_system="auto" if use_colors else None
         )
-        self.parser = LogParser()
 
     async def view_file(
         self,
         file_path: str,
-        lines: Optional[int] = None,
+        lines: int | None = None,
         follow: bool = False,
-        level_filter: Optional[str] = None,
-        pattern: Optional[str] = None,
-        thread_filter: Optional[str] = None,
+        level_filter: str | None = None,
+        pattern: str | None = None,
+        thread_filter: str | None = None,
     ):
         """View a log file with beautiful formatting."""
         path = Path(file_path)
 
-        if not path.exists():
+        if not path.exists():  # noqa: ASYNC240 - one stat call before the view starts
             self.console.print(f"[red]❌ File not found: {file_path}[/red]")
             return
 
         self.console.print(f"\n[bold cyan]📄 {path.name}[/bold cyan]")
-        self.console.print(f"[dim]{path.absolute()}[/dim]\n")
+        self.console.print(f"[dim]{path.absolute()}[/dim]\n")  # noqa: ASYNC240 - a cwd lookup, no file read
 
-        # Read file
-        with open(file_path, "r") as f:
-            all_lines = f.readlines()
+        parser = LogParser.for_file(file_path)
 
-        # Parse entries
-        entries = [self.parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(all_lines)]
+        # One handle and one reader serve the first read and the follow, so they share the
+        # position. Only the follow waits for the newline of a last line still being written.
+        with open(file_path, "rb") as f:  # noqa: ASYNC230 - the view reads in this task; moving it to a thread changes the order of output
+            growing = CompleteLines(f)
+            all_lines = list(growing)
+            if not follow and growing.unfinished():
+                all_lines.append(growing.unfinished())
 
-        # Apply filters
-        entries = self._apply_filters(entries, level_filter, pattern, thread_filter)
+            # Parse entries, each file with the format that names it
+            entries = [
+                parser.parse_line(i + 1, text)
+                for i, line in enumerate(all_lines)
+                if not is_blank_line(text := cut_newline(line))
+            ]
 
-        # Apply line limit
-        if lines and not follow:
-            entries = entries[-lines:]
+            # Apply filters
+            filtered = self._apply_filters(entries, level_filter, pattern, thread_filter)
 
-        # Display entries
-        if follow:
-            await self._follow_mode(
-                path, entries[-lines:] if lines else entries, level_filter, pattern, thread_filter
-            )
-        else:
-            self._display_entries(entries)
+            if follow:
+                await self._follow_mode(
+                    growing,
+                    len(all_lines),
+                    filtered[-lines:] if lines else filtered,
+                    level_filter,
+                    pattern,
+                    thread_filter,
+                    parser,
+                )
+            else:
+                self._display_entries(filtered[-lines:] if lines else filtered)
 
     def _apply_filters(
         self,
         entries: list,
-        level_filter: Optional[str],
-        pattern: Optional[str],
-        thread_filter: Optional[str],
+        level_filter: str | None,
+        pattern: str | None,
+        thread_filter: str | None,
     ) -> list:
         """Apply filters to log entries."""
         filtered = entries
 
         if level_filter:
-            level_upper = level_filter.upper()
+            level_upper = level_text(level_name(level_filter))
             filtered = [e for e in filtered if e.level == level_upper]
 
         if pattern:
@@ -154,35 +167,46 @@ class TerminalViewer:
 
     async def _follow_mode(
         self,
-        path: Path,
+        growing: CompleteLines,
+        line_number: int,
         initial_entries: list,
-        level_filter: Optional[str],
-        pattern: Optional[str],
-        thread_filter: Optional[str],
+        level_filter: str | None,
+        pattern: str | None,
+        thread_filter: str | None,
+        parser: LogParser,
     ):
-        """Follow log file in real-time."""
+        """Follow log file in real-time, from the reader and line number the first read ended at."""
         # Display initial entries
         self._display_entries(initial_entries)
 
         self.console.print("\n[bold green]📡 Following log file... (Ctrl+C to stop)[/bold green]\n")
 
-        # Track file position
-        with open(path, "r") as f:
-            f.seek(0, 2)  # Go to end
-            line_number = len(initial_entries)
+        while True:
+            line_number = self._print_new_lines(
+                growing, line_number, level_filter, pattern, thread_filter, parser
+            )
+            await asyncio.sleep(0.1)
 
-            while True:
-                line = f.readline()
-                if line:
-                    line_number += 1
-                    entry = self.parser.parse_line(line_number, line.rstrip())
-
-                    # Apply filters
-                    filtered = self._apply_filters([entry], level_filter, pattern, thread_filter)
-                    if filtered:
-                        self._print_entry(entry)
-                else:
-                    await asyncio.sleep(0.1)
+    def _print_new_lines(
+        self,
+        growing: CompleteLines,
+        line_number: int,
+        level_filter: str | None,
+        pattern: str | None,
+        thread_filter: str | None,
+        parser: LogParser,
+    ) -> int:
+        """Print the entries among the lines written since the last pass: a blank line prints
+        nothing but has its number. Returns the number of the last line read."""
+        for line in growing:
+            line_number += 1
+            text = cut_newline(line)
+            if is_blank_line(text):
+                continue
+            entry = parser.parse_line(line_number, text)
+            if self._apply_filters([entry], level_filter, pattern, thread_filter):
+                self._print_entry(entry)
+        return line_number
 
     def display_thread_view(self, entries: list):
         """Display beautiful thread-correlated view."""

@@ -10,19 +10,19 @@ These tests simulate real-world scenarios that break naive implementations:
 """
 
 import json
-import pytest
-import tempfile
 import random
+import tempfile
 from pathlib import Path
 
+import pytest
 
 # Import with Rust backend check
 try:
     from logler.investigate import (
-        search,
+        RUST_AVAILABLE,
         follow_thread,
         follow_thread_hierarchy,
-        RUST_AVAILABLE,
+        search,
     )
     from logler.tree_formatter import format_tree, format_waterfall
 except ImportError as e:

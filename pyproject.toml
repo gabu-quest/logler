@@ -4,10 +4,10 @@ build-backend = "maturin"
 
 [project]
 name = "logler"
-version = "1.3.2"
+version = "2.0.0"
 description = "Beautiful local log viewer with thread tracking and real-time updates"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
     {name = "Logler Contributors"},
@@ -18,10 +18,9 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Debuggers",
     "Topic :: System :: Logging",
 ]
@@ -33,18 +32,22 @@ dependencies = [
     "duckdb>=1.0",
     "pydantic>=2.0",
     "pyyaml>=6.0.3",
+    "pytz>=2023.3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "black>=25.0.0",
-    "ruff>=0.3.0",
-    "httpx>=0.28.0",
+    "ruff==0.17.5",
+    "mypy==2.4.1",
+    "opentelemetry-api==1.45.2",
+    "types-pyyaml==6.0.12.20261113",
+    "types-pytz==2026.6.0.20261031",
     "maturin>=1.10.0",
     "patchelf>=0.17.0",
-    "marimo>=0.10.0",
+    "marimo>=0.17.6",
+    "pre-commit>=4.3.0",
 ]
 bench = [
     "matplotlib>=3.8",
@@ -61,33 +64,52 @@ Homepage = "https://github.com/gabu-quest/logler"
 Documentation = "https://github.com/gabu-quest/logler#readme"
 Repository = "https://github.com/gabu-quest/logler"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["logler*"]
-
-[tool.setuptools.package-data]
-logler = []
-
 [tool.maturin]
 manifest-path = "crates/logler-py/Cargo.toml"
 python-source = "src"
 python-packages = ["logler"]
 include = ["LICENSE", "README.md"]
 
-[tool.black]
-line-length = 100
-target-version = ['py39']
-
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "SIM", "ASYNC", "RUF", "B"]
+ignore = [
+    # ruff format does not wrap strings or comments; the 78 long lines are f-strings in
+    # messages, docstring and test log lines, whose breaking would change the text or
+    # the test data.
+    "E501",
+]
+# The multiplication sign in comments and docstrings, and the information-source, plus and
+# minus emoji in printed status lines, are meant.
+allowed-confusables = ["×", "ℹ", "➕", "➖"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test and benchmark names say what they check, in the words of the thing checked.
+"tests/**/*" = ["N"]
+"benchmarks/**/*" = ["N"]
+# The tours are marimo notebooks, written by its editor: a cell's arguments are the names
+# other cells define, imports live inside cells, and a fix that adds a module-level import
+# puts it outside every cell.
+"examples/tours/*.py" = ["I", "N", "UP017"]
+
+[tool.ruff.format]
+# The examples in the docs keep one argument per line where that reads better.
+exclude = ["*.md"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+files = ["src/logler"]
+# The extension's stub sits beside its package under src/, so the checker reads it from there
+# whether or not the wheel is installed.
+mypy_path = "src"
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[dependency-groups]
-dev = [
-    "marimo>=0.17.6",
-    "pre-commit>=4.3.0",
-    "tiktoken>=0.12.0",
-]

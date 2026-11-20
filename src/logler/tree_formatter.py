@@ -9,28 +9,26 @@ Renders thread hierarchies and nested structures as ASCII trees with:
 - Compact and detailed modes
 """
 
-from typing import Dict, Any, List, Optional
 from datetime import datetime
-
+from typing import Any
 
 try:
     from rich.console import Console  # noqa: F401
-    from rich.text import Text  # noqa: F401
+    from rich.text import Text
     from rich.tree import Tree as RichTree  # noqa: F401
 
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
-    Text = None  # Placeholder when Rich is not available
 
 
 def format_tree(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     mode: str = "compact",
     show_duration: bool = True,
     show_errors: bool = True,
     show_confidence: bool = False,
-    max_depth: Optional[int] = None,
+    max_depth: int | None = None,
     use_colors: bool = True,
 ) -> str:
     """
@@ -63,7 +61,7 @@ def format_tree(
         )
 
 
-def _format_detection_method(hierarchy: Dict[str, Any]) -> str:
+def _format_detection_method(hierarchy: dict[str, Any]) -> str:
     method = hierarchy.get("detection_method", "Unknown")
     methods = hierarchy.get("detection_methods") or []
     method_str = str(method)
@@ -73,7 +71,7 @@ def _format_detection_method(hierarchy: Dict[str, Any]) -> str:
     return method_str
 
 
-def _timeline_label(hierarchy: Dict[str, Any]) -> str:
+def _timeline_label(hierarchy: dict[str, Any]) -> str:
     roots = hierarchy.get("roots", [])
     if not roots:
         return "Hierarchy"
@@ -85,12 +83,12 @@ def _timeline_label(hierarchy: Dict[str, Any]) -> str:
 
 
 def _format_ascii_tree(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     mode: str,
     show_duration: bool,
     show_errors: bool,
     show_confidence: bool,
-    max_depth: Optional[int],
+    max_depth: int | None,
 ) -> str:
     """Format tree using plain ASCII (no colors)"""
     lines = []
@@ -149,15 +147,15 @@ def _format_ascii_tree(
 
 
 def _append_node_ascii(
-    node: Dict[str, Any],
-    lines: List[str],
+    node: dict[str, Any],
+    lines: list[str],
     prefix: str,
     is_last: bool,
     mode: str,
     show_duration: bool,
     show_errors: bool,
     show_confidence: bool,
-    max_depth: Optional[int],
+    max_depth: int | None,
     current_depth: int,
 ):
     """Recursively append node to ASCII tree"""
@@ -247,18 +245,19 @@ def _append_node_ascii(
 
 
 def _format_rich_tree(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     mode: str,
     show_duration: bool,
     show_errors: bool,
     show_confidence: bool,
-    max_depth: Optional[int],
+    max_depth: int | None,
 ) -> str:
     """Format tree using Rich library with colors"""
-    from rich.console import Console
-    from rich.tree import Tree as RichTree
-    from rich.text import Text
     from io import StringIO
+
+    from rich.console import Console
+    from rich.text import Text
+    from rich.tree import Tree as RichTree
 
     console = Console(file=StringIO(), width=100)
 
@@ -311,7 +310,7 @@ def _format_rich_tree(
 
 
 def _create_rich_node(
-    node: Dict[str, Any],
+    node: dict[str, Any],
     mode: str,
     show_duration: bool,
     show_errors: bool,
@@ -368,12 +367,12 @@ def _create_rich_node(
 
 def _add_rich_children(
     parent_tree,
-    node: Dict[str, Any],
+    node: dict[str, Any],
     mode: str,
     show_duration: bool,
     show_errors: bool,
     show_confidence: bool,
-    max_depth: Optional[int],
+    max_depth: int | None,
     current_depth: int,
 ):
     """Recursively add children to Rich tree"""
@@ -424,7 +423,7 @@ def _add_rich_children(
         )
 
 
-def _format_duration(ms: Optional[int]) -> str:
+def _format_duration(ms: int | None) -> str:
     """Format duration in human-readable form"""
     if ms is None:
         return "N/A"
@@ -441,12 +440,12 @@ def _format_duration(ms: Optional[int]) -> str:
 
 
 def print_tree(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     mode: str = "compact",
     show_duration: bool = True,
     show_errors: bool = True,
     show_confidence: bool = False,
-    max_depth: Optional[int] = None,
+    max_depth: int | None = None,
 ):
     """
     Print hierarchy tree to console.
@@ -470,7 +469,7 @@ def print_tree(
 
 
 def format_waterfall(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     width: int = 80,
     show_labels: bool = True,
     show_errors: bool = True,
@@ -523,7 +522,7 @@ def format_waterfall(
     lines.append("├" + "─" * (effective_width - 2) + "┤")
 
     # Collect all nodes in order
-    nodes_flat = []
+    nodes_flat: list[dict] = []
     roots = hierarchy.get("roots", [])
     for root in roots:
         _collect_nodes_flat(root, nodes_flat, 0)
@@ -535,7 +534,7 @@ def format_waterfall(
         start_str = node.get("start_time")
         if start_str:
             try:
-                start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                start_time = datetime.fromisoformat(start_str)
                 if earliest is None or start_time < earliest:
                     earliest = start_time
             except (ValueError, TypeError):
@@ -562,7 +561,7 @@ def format_waterfall(
             continue
 
         try:
-            start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            start_time = datetime.fromisoformat(start_str)
             offset_ms = int((start_time - earliest).total_seconds() * 1000)
         except (ValueError, TypeError):
             continue  # Skip nodes with invalid timestamps
@@ -620,7 +619,7 @@ def format_waterfall(
     return "\n".join(lines)
 
 
-def _collect_nodes_flat(node: Dict[str, Any], result: List[Dict], depth: int):
+def _collect_nodes_flat(node: dict[str, Any], result: list[dict], depth: int):
     """Flatten hierarchy to list with depth info"""
     result.append({"node": node, "depth": depth})
     for child in node.get("children", []):
@@ -628,7 +627,7 @@ def _collect_nodes_flat(node: Dict[str, Any], result: List[Dict], depth: int):
 
 
 def print_waterfall(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     width: int = 80,
     show_labels: bool = True,
     show_errors: bool = True,
@@ -653,7 +652,7 @@ def print_waterfall(
 
 
 def format_flamegraph(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     width: int = 100,
     use_colors: bool = True,
     min_width: int = 3,
@@ -716,7 +715,7 @@ def format_flamegraph(
             return colors[5]  # Red for errors
         return colors[depth % 5]
 
-    def format_duration(ms: Optional[float]) -> str:
+    def format_duration(ms: float | None) -> str:
         if ms is None:
             return ""
         if ms == 0:
@@ -727,9 +726,9 @@ def format_flamegraph(
 
     # Build layers by depth
     max_depth = hierarchy.get("max_depth", 0)
-    layers: List[List[Dict[str, Any]]] = [[] for _ in range(max_depth + 1)]
+    layers: list[list[dict[str, Any]]] = [[] for _ in range(max_depth + 1)]
 
-    def collect_by_depth(node: Dict[str, Any], offset: float = 0):
+    def collect_by_depth(node: dict[str, Any], offset: float = 0):
         depth = node.get("depth", 0)
         duration = node.get("duration_ms", 0) or 0
         # Prefer 'name' or 'operation_name' over 'id' for display
@@ -820,7 +819,7 @@ def format_flamegraph(
 
 
 def print_flamegraph(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     width: int = 100,
     use_colors: bool = True,
 ):

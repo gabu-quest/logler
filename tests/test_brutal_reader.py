@@ -6,10 +6,12 @@ large files, corruption, and adversarial inputs.
 """
 
 import os
-import pytest
 import tempfile
 import threading
 from pathlib import Path
+
+import pytest
+
 from logler.log_reader import LogReader
 
 
@@ -134,10 +136,12 @@ class TestFileEdgeCases:
 
     def test_directory_instead_of_file(self):
         """Directory path instead of file"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with pytest.raises((IsADirectoryError, PermissionError, OSError, ValueError)):
-                reader = LogReader(tmpdir)
-                list(reader.read_lines())
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            pytest.raises((IsADirectoryError, PermissionError, OSError, ValueError)),
+        ):
+            reader = LogReader(tmpdir)
+            list(reader.read_lines())
 
 
 class TestLargeFileHandling:
@@ -709,3 +713,116 @@ class TestMemoryEfficiency:
             assert len(lines) == 10
         finally:
             Path(temp_path).unlink()
+
+
+class _EndOfScript(Exception):
+    """Raised by the scripted sleep when every step has run."""
+
+
+def _follow_script(monkeypatch, path, steps, on_line=None, **kwargs):
+    """Run LogReader.tail(follow=True) with `sleep` replaced by the next scripted step.
+
+    Each step is called with the lines yielded so far (a copy) when the follower has nothing
+    to read; when the steps are used up the loop ends. Returns (yielded, what each step saw).
+    """
+    remaining = iter(steps)
+    yielded, seen = [], []
+
+    def scripted_sleep(_seconds):
+        step = next(remaining, None)
+        if step is None:
+            raise _EndOfScript
+        seen.append(list(yielded))
+        step()
+
+    monkeypatch.setattr("logler.log_reader.time.sleep", scripted_sleep)
+    try:
+        for line in LogReader(str(path)).tail(follow=True, **kwargs):
+            yielded.append(line)
+            if on_line:
+                on_line(list(yielded))
+    except _EndOfScript:
+        pass
+    return yielded, seen
+
+
+def _append_text(path, text):
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(text)
+
+
+class TestTailFollow:
+    """tail(follow=True): no line lost, none split, none repeated."""
+
+    def test_line_written_after_the_first_lines_is_yielded(self, tmp_path, monkeypatch):
+        path = tmp_path / "gap1.log"
+        path.write_text("one\ntwo\n")
+
+        def after_first_lines(yielded):
+            if yielded == ["one", "two"]:
+                _append_text(path, "three\n")
+
+        yielded, _ = _follow_script(monkeypatch, path, [lambda: None], on_line=after_first_lines)
+        assert yielded == ["one", "two", "three"]
+
+    def test_line_written_in_two_parts_is_yielded_once_and_whole(self, tmp_path, monkeypatch):
+        path = tmp_path / "gap2.log"
+        path.write_text("one\n")
+
+        yielded, seen = _follow_script(
+            monkeypatch,
+            path,
+            [lambda: _append_text(path, "hel"), lambda: _append_text(path, "lo\n"), lambda: None],
+        )
+        assert seen == [["one"], ["one"], ["one", "hello"]]
+        assert yielded == ["one", "hello"]
+
+    def test_unterminated_last_line_is_yielded_once_when_its_newline_arrives(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "gap3.log"
+        path.write_text("one\ntwo\nhel")
+
+        yielded, seen = _follow_script(
+            monkeypatch, path, [lambda: _append_text(path, "lo\n"), lambda: None]
+        )
+        assert seen == [["one", "two"], ["one", "two", "hello"]]
+        assert yielded == ["one", "two", "hello"]
+
+    def test_character_written_in_two_parts_is_not_taken_for_a_truncation(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "char.log"
+        first, rest = "日本\n".encode()[:2], "日本\n".encode()[2:]
+        path.write_bytes(b"one\n" + first)
+
+        def finish():
+            with open(path, "ab") as f:
+                f.write(rest)
+
+        yielded, seen = _follow_script(monkeypatch, path, [finish, lambda: None])
+        assert seen == [["one"], ["one", "日本"]]
+        assert yielded == ["one", "日本"]
+
+    def test_file_truncated_while_followed_is_read_again_from_its_start(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "rotated.log"
+        path.write_text("old one\nold two\n")
+
+        yielded, _ = _follow_script(
+            monkeypatch, path, [lambda: path.write_text("new\n"), lambda: None]
+        )
+        assert yielded == ["old one", "old two", "new"]
+
+    def test_num_lines_limits_the_first_lines_not_the_follow(self, tmp_path, monkeypatch):
+        path = tmp_path / "limited.log"
+        path.write_text("".join(f"line {i}\n" for i in range(1, 6)))
+
+        yielded, _ = _follow_script(
+            monkeypatch,
+            path,
+            [lambda: _append_text(path, "line 6\n"), lambda: None],
+            num_lines=2,
+        )
+        assert yielded == ["line 4", "line 5", "line 6"]

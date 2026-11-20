@@ -5,8 +5,12 @@ Run with: pytest tests/test_install_smoke.py -v
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
+import pytest
+
+from tests.conftest import LOGLER, PYTHON
 
 EXAMPLE_LOGS = Path(__file__).parent.parent / "examples" / "logs"
 
@@ -16,7 +20,7 @@ class TestCLICommands:
 
     def test_version(self):
         result = subprocess.run(
-            ["logler", "--version"],
+            [LOGLER, "--version"],
             capture_output=True,
             text=True,
         )
@@ -25,7 +29,7 @@ class TestCLICommands:
 
     def test_help(self):
         result = subprocess.run(
-            ["logler", "--help"],
+            [LOGLER, "--help"],
             capture_output=True,
             text=True,
         )
@@ -34,7 +38,7 @@ class TestCLICommands:
 
     def test_llm_help(self):
         result = subprocess.run(
-            ["logler", "llm", "--help"],
+            [LOGLER, "llm", "--help"],
             capture_output=True,
             text=True,
         )
@@ -48,7 +52,7 @@ class TestLLMCommands:
     def test_llm_schema(self):
         log_file = EXAMPLE_LOGS / "interleave" / "api.log"
         result = subprocess.run(
-            ["logler", "llm", "schema", str(log_file)],
+            [LOGLER, "llm", "schema", str(log_file)],
             capture_output=True,
             text=True,
         )
@@ -62,7 +66,7 @@ class TestLLMCommands:
     def test_llm_emit(self):
         log_file = EXAMPLE_LOGS / "interleave" / "api.log"
         result = subprocess.run(
-            ["logler", "llm", "emit", str(log_file)],
+            [LOGLER, "llm", "emit", str(log_file)],
             capture_output=True,
             text=True,
         )
@@ -78,7 +82,7 @@ class TestLLMCommands:
     def test_llm_search(self):
         log_file = EXAMPLE_LOGS / "interleave" / "api.log"
         result = subprocess.run(
-            ["logler", "llm", "search", str(log_file), "--query", "api"],
+            [LOGLER, "llm", "search", str(log_file), "--query", "api"],
             capture_output=True,
             text=True,
         )
@@ -96,7 +100,7 @@ class TestRustBackend:
 
     def test_rust_available(self):
         result = subprocess.run(
-            ["python", "-c", "import logler_rs; print('OK')"],
+            [PYTHON, "-c", "import logler_rs; print('OK')"],
             capture_output=True,
             text=True,
         )
@@ -119,10 +123,20 @@ result = json.loads(inv.search(json.dumps(query)))
 print(len(result.get('results', [])))
 """
         result = subprocess.run(
-            ["python", "-c", code],
+            [PYTHON, "-c", code],
             capture_output=True,
             text=True,
         )
         assert result.returncode == 0
         count = int(result.stdout.strip())
         assert count > 0
+
+
+class TestStableAbiWheel:
+    """The wheel ships one stable-ABI extension that every Python from 3.12 loads."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows extension names carry no ABI tag")
+    def test_extension_is_stable_abi_file(self):
+        from logler_rs import logler_rs as extension
+
+        assert Path(extension.__file__).name == "logler_rs.abi3.so"

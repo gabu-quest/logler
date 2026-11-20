@@ -5,8 +5,10 @@ These tests throw every conceivable edge case at the ThreadTracker
 to ensure it handles real-world chaos gracefully.
 """
 
+from datetime import UTC, datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
+
 from logler.parser import LogEntry
 from logler.tracker import ThreadTracker
 
@@ -69,14 +71,14 @@ class TestThreadTracking:
                 raw=f"Message {i}",
                 thread_id="worker-1",
                 level="INFO",
-                timestamp=datetime(2024, 1, 1, 10, minute, second, tzinfo=timezone.utc),
+                timestamp=datetime(2024, 1, 1, 10, minute, second, tzinfo=UTC),
             )
             tracker.track(entry)
 
         thread = tracker.get_thread("worker-1")
         assert thread["log_count"] == 100
-        assert thread["first_seen"] == datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-        assert thread["last_seen"] == datetime(2024, 1, 1, 10, 1, 39, tzinfo=timezone.utc)
+        assert thread["first_seen"] == datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        assert thread["last_seen"] == datetime(2024, 1, 1, 10, 1, 39, tzinfo=UTC)
 
     def test_thread_error_counting(self, tracker):
         """Count errors per thread"""
@@ -113,22 +115,22 @@ class TestThreadTracking:
     def test_out_of_order_timestamps(self, tracker):
         """Entries arrive out of timestamp order"""
         timestamps = [
-            datetime(2024, 1, 1, 10, 30, 0, tzinfo=timezone.utc),  # Middle
-            datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),  # First
-            datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),  # Last
+            datetime(2024, 1, 1, 10, 30, 0, tzinfo=UTC),  # Middle
+            datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),  # First
+            datetime(2024, 1, 1, 11, 0, 0, tzinfo=UTC),  # Last
         ]
         for i, ts in enumerate(timestamps):
             entry = LogEntry(line_number=i, raw=f"Message {i}", thread_id="worker-1", timestamp=ts)
             tracker.track(entry)
 
         thread = tracker.get_thread("worker-1")
-        assert thread["first_seen"] == datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-        assert thread["last_seen"] == datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
+        assert thread["first_seen"] == datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+        assert thread["last_seen"] == datetime(2024, 1, 1, 11, 0, 0, tzinfo=UTC)
 
     def test_entries_with_none_timestamp(self, tracker):
         """Some entries have None timestamp"""
         for i in range(5):
-            ts = datetime(2024, 1, 1, 10, 0, i, tzinfo=timezone.utc) if i % 2 == 0 else None
+            ts = datetime(2024, 1, 1, 10, 0, i, tzinfo=UTC) if i % 2 == 0 else None
             entry = LogEntry(line_number=i, raw=f"Message {i}", thread_id="worker-1", timestamp=ts)
             tracker.track(entry)
 
@@ -136,7 +138,7 @@ class TestThreadTracking:
         assert thread["log_count"] == 5
         # First/last should be from entries that have timestamps
         assert thread["first_seen"] is not None  # guard
-        assert thread["first_seen"] == datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+        assert thread["first_seen"] == datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
 
     def test_all_entries_none_timestamp(self, tracker):
         """All entries have None timestamp"""
@@ -166,7 +168,7 @@ class TestTraceTracking:
             raw="test",
             trace_id="trace-123",
             span_id="span-1",
-            timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
         )
         tracker.track(entry)
 
@@ -183,7 +185,7 @@ class TestTraceTracking:
                 raw=f"Span {i}",
                 trace_id="trace-123",
                 span_id=f"span-{i}",
-                timestamp=datetime(2024, 1, 1, 10, 0, i, tzinfo=timezone.utc),
+                timestamp=datetime(2024, 1, 1, 10, 0, i, tzinfo=UTC),
             )
             tracker.track(entry)
 
@@ -197,14 +199,14 @@ class TestTraceTracking:
             raw="start",
             trace_id="trace-123",
             span_id="span-1",
-            timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
         )
         entry2 = LogEntry(
             line_number=2,
             raw="end",
             trace_id="trace-123",
             span_id="span-2",
-            timestamp=datetime(2024, 1, 1, 10, 0, 5, tzinfo=timezone.utc),  # 5 seconds later
+            timestamp=datetime(2024, 1, 1, 10, 0, 5, tzinfo=UTC),  # 5 seconds later
         )
         tracker.track(entry1)
         tracker.track(entry2)
@@ -235,7 +237,7 @@ class TestTraceTracking:
             raw="test",
             trace_id="trace-123",
             span_id=None,  # No span ID
-            timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
         )
         tracker.track(entry)
 
@@ -317,7 +319,7 @@ class TestCombinedTracking:
             span_id="span-1",
             correlation_id="req-456",
             service_name="api",
-            timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
         )
         tracker.track(entry)
 
@@ -446,7 +448,7 @@ class TestTimezoneHandling:
 
     def test_mixed_timezones(self, tracker):
         """Entries with different timezones"""
-        tz_utc = timezone.utc
+        tz_utc = UTC
         tz_plus5 = timezone(timedelta(hours=5))
         tz_minus8 = timezone(timedelta(hours=-8))
 
@@ -484,7 +486,7 @@ class TestTimezoneHandling:
             line_number=1,
             raw="Aware",
             thread_id="worker-1",
-            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
         )
         naive_entry = LogEntry(
             line_number=2,
@@ -515,7 +517,7 @@ class TestHighVolume:
                 raw=f"Message {i}",
                 thread_id=f"worker-{i % 100}",  # 100 threads
                 correlation_id=f"req-{i % 1000}",  # 1000 correlations
-                timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+                timestamp=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
             )
             tracker.track(entry)
 
@@ -553,3 +555,24 @@ class TestStateIsolation:
         assert t2 is not None  # guard
         assert t2["thread_id"] == "tracker2-thread"
         assert tracker2.get_thread("tracker1-thread") is None
+
+
+class TestReadingDoesNotBreakTracking:
+    """Reading a thread leaves the tracker's own record alone."""
+
+    def test_track_read_read_track_again(self):
+        tracker = ThreadTracker()
+        tracker.track(LogEntry(line_number=1, raw="a", thread_id="w", correlation_id="req-b"))
+        tracker.track(LogEntry(line_number=2, raw="b", thread_id="w", correlation_id="req-a"))
+        first = tracker.get_thread("w")
+        second = tracker.get_thread("w")
+        assert first is not None and second is not None
+        assert first["correlation_ids"] == ["req-a", "req-b"]
+        assert second["correlation_ids"] == ["req-a", "req-b"]
+
+        tracker.track(LogEntry(line_number=3, raw="c", thread_id="w", correlation_id="req-c"))
+        third = tracker.get_thread("w")
+        assert third is not None
+        assert third["log_count"] == 3
+        assert third["correlation_ids"] == ["req-a", "req-b", "req-c"]
+        assert tracker.threads["w"]["correlation_ids"] == {"req-a", "req-b", "req-c"}

@@ -1,6 +1,5 @@
 # Rust
 /target/
-Cargo.lock
 **/*.rs.bk
 *.pdb
 
@@ -219,9 +218,8 @@ __marimo__/
 # Internal planning docs
 .internal/
 
-# Benchmark results (keep REPORT.md and SVG charts)
-benchmarks/results/*.json
-benchmarks/results/charts/*.png
+# Benchmark output is machine-specific; the published report is docs/benchmarks/
+benchmarks/results/
 
 # Project-local Claude memory (personal, not shared)
 CLAUDE.local.md

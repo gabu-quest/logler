@@ -9,77 +9,15 @@ These tests verify that:
 """
 
 import json
-import pytest
-import subprocess
-import tempfile
 import os
+import tempfile
 from pathlib import Path
+from typing import ClassVar
 
-# Exit codes (should match llm_cli.py)
-EXIT_SUCCESS = 0
-EXIT_NO_RESULTS = 1
-EXIT_USER_ERROR = 2
+import pytest
 
-
-def run_llm_command(args, timeout=60):
-    """Run a logler llm command and return result."""
-    cmd = ["python", "-m", "logler.cli", "llm"] + args
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout, cwd=str(Path(__file__).parent.parent)
-    )
-    return result
-
-
-@pytest.fixture
-def sample_log_file():
-    """Create a sample log file for testing."""
-    content = """2024-01-15T10:00:00.000Z INFO [worker-1] correlation_id=req-abc123 Starting request processing
-2024-01-15T10:00:00.050Z DEBUG [worker-1] correlation_id=req-abc123 Validating user token
-2024-01-15T10:00:00.100Z INFO [worker-1] correlation_id=req-abc123 User validated successfully
-2024-01-15T10:00:00.150Z INFO [worker-1] correlation_id=req-abc123 Querying database
-2024-01-15T10:00:00.500Z WARN [worker-1] correlation_id=req-abc123 Query took 350ms
-2024-01-15T10:00:01.000Z ERROR [worker-1] correlation_id=req-abc123 Database timeout after 500ms
-2024-01-15T10:00:01.100Z INFO [worker-1] correlation_id=req-abc123 Retrying database query
-2024-01-15T10:00:01.600Z ERROR [worker-1] correlation_id=req-abc123 Retry failed: connection pool exhausted
-2024-01-15T10:00:01.700Z INFO [worker-1] correlation_id=req-abc123 Returning error response to client
-2024-01-15T10:00:02.000Z INFO [worker-2] correlation_id=req-def456 Starting new request
-"""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
-        f.write(content)
-        f.flush()
-        yield f.name
-    os.unlink(f.name)
-
-
-@pytest.fixture
-def json_log_file():
-    """Create a JSON log file for testing."""
-    entries = [
-        {
-            "timestamp": "2024-01-15T10:00:00Z",
-            "level": "INFO",
-            "message": "Starting",
-            "thread_id": "main",
-        },
-        {
-            "timestamp": "2024-01-15T10:00:01Z",
-            "level": "ERROR",
-            "message": "Database timeout",
-            "thread_id": "worker-1",
-        },
-        {
-            "timestamp": "2024-01-15T10:00:02Z",
-            "level": "INFO",
-            "message": "Recovered",
-            "thread_id": "worker-1",
-        },
-    ]
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
-        for entry in entries:
-            f.write(json.dumps(entry) + "\n")
-        f.flush()
-        yield f.name
-    os.unlink(f.name)
+from logler.llm_cli import llm
+from tests.conftest import EXIT_NO_RESULTS, EXIT_SUCCESS, EXIT_USER_ERROR, invoke, run_llm_command
 
 
 class TestSchemaCommand:
@@ -141,21 +79,6 @@ class TestSchemaCommand:
         assert "\n  " in result.stdout
 
 
-class TestSearchCommand:
-    """Tests for logler llm search"""
-
-    def test_search_basic(self, sample_log_file):
-        """Test basic search."""
-        result = run_llm_command(["search", sample_log_file])
-        assert result.returncode == EXIT_SUCCESS
-
-        output = json.loads(result.stdout)
-        assert "query" in output
-        assert "summary" in output
-        assert "results" in output
-        assert output["summary"]["total_matches"] == 10
-
-
 class TestSampleCommand:
     """Tests for logler llm sample"""
 
@@ -186,6 +109,18 @@ class TestTriageCommand:
 
 class TestEmitCommand:
     """Tests for logler llm emit"""
+
+    @pytest.mark.parametrize("mode", [[], ["--tail", "5"]])
+    def test_no_match_prints_nothing_and_exits_1(self, three_hour_log, mode):
+        code, stdout, _ = invoke(["emit", three_hour_log, "--query", "no-such-text", *mode])
+        assert stdout == ""
+        assert code == EXIT_NO_RESULTS
+
+    @pytest.mark.parametrize("mode", [[], ["--tail", "5"]])
+    def test_a_match_exits_0(self, three_hour_log, mode):
+        code, stdout, _ = invoke(["emit", three_hour_log, "--query", "middle", *mode])
+        assert [json.loads(line)["line_number"] for line in stdout.splitlines()] == [2]
+        assert code == EXIT_SUCCESS
 
     def test_emit_basic(self, sample_log_file):
         """Test basic JSONL emission."""
@@ -315,7 +250,7 @@ class TestDiffCommand:
 class TestSessionCommands:
     """Tests for logler llm session subcommands"""
 
-    def test_session_create(self, sample_log_file):
+    def test_session_create(self, sample_log_file, _isolated_home):
         """Test session creation."""
         result = run_llm_command(
             ["session", "create", "-f", sample_log_file, "--name", "test-session"]
@@ -327,10 +262,8 @@ class TestSessionCommands:
         assert output["session_id"].startswith("sess_")
         assert output["status"] == "active"
 
-        # Cleanup
-        session_file = Path(output["session_file"])
-        if session_file.exists():
-            session_file.unlink()
+        assert Path(output["session_file"]).parent == _isolated_home / ".logler" / "sessions"
+        assert Path(output["session_file"]).exists()
 
     def test_session_list(self):
         """Test session listing."""
@@ -421,119 +354,6 @@ class TestNoTruncation:
 
         finally:
             os.unlink(log_file)
-
-
-# =============================================================================
-# New filtering CLI tests
-# =============================================================================
-
-
-@pytest.fixture
-def filtering_cli_log():
-    """Create a log file with known counts for CLI filter testing.
-
-    80 entries: 4 levels × 2 services × 10 per combination.
-    - Levels: INFO (20), DEBUG (20), WARN (20), ERROR (20)
-    - Services: svc-x (40), svc-y (40)
-    - Threads: t-0, t-1 (40 each)
-    """
-    entries = []
-    idx = 0
-    for svc in ["svc-x", "svc-y"]:
-        for level in ["INFO", "DEBUG", "WARN", "ERROR"]:
-            for j in range(10):
-                entries.append(
-                    json.dumps(
-                        {
-                            "timestamp": f"2024-01-15T10:{idx // 60:02d}:{idx % 60:02d}Z",
-                            "level": level,
-                            "message": "health ping" if j == 0 else f"operation {idx}",
-                            "thread_id": f"t-{idx % 2}",
-                            "service_name": svc,
-                            "correlation_id": f"req-{idx % 5}",
-                        }
-                    )
-                )
-                idx += 1
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
-        f.write("\n".join(entries) + "\n")
-        f.flush()
-        yield f.name
-    os.unlink(f.name)
-
-
-class TestSearchMultiLevel:
-    """Test comma-separated --level via CLI."""
-
-    def test_multi_level_filter(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--level", "ERROR,WARN"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert data["summary"]["total_matches"] == 40
-
-    def test_single_level_filter(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--level", "ERROR"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert data["summary"]["total_matches"] == 20
-
-
-class TestSearchTail:
-    """Test --tail flag returns last N entries."""
-
-    def test_tail_returns_n(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--tail", "5"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert len(data["results"]) == 5
-        assert data["summary"]["total_matches"] == 80
-
-
-class TestSearchExclude:
-    """Test --exclude-level and --exclude-query flags."""
-
-    def test_exclude_level(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--exclude-level", "DEBUG"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert data["summary"]["total_matches"] == 60
-
-        for item in data["results"]:
-            assert item["level"] != "DEBUG"
-
-    def test_exclude_query(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--exclude-query", "health"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        # 8 entries have "health ping" (1 per level × service = 2 services × 4 levels)
-        assert data["summary"]["total_matches"] == 72
-
-
-class TestSearchFields:
-    """Test --fields projection."""
-
-    def test_fields_projection(self, filtering_cli_log):
-        result = run_llm_command(
-            [
-                "search",
-                filtering_cli_log,
-                "--level",
-                "ERROR",
-                "--limit",
-                "3",
-                "--fields",
-                "timestamp,level,message",
-            ]
-        )
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert len(data["results"]) == 3
-
-        for item in data["results"]:
-            assert "timestamp" in item
-            assert "level" in item
-            assert "message" in item
-            assert "thread_id" not in item
 
 
 class TestIdsCommand:
@@ -663,149 +483,6 @@ class TestCLISmokeSuite:
         assert metrics["log_levels"]["INFO"] == 20
 
 
-# =============================================================================
-# New feature tests: --count-only, --offset, --compact, --metadata-only,
-# --max-bytes on additional commands, relative --after/--before
-# =============================================================================
-
-
-class TestSearchCountOnly:
-    """Test --count-only returns match count without results."""
-
-    def test_count_only_with_results(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--count-only"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert data["total_matches"] == 80
-        assert data["files_searched"] == 1
-        assert "results" not in data
-
-    def test_count_only_with_filter(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--level", "ERROR", "--count-only"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert data["total_matches"] == 20
-
-    def test_count_only_no_results(self, filtering_cli_log):
-        result = run_llm_command(
-            ["search", filtering_cli_log, "--service", "nonexistent", "--count-only"]
-        )
-        assert result.returncode == EXIT_NO_RESULTS
-        data = json.loads(result.stdout)
-        assert data["total_matches"] == 0
-
-
-class TestSearchOffset:
-    """Test --offset for pagination."""
-
-    def test_offset_skips_entries(self, filtering_cli_log):
-        """--offset 10 --limit 5 returns entries 11-15."""
-        result = run_llm_command(["search", filtering_cli_log, "--offset", "10", "--limit", "5"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert len(data["results"]) == 5
-        assert data["summary"]["offset"] == 10
-
-    def test_offset_has_more_flag(self, filtering_cli_log):
-        """has_more is true when more results remain."""
-        result = run_llm_command(["search", filtering_cli_log, "--offset", "0", "--limit", "10"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert data["summary"]["has_more"] is True
-
-    def test_offset_last_page(self, filtering_cli_log):
-        """has_more is false on the last page."""
-        result = run_llm_command(["search", filtering_cli_log, "--offset", "75", "--limit", "10"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert len(data["results"]) == 5  # 80 - 75 = 5 remaining
-        assert data["summary"]["has_more"] is False
-
-    def test_pagination_three_pages(self, filtering_cli_log):
-        """Paginate through 20 ERROR entries in pages of 8."""
-        all_line_numbers = []
-        for page_offset in [0, 8, 16]:
-            result = run_llm_command(
-                [
-                    "search",
-                    filtering_cli_log,
-                    "--level",
-                    "ERROR",
-                    "--offset",
-                    str(page_offset),
-                    "--limit",
-                    "8",
-                ]
-            )
-            assert result.returncode == EXIT_SUCCESS
-            data = json.loads(result.stdout)
-            all_line_numbers.extend([r["line_number"] for r in data["results"]])
-
-        # 8 + 8 + 4 = 20 total ERROR entries
-        assert len(all_line_numbers) == 20
-        # No duplicate line numbers
-        assert len(set(all_line_numbers)) == 20
-
-
-class TestSearchCompact:
-    """Test --compact uses short field names."""
-
-    def test_compact_short_keys(self, filtering_cli_log):
-        result = run_llm_command(
-            ["search", filtering_cli_log, "--level", "ERROR", "--limit", "3", "--compact"]
-        )
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert len(data["results"]) == 3
-
-        for item in data["results"]:
-            assert "ln" in item
-            assert "ts" in item
-            assert "lv" in item
-            assert "msg" in item
-            # Long keys should NOT be present
-            assert "line_number" not in item
-            assert "timestamp" not in item
-            assert "level" not in item
-
-    def test_compact_saves_bytes(self, filtering_cli_log):
-        """Compact mode should produce smaller output."""
-        normal = run_llm_command(["search", filtering_cli_log, "--level", "ERROR", "--limit", "10"])
-        compact = run_llm_command(
-            ["search", filtering_cli_log, "--level", "ERROR", "--limit", "10", "--compact"]
-        )
-        assert len(compact.stdout) < len(normal.stdout)
-
-
-class TestSearchMetadataOnly:
-    """Test --metadata-only returns aggregations without results."""
-
-    def test_metadata_only_no_results_key(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--metadata-only"])
-        assert result.returncode == EXIT_SUCCESS
-        data = json.loads(result.stdout)
-        assert "results" not in data
-        assert "aggregations" in data
-        assert "summary" in data
-        assert data["summary"]["total_matches"] == 80
-
-    def test_metadata_only_aggregation_counts(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--metadata-only"])
-        data = json.loads(result.stdout)
-        agg = data["aggregations"]
-        assert agg["by_level"]["ERROR"] == 20
-        assert agg["by_level"]["INFO"] == 20
-        assert agg["by_level"]["WARN"] == 20
-        assert agg["by_level"]["DEBUG"] == 20
-
-    def test_metadata_only_by_service(self, filtering_cli_log):
-        result = run_llm_command(["search", filtering_cli_log, "--metadata-only"])
-        data = json.loads(result.stdout)
-        agg = data["aggregations"]
-        assert agg["by_service"]["svc-x"] == 40
-        assert agg["by_service"]["svc-y"] == 40
-
-
 class TestMaxBytesAdditionalCommands:
     """Test --max-bytes on correlate, hierarchy, bottleneck, summarize."""
 
@@ -819,167 +496,237 @@ class TestMaxBytesAdditionalCommands:
         assert len(capped.stdout) <= len(normal.stdout)
 
 
-class TestRelativeTime:
-    """Test relative time parsing in --after/--before.
+class TestLevelWords:
+    """A level word names a level, or it is the user's error; every command reads it alike."""
 
-    Note: The Rust backend has a known issue with time_start/time_end
-    filtering on some log formats, so we test the parsing layer directly.
-    """
+    LEVEL_COMMANDS: ClassVar[list[list[str]]] = [
+        ["search", "{f}", "--level", "bogus"],
+        ["search", "{f}", "--exclude-level", "bogus"],
+        ["sample", "{f}", "--level", "bogus"],
+        ["sample", "{f}", "--exclude-level", "bogus"],
+        ["emit", "{f}", "--level", "bogus"],
+        ["emit", "{f}", "--exclude-level", "bogus"],
+        ["session", "query", "no-such-session", "--level", "bogus"],
+        ["correlate-events", "{f}", "--trigger-level", "bogus"],
+    ]
 
-    def test_relative_time_parse_units(self):
-        """Verify _parse_time_arg produces valid ISO timestamps for various units."""
-        from logler.llm_cli import _parse_time_arg
-        from datetime import datetime
+    @pytest.mark.parametrize("args", LEVEL_COMMANDS)
+    def test_unknown_word_is_exit_2_with_json_error(self, three_hour_log, args):
+        code, stdout, _ = invoke([a.replace("{f}", three_hour_log) for a in args])
+        assert code == 2
+        assert json.loads(stdout) == {"error": "Unknown log level: bogus", "code": 2}
 
-        for duration in ["-30m", "-2h", "-1d", "-30s"]:
-            result = _parse_time_arg(duration, "--after")
-            assert result is not None
-            # Should be a valid ISO timestamp
-            parsed = datetime.fromisoformat(result)
-            assert parsed.year > 2020
+    @pytest.fixture
+    def three_level_log(self, tmp_path):
+        path = tmp_path / "levels.log"
+        path.write_text(
+            "2024-01-15 10:00:00 INFO fine\n"
+            "2024-01-15 10:00:01 WARN careful\n"
+            "2024-01-15 10:00:02 ERROR broken\n"
+        )
+        return str(path)
 
-    def test_relative_time_is_in_past(self):
-        """Relative time arguments should produce timestamps before now."""
-        from logler.llm_cli import _parse_time_arg
-        from datetime import datetime, timezone
+    @pytest.mark.parametrize("word", ["warning", "WARN", "warn"])
+    def test_sample_exclude_level_reads_every_spelling_alike(self, three_level_log, word):
+        _, stdout, _ = invoke(["sample", three_level_log, "--exclude-level", word, "--size", "10"])
+        assert sorted(e["level"] for e in json.loads(stdout)["entries"]) == ["ERROR", "INFO"]
 
-        now = datetime.now(timezone.utc)
-        one_hour_ago = _parse_time_arg("-1h", "--after")
-        parsed = datetime.fromisoformat(one_hour_ago)
-        # Make both tz-aware for comparison
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        # Should be approximately 1 hour before now (within 5 sec tolerance)
-        diff = (now - parsed).total_seconds()
-        assert 3595 < diff < 3605
-
-    def test_resolve_time_filters_relative(self):
-        """_resolve_time_filters handles relative --after/--before."""
-        from logler.llm_cli import _resolve_time_filters
-        from datetime import datetime
-
-        time_start, time_end = _resolve_time_filters(None, "-2h", "-30m")
-        assert time_start is not None
-        assert time_end is not None
-        start = datetime.fromisoformat(time_start)
-        end = datetime.fromisoformat(time_end)
-        assert start < end
-
-    def test_absolute_time_still_works(self):
-        """ISO8601 timestamps still work for --after/--before."""
-        from logler.llm_cli import _parse_time_arg
-
-        result = _parse_time_arg("2024-01-15T10:00:00Z", "--after")
-        assert "2024-01-15" in result
+    @pytest.mark.parametrize("word", ["warning", "WARN", "warn"])
+    def test_emit_exclude_level_reads_every_spelling_alike(self, three_level_log, word):
+        _, stdout, _ = invoke(["emit", three_level_log, "--exclude-level", word])
+        assert [json.loads(line)["level"] for line in stdout.splitlines()] == ["INFO", "ERROR"]
 
 
-# ---------------------------------------------------------------------------
-# Security: SQL command blocks filesystem access
-# ---------------------------------------------------------------------------
+class TestCommandShell:
+    """Every llm command takes --pretty and reports an uncaught exception the same way."""
+
+    @staticmethod
+    def _commands(group, prefix=()):
+        import click
+
+        for name, cmd in sorted(group.commands.items()):
+            if isinstance(cmd, click.Group):
+                yield from TestCommandShell._commands(cmd, (*prefix, name))
+            else:
+                yield (*prefix, name), cmd
+
+    def test_every_command_has_pretty_but_the_one_that_streams_lines(self):
+        commands = list(self._commands(llm))
+        assert len(commands) == 30
+        without = [
+            " ".join(path)
+            for path, cmd in commands
+            if not any("--pretty" in p.opts for p in cmd.params)
+        ]
+        assert without == ["emit"]
+
+    @pytest.mark.parametrize(
+        "args,target,stream",
+        [
+            (["summarize", "{f}"], "logler.parser.LogParser.for_file", "stdout"),
+            (["compare", "a", "b", "-f", "{f}"], "logler.investigate.follow_thread", "stdout"),
+            (["emit", "{f}"], "logler.parser.LogParser.for_file", "stderr"),
+        ],
+    )
+    def test_uncaught_exception_is_the_json_internal_error(
+        self, monkeypatch, three_hour_log, args, target, stream
+    ):
+        module, _, attr = target.rpartition(".")
+        if module == "logler.parser.LogParser":
+            from logler.parser import LogParser as owner
+
+            monkeypatch.setattr(owner, "for_file", classmethod(_boom))
+        else:
+            import logler.investigate as owner
+
+            monkeypatch.setattr(owner, attr, _boom)
+        code, stdout, stderr = invoke([a.replace("{f}", three_hour_log) for a in args])
+        assert code == 3
+        text = {"stdout": stdout, "stderr": stderr}[stream]
+        assert json.loads(text) == {"error": "Internal error: boom", "code": 3}
+        assert {"stdout": stderr, "stderr": stdout}[stream] == ""
 
 
-class TestSqlCommandSecurity:
-    """Verify the logler llm sql command blocks DuckDB filesystem functions."""
+def _boom(*args, **kwargs):
+    raise RuntimeError("boom")
 
-    def test_sql_blocks_read_csv_auto(self, sample_log_file):
-        """read_csv_auto must be blocked — prevents host file reads."""
-        result = run_llm_command(
+
+class TestFilesArgument:
+    """Which files a FILES argument names."""
+
+    def test_a_folder_matched_by_a_glob_is_not_a_log_file(self, three_hour_log, tmp_path):
+        (tmp_path / "old").mkdir()
+
+        code, out, _ = invoke(["search", str(tmp_path / "*"), "--count-only"])
+
+        assert code == 0, out
+        assert json.loads(out)["total_matches"] == 3
+
+    def test_a_folder_given_by_name_is_no_file(self, tmp_path):
+        (tmp_path / "old").mkdir()
+
+        code, out, _ = invoke(["search", str(tmp_path / "old")])
+
+        assert code == 2, out
+        assert json.loads(out)["error"].startswith("No files found matching")
+
+
+class TestPerLineReadersNumberLinesAsSearchDoes:
+    """schema, summarize, verify-pattern, emit, diff, format test and stats cut a file as
+    search does: a line ends at "\\n" or "\\r\\n", a bare "\\r" stays in the line, the text
+    keeps its trailing spaces."""
+
+    @pytest.fixture
+    def carriage_return_log(self, tmp_path):
+        """Four lines; line 2 ends in spaces, line 3 holds a bare carriage return."""
+        path = tmp_path / "cr.log"
+        path.write_bytes(
+            b"2024-01-15T10:00:00Z ERROR one\n"
+            b"2024-01-15T10:00:01Z ERROR two  \n"
+            b"2024-01-15T10:00:02Z ERROR three\r2024-01-15T10:00:02Z ERROR still three\n"
+            b"2024-01-15T10:00:03Z ERROR four\n"
+        )
+        return str(path)
+
+    def test_search_is_the_reference(self, carriage_return_log):
+        _, stdout, _ = invoke(["search", carriage_return_log, "--compact"])
+        assert sorted(e["ln"] for e in json.loads(stdout)["results"]) == [1, 2, 3, 4]
+
+    def test_emit(self, carriage_return_log):
+        _, stdout, _ = invoke(["emit", carriage_return_log])
+        assert [json.loads(line)["line_number"] for line in stdout.splitlines()] == [1, 2, 3, 4]
+
+    def test_summarize(self, carriage_return_log):
+        _, stdout, _ = invoke(["summarize", carriage_return_log])
+        data = json.loads(stdout)
+        assert data["stats"]["total_entries"] == 4
+        assert [e["line"] for e in data["errors"]] == [1, 2, 3, 4]
+
+    def test_schema(self, carriage_return_log):
+        _, stdout, _ = invoke(["schema", carriage_return_log])
+        assert json.loads(stdout)["total_entries"] == 4
+
+    def test_verify_pattern_numbers_the_line_after_it_as_search_does(self, carriage_return_log):
+        _, stdout, _ = invoke(["verify-pattern", carriage_return_log, "--pattern", "four"])
+        (match,) = json.loads(stdout)["sample_matches"]
+        assert (match["line_number"], match["raw"]) == (4, "2024-01-15T10:00:03Z ERROR four")
+
+    def test_verify_pattern_raw_keeps_trailing_spaces(self, carriage_return_log):
+        _, stdout, _ = invoke(["verify-pattern", carriage_return_log, "--pattern", "two"])
+        (match,) = json.loads(stdout)["sample_matches"]
+        assert (match["line_number"], match["raw"]) == (2, "2024-01-15T10:00:01Z ERROR two  ")
+
+    def test_diff(self, carriage_return_log):
+        _, stdout, _ = invoke(
             [
-                "sql",
-                "SELECT * FROM read_csv_auto('/etc/passwd')",
-                "-f",
-                sample_log_file,
+                "diff",
+                carriage_return_log,
+                "--before-start",
+                "2024-01-15T10:00:00",
+                "--before-end",
+                "2024-01-15T10:00:03",
+                "--after-start",
+                "2024-01-15T11:00:00",
+                "--after-end",
+                "2024-01-15T12:00:00",
             ]
         )
-        assert result.returncode == EXIT_USER_ERROR
-        data = json.loads(result.stdout)
-        assert "error" in data
-        assert "file system operations are disabled" in data["error"].lower()
+        assert json.loads(stdout)["comparison"]["before"]["total"] == 4
 
-    def test_sql_blocks_copy_to(self, sample_log_file):
-        """COPY ... TO must be blocked — prevents data exfiltration."""
-        result = run_llm_command(
+    def test_format_test(self, carriage_return_log):
+        regex = r"(?P<ts>\S+) (?P<level>\w+) (?P<msg>four)"
+        _, stdout, _ = invoke(["format", "test", "-f", carriage_return_log, "--regex", regex])
+        data = json.loads(stdout)
+        assert data["total_lines"] == 4
+        assert [r["line_number"] for r in data["results"] if r["matched"]] == [4]
+
+    def test_stats(self, carriage_return_log):
+        from click.testing import CliRunner
+
+        from logler.cli import main
+
+        result = CliRunner().invoke(main, ["stats", carriage_return_log, "--json"])
+        assert json.loads(result.stdout)["total"] == 4
+
+    def test_a_blank_line_and_a_line_of_spaces_are_no_entry(self, tmp_path):
+        """A blank line and a line of spaces are no entry; the line numbers still count them."""
+        path = tmp_path / "blank.log"
+        path.write_bytes(
+            b"2024-01-15T10:00:00Z ERROR one\n\n   \n2024-01-15T10:00:03Z ERROR four\n"
+        )
+        _, stdout, _ = invoke(["emit", str(path)])
+        assert [json.loads(line)["line_number"] for line in stdout.splitlines()] == [1, 4]
+        _, stdout, _ = invoke(["summarize", str(path)])
+        assert json.loads(stdout)["stats"]["total_entries"] == 2
+        _, stdout, _ = invoke(["schema", str(path)])
+        assert json.loads(stdout)["total_entries"] == 2
+        _, stdout, _ = invoke(["verify-pattern", str(path), "--pattern", "ERROR"])
+        assert json.loads(stdout)["statistics"]["total_entries"] == 2
+        _, stdout, _ = invoke(
             [
-                "sql",
-                "COPY logs TO '/tmp/exfil.csv'",
-                "-f",
-                sample_log_file,
+                "diff",
+                str(path),
+                "--before-start",
+                "2024-01-15T10:00:00",
+                "--before-end",
+                "2024-01-15T10:00:05",
+                "--after-start",
+                "2024-01-15T11:00:00",
+                "--after-end",
+                "2024-01-15T12:00:00",
             ]
         )
-        assert result.returncode == EXIT_USER_ERROR
-        data = json.loads(result.stdout)
-        assert "error" in data
-        assert "file system operations are disabled" in data["error"].lower()
+        assert json.loads(stdout)["comparison"]["before"]["total"] == 2
 
-
-class TestSqlCommandBatching:
-    """Verify the sql command handles large files via batched inserts."""
-
-    def test_sql_large_file_batched(self):
-        """Generate >5000 entries, run sql, verify correct total_entries count."""
-        import tempfile
-        import os
-
-        n_entries = 6_000
-        lines = []
-        for i in range(n_entries):
-            ts = f"2024-01-15T10:00:{i % 60:02d}.{i:03d}Z"
-            level = "INFO" if i % 5 != 0 else "ERROR"
-            lines.append(f"{ts} {level} [worker-{i % 4}] Message number {i}")
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
-            f.write("\n".join(lines) + "\n")
-            f.flush()
-            log_path = f.name
-
-        try:
-            result = run_llm_command(
-                [
-                    "sql",
-                    "SELECT COUNT(*) as cnt FROM logs",
-                    "-f",
-                    log_path,
-                ]
-            )
-            assert result.returncode == EXIT_SUCCESS, result.stderr
-            data = json.loads(result.stdout)
-            assert data["total_entries"] == n_entries
-            assert data["row_count"] == 1
-            assert data["results"][0]["cnt"] == n_entries
-        finally:
-            os.unlink(log_path)
-
-    def test_sql_count_by_level(self):
-        """Batched insert preserves all fields correctly (level grouping)."""
-        import tempfile
-        import os
-
-        # 100 INFO + 50 ERROR = 150 entries
-        lines = []
-        for i in range(100):
-            lines.append(f"2024-01-15T10:00:00.{i:03d}Z INFO [w-1] info msg {i}")
-        for i in range(50):
-            lines.append(f"2024-01-15T10:00:01.{i:03d}Z ERROR [w-2] error msg {i}")
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
-            f.write("\n".join(lines) + "\n")
-            f.flush()
-            log_path = f.name
-
-        try:
-            result = run_llm_command(
-                [
-                    "sql",
-                    "SELECT level, COUNT(*) as cnt FROM logs GROUP BY level ORDER BY level",
-                    "-f",
-                    log_path,
-                ]
-            )
-            assert result.returncode == EXIT_SUCCESS, result.stderr
-            data = json.loads(result.stdout)
-            assert data["total_entries"] == 150
-            rows = {r["level"]: r["cnt"] for r in data["results"]}
-            assert rows["ERROR"] == 50
-            assert rows["INFO"] == 100
-        finally:
-            os.unlink(log_path)
+    def test_format_test_skips_an_empty_line_and_a_line_of_spaces(self, tmp_path):
+        path = tmp_path / "blank.log"
+        path.write_bytes(
+            b"2024-01-15T10:00:00Z ERROR one\n\n   \n2024-01-15T10:00:03Z ERROR four\n"
+        )
+        _, stdout, _ = invoke(["format", "test", "-f", str(path), "--regex", r"(?P<ts>\S+) .*"])
+        data = json.loads(stdout)
+        assert data["total_lines"] == 2
+        assert [(r["line_number"], r["matched"]) for r in data["results"]] == [
+            (1, True),
+            (4, True),
+        ]

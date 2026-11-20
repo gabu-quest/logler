@@ -6,13 +6,10 @@ Public API surface is re-exported by :mod:`logler.investigate`.
 
 import json
 import re
-from typing import List, Optional, Dict, Any
 from collections import defaultdict
+from typing import Any
 
-from ._search_core import (
-    RUST_AVAILABLE,
-)
-
+from ._search_core import RUST_AVAILABLE, _investigator_for
 
 # ---------------------------------------------------------------------------
 # Hierarchy construction
@@ -20,15 +17,15 @@ from ._search_core import (
 
 
 def follow_thread_hierarchy(
-    files: List[str],
+    files: list[str],
     root_identifier: str,
-    max_depth: Optional[int] = None,
+    max_depth: int | None = None,
     use_naming_patterns: bool = True,
     use_temporal_inference: bool = True,
     min_confidence: float = 0.0,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Build hierarchical tree of threads/spans showing parent-child relationships.
 
     This detects sub-threads and nested operations using:
@@ -56,7 +53,8 @@ def follow_thread_hierarchy(
                 "max_depth": int,
                 "total_duration_ms": int | None,
                 "concurrent_count": int,
-                "bottleneck": {"node_id": str, "duration_ms": int, ...} | None,
+                "bottleneck": {"node_id": str, "node_name": str | None,
+                               "duration_ms": int, "percentage": float, "depth": int} | None,
                 "error_nodes": [str, ...],
                 "detection_method": str,
                 "detection_methods": [str, ...]
@@ -70,25 +68,7 @@ def follow_thread_hierarchy(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Lazy import to avoid circular dependency
-    from .investigate import Investigator
-
-    # Use Investigator when custom parsing is requested
-    if parser_format or custom_regex:
-        inv = Investigator()
-        inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
-        return inv.build_hierarchy(
-            root_identifier=root_identifier,
-            max_depth=max_depth,
-            use_naming_patterns=use_naming_patterns,
-            use_temporal_inference=use_temporal_inference,
-            min_confidence=min_confidence,
-        )
-
-    # Use cached investigator to avoid re-parsing files
-    from .cache import get_cached_investigator
-
-    investigator = get_cached_investigator(files)
+    investigator = _investigator_for(files, parser_format, custom_regex)
     result_json = investigator.build_hierarchy(
         files,
         root_identifier,
@@ -105,7 +85,7 @@ def follow_thread_hierarchy(
 # ---------------------------------------------------------------------------
 
 
-def _format_detection_method(hierarchy: Dict[str, Any]) -> str:
+def _format_detection_method(hierarchy: dict[str, Any]) -> str:
     method = hierarchy.get("detection_method", "Unknown")
     methods = hierarchy.get("detection_methods") or []
     method_str = str(method)
@@ -115,7 +95,7 @@ def _format_detection_method(hierarchy: Dict[str, Any]) -> str:
     return method_str
 
 
-def get_hierarchy_summary(hierarchy: Dict[str, Any]) -> str:
+def get_hierarchy_summary(hierarchy: dict[str, Any]) -> str:
     """Generate a human-readable summary of a thread hierarchy.
 
     Args:
@@ -184,7 +164,7 @@ def get_hierarchy_summary(hierarchy: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _append_tree_preview(node: Dict[str, Any], lines: List[str], depth: int, max_depth: int):
+def _append_tree_preview(node: dict[str, Any], lines: list[str], depth: int, max_depth: int):
     """Helper to append tree preview to lines."""
     if depth >= max_depth:
         return
@@ -214,9 +194,9 @@ def _append_tree_preview(node: Dict[str, Any], lines: List[str], depth: int, max
 
 
 def analyze_error_flow(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     include_context: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Analyse error propagation through a hierarchy to identify root causes.
 
     Traces errors through parent-child relationships to find root causes,
@@ -244,7 +224,7 @@ def analyze_error_flow(
         >>> if analysis["has_errors"]:
         ...     print(f"Root cause: {analysis['root_causes'][0]['node_id']}")
     """
-    result = {
+    result: dict[str, Any] = {
         "has_errors": False,
         "total_error_nodes": 0,
         "root_causes": [],
@@ -269,7 +249,7 @@ def analyze_error_flow(
     all_nodes = {}
     parent_map = {}  # child_id -> parent_id
 
-    def collect_nodes(node: Dict[str, Any], parent_id: Optional[str] = None):
+    def collect_nodes(node: dict[str, Any], parent_id: str | None = None):
         node_id = node.get("id")
         if node_id:
             all_nodes[node_id] = node
@@ -310,7 +290,7 @@ def analyze_error_flow(
         node_id = error_node["node_id"]
 
         # Build path from root to this node
-        path = []
+        path: list[str] = []
         current = node_id
         while current:
             path.insert(0, current)
@@ -378,7 +358,7 @@ def analyze_error_flow(
     max_depth = max((rc["depth"] for rc in root_causes), default=0)
 
     # Count concurrent failures (root causes at same depth)
-    depth_counts = defaultdict(int)
+    depth_counts: defaultdict[int, int] = defaultdict(int)
     for rc in root_causes:
         depth_counts[rc["depth"]] += 1
     concurrent = max(depth_counts.values(), default=0)
@@ -426,7 +406,7 @@ def analyze_error_flow(
 
 
 def format_error_flow(
-    error_analysis: Dict[str, Any],
+    error_analysis: dict[str, Any],
     show_chains: bool = True,
     show_recommendations: bool = True,
 ) -> str:
@@ -537,11 +517,11 @@ def format_error_flow(
 
 
 def detect_correlation_chains(
-    files: List[str],
-    root_correlation_id: Optional[str] = None,
-    chain_patterns: Optional[List[str]] = None,
-    parser_format: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: list[str],
+    root_correlation_id: str | None = None,
+    chain_patterns: list[str] | None = None,
+    parser_format: str | None = None,
+) -> dict[str, Any]:
     """Detect correlation ID chaining where one request spawns sub-requests.
 
     Identifies parent-child relationships between correlation IDs by analysing
@@ -570,6 +550,9 @@ def detect_correlation_chains(
         >>> for c in chains["chains"]:
         ...     print(f"{c['parent_correlation_id']} -> {c['child_correlation_id']}")
     """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
     # Default patterns to detect correlation chaining
     default_patterns = [
         # Explicit field patterns
@@ -589,23 +572,10 @@ def detect_correlation_chains(
     compiled_patterns = [re.compile(p) for p in patterns]
 
     # Read and parse logs using the proper search API (cached investigator)
-    entries = []
-    if RUST_AVAILABLE:
-        from ._search_core import search as _search
+    from ._search_core import search as _search
 
-        result = _search(files, limit=10000)
-        entries = [r["entry"] for r in result.get("results", [])]
-    else:
-        # Fallback to Python parsing
-        from .parser import LogParser
-
-        parser = LogParser()
-        for file_path in files:
-            with open(file_path, "r") as f:
-                for line in f:
-                    entry = parser.parse_line(line)
-                    if entry:
-                        entries.append(entry.__dict__ if hasattr(entry, "__dict__") else entry)
+    result = _search(files, limit=10000)
+    entries = [r["entry"] for r in result.get("results", [])]
 
     # Detect chains
     chains = []
@@ -720,7 +690,8 @@ def detect_correlation_chains(
         root_ids = [root_correlation_id] if root_correlation_id in root_ids else []
 
     # Convert hierarchy to regular dict
-    hierarchy_dict = {k: list(set(v)) for k, v in hierarchy.items()}
+    # Children in the order they first appear in the logs, repeats dropped
+    hierarchy_dict = {k: list(dict.fromkeys(v)) for k, v in hierarchy.items()}
 
     return {
         "chains": unique_chains,
@@ -732,14 +703,14 @@ def detect_correlation_chains(
 
 
 def build_hierarchy_with_correlation_chains(
-    files: List[str],
+    files: list[str],
     root_identifier: str,
     include_correlation_chains: bool = True,
-    max_depth: Optional[int] = None,
+    max_depth: int | None = None,
     use_naming_patterns: bool = True,
     use_temporal_inference: bool = True,
     min_confidence: float = 0.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build hierarchy that includes correlation ID chaining relationships.
 
     Extends :func:`follow_thread_hierarchy` by also detecting when one
@@ -755,7 +726,10 @@ def build_hierarchy_with_correlation_chains(
         min_confidence: Minimum confidence score.
 
     Returns:
-        HierarchyResult dict with additional correlation chain information.
+        HierarchyResult dict. With ``include_correlation_chains`` it also has
+        ``correlation_chains`` and ``chained_correlation_ids``, and, only when a chain was
+        found, ``has_correlation_chains``, ``correlation_chain_count`` and
+        ``related_correlation_ids``.
 
     Example::
 
@@ -803,9 +777,9 @@ def build_hierarchy_with_correlation_chains(
 
 
 def analyze_bottlenecks(
-    hierarchy: Dict[str, Any],
+    hierarchy: dict[str, Any],
     threshold_percentage: float = 20.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Detect performance bottlenecks with optimisation suggestions.
 
     Analyses hierarchy to identify primary/secondary bottlenecks,
@@ -814,7 +788,10 @@ def analyze_bottlenecks(
 
     Args:
         hierarchy: Hierarchy from :func:`follow_thread_hierarchy`.
-        threshold_percentage: Minimum % of total time to be considered significant.
+        threshold_percentage: Minimum % of total time a node must spend in itself (its
+            duration less its children's) to be listed in ``secondary_bottlenecks``. The
+            primary bottleneck is the hierarchy's own ``bottleneck``, the node with the
+            most self-time, and is reported whatever its share.
 
     Returns:
         BottleneckAnalysis dict with shape::
@@ -824,8 +801,12 @@ def analyze_bottlenecks(
                 "secondary_bottlenecks": [...],
                 "optimization_suggestions": [str, ...],
                 "parallelization_opportunities": [...],
+                "caching_opportunities": [str, ...],
                 "estimated_improvement_ms": float
             }
+
+        All six keys are always returned; a hierarchy with no total duration gets the
+        empty values.
 
     Example::
 
@@ -833,7 +814,7 @@ def analyze_bottlenecks(
         >>> for s in analysis["optimization_suggestions"]:
         ...     print(f"  - {s}")
     """
-    result = {
+    result: dict[str, Any] = {
         "primary_bottleneck": None,
         "secondary_bottlenecks": [],
         "optimization_suggestions": [],
@@ -853,15 +834,19 @@ def analyze_bottlenecks(
     # Collect all nodes with timing
     all_nodes = []
 
-    def collect_nodes(node: Dict[str, Any]):
+    def collect_nodes(node: dict[str, Any]):
         duration = node.get("duration_ms", 0)
         if duration and duration > 0:
             percentage = (duration / total_duration) * 100
+            children_ms = sum(c.get("duration_ms") or 0 for c in node.get("children", []))
+            self_time = max(duration - children_ms, 0)
             all_nodes.append(
                 {
                     "id": node.get("id"),
                     "duration_ms": duration,
                     "percentage": percentage,
+                    "self_time_ms": self_time,
+                    "self_percentage": (self_time / total_duration) * 100,
                     "depth": node.get("depth", 0),
                     "children_count": len(node.get("children", [])),
                     "is_leaf": len(node.get("children", [])) == 0,
@@ -877,10 +862,17 @@ def analyze_bottlenecks(
     # Sort by duration
     all_nodes.sort(key=lambda x: -x["duration_ms"])
 
-    # Find secondary bottlenecks
-    for node in all_nodes[1:5]:  # Top 5 excluding primary
-        if node["percentage"] >= threshold_percentage:
-            result["secondary_bottlenecks"].append(node)
+    # Secondary bottlenecks: measured as the primary is, by self-time, so a node that only
+    # encloses a slow child is not one. The four with the most that meet the threshold.
+    primary_id = bottleneck.get("node_id") if bottleneck else None
+    result["secondary_bottlenecks"] = sorted(
+        (
+            n
+            for n in all_nodes
+            if n["id"] != primary_id and n["self_percentage"] >= threshold_percentage
+        ),
+        key=lambda n: -n["self_time_ms"],
+    )[:4]
 
     # Generate optimisation suggestions
     suggestions = []
@@ -962,11 +954,11 @@ def analyze_bottlenecks(
 
 
 def diff_hierarchies(
-    hierarchy_a: Dict[str, Any],
-    hierarchy_b: Dict[str, Any],
+    hierarchy_a: dict[str, Any],
+    hierarchy_b: dict[str, Any],
     label_a: str = "Before",
     label_b: str = "After",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compare two hierarchies to identify performance changes.
 
     Useful for before/after deployment comparisons, A/B testing,
@@ -982,11 +974,15 @@ def diff_hierarchies(
         HierarchyDiffResult dict with shape::
 
             {
-                "summary": {"total_duration_change_ms": float, ...},
+                "label_a": str,
+                "label_b": str,
+                "summary": {"total_duration_change_ms": float, "total_duration_change_pct": float,
+                            "node_count_change": int, "new_errors": int, "resolved_errors": int},
                 "improved_nodes": [...],
                 "degraded_nodes": [...],
                 "new_nodes": [...],
-                "removed_nodes": [...]
+                "removed_nodes": [...],
+                "error_changes": {"new_errors": [str, ...], "resolved_errors": [str, ...]}
             }
 
     Example::
@@ -994,7 +990,7 @@ def diff_hierarchies(
         >>> diff = diff_hierarchies(before_h, after_h)
         >>> print(f"Change: {diff['summary']['total_duration_change_pct']:.1f}%")
     """
-    result = {
+    result: dict[str, Any] = {
         "label_a": label_a,
         "label_b": label_b,
         "summary": {
@@ -1015,10 +1011,10 @@ def diff_hierarchies(
     }
 
     # Collect nodes from both hierarchies
-    def collect_nodes(hierarchy: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    def collect_nodes(hierarchy: dict[str, Any]) -> dict[str, dict[str, Any]]:
         nodes = {}
 
-        def walk(node: Dict[str, Any]):
+        def walk(node: dict[str, Any]):
             node_id = node.get("id")
             if node_id:
                 nodes[node_id] = {
@@ -1051,7 +1047,8 @@ def diff_hierarchies(
     result["summary"]["node_count_change"] = len(nodes_b) - len(nodes_a)
 
     # Compare individual nodes
-    all_node_ids = set(nodes_a.keys()) | set(nodes_b.keys())
+    # Tree order: every node of A, then the nodes only B has
+    all_node_ids = list(dict.fromkeys([*nodes_a, *nodes_b]))
 
     for node_id in all_node_ids:
         in_a = node_id in nodes_a
@@ -1117,7 +1114,7 @@ def diff_hierarchies(
     return result
 
 
-def format_hierarchy_diff(diff: Dict[str, Any]) -> str:
+def format_hierarchy_diff(diff: dict[str, Any]) -> str:
     """Format hierarchy diff as human-readable text.
 
     Args:
@@ -1140,7 +1137,9 @@ def format_hierarchy_diff(diff: Dict[str, Any]) -> str:
     direction = (
         "\u2b07\ufe0f IMPROVED"
         if change_ms < 0
-        else "\u2b06\ufe0f DEGRADED" if change_ms > 0 else "\u27a1\ufe0f UNCHANGED"
+        else "\u2b06\ufe0f DEGRADED"
+        if change_ms > 0
+        else "\u27a1\ufe0f UNCHANGED"
     )
     lines.append(f"\n{direction}: {abs(change_ms):.0f}ms ({abs(change_pct):.1f}%)")
 

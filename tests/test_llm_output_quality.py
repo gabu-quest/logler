@@ -20,8 +20,11 @@ import json
 import os
 import subprocess
 import tempfile
-import pytest
 from pathlib import Path
+
+import pytest
+
+from tests.conftest import PYTHON
 
 # Exit codes (match llm_cli.py)
 EXIT_SUCCESS = 0
@@ -39,7 +42,7 @@ BYTES_PER_TOKEN = 4
 
 def run_llm_command(args, timeout=120):
     """Run a logler llm command and return result."""
-    cmd = ["python", "-m", "logler.cli", "llm"] + args
+    cmd = [PYTHON, "-m", "logler.cli", "llm", *args]
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -157,9 +160,9 @@ class TestTokenEfficiency:
 
         raw_size = len(with_raw.stdout.encode())
         no_raw_size = len(without_raw.stdout.encode())
-        assert (
-            no_raw_size < raw_size
-        ), f"--no-raw ({no_raw_size}B) should be smaller than default ({raw_size}B)"
+        assert no_raw_size < raw_size, (
+            f"--no-raw ({no_raw_size}B) should be smaller than default ({raw_size}B)"
+        )
 
     def test_ids_output_scales_linearly(self, microservice, apache_clf):
         """IDs on 200 entries vs 500 entries — ratio should be within 4x."""
@@ -198,9 +201,9 @@ class TestTokenEfficiency:
         )
         assert result.returncode == 0
         output_size = len(result.stdout.encode())
-        assert (
-            output_size <= 4200
-        ), f"--max-bytes 4000 produced {output_size}B, expected <= 4200B (small overshoot ok)"
+        assert output_size <= 4200, (
+            f"--max-bytes 4000 produced {output_size}B, expected <= 4200B (small overshoot ok)"
+        )
         # Must still be valid JSON
         data = json.loads(result.stdout)
         assert "results" in data or "total_matches" in data
@@ -221,9 +224,9 @@ class TestTokenEfficiency:
         assert result.returncode == 0
         output_size = len(result.stdout.encode())
         # This is intentionally documenting the problem — large output
-        assert (
-            output_size > 50_000
-        ), f"Expected large output for unbounded search on 10K file, got {output_size}B"
+        assert output_size > 50_000, (
+            f"Expected large output for unbounded search on 10K file, got {output_size}B"
+        )
 
 
 class TestTruncationCorrectness:
@@ -287,9 +290,9 @@ class TestTruncationCorrectness:
         # If summary exists, its count should match
         summary = data.get("summary", {})
         if "returned" in summary:
-            assert (
-                summary["returned"] == actual_results
-            ), f"summary.returned={summary['returned']} != actual results={actual_results}"
+            assert summary["returned"] == actual_results, (
+                f"summary.returned={summary['returned']} != actual results={actual_results}"
+            )
 
     def test_max_bytes_very_small_budget_no_crash(self, microservice):
         """Very small byte budget (200 bytes) returns valid JSON, not crash."""
@@ -360,20 +363,20 @@ class TestOutputInformationDensity:
             assert "message" in entry, f"Missing message: {list(entry.keys())}"
             # line_number may be in item or entry
             has_line = "line_number" in item or "line_number" in entry
-            assert (
-                has_line
-            ), f"Missing line_number: item={list(item.keys())}, entry={list(entry.keys())}"
+            assert has_line, (
+                f"Missing line_number: item={list(item.keys())}, entry={list(entry.keys())}"
+            )
 
     def test_triage_has_actionable_suggestions(self, microservice):
         """Triage output contains suggested_actions list with >0 entries."""
         result = run_llm_command(["triage", microservice])
         data = parse_json_output(result)
-        assert (
-            "suggested_actions" in data
-        ), f"Triage missing suggested_actions. Keys: {list(data.keys())}"
-        assert (
-            len(data["suggested_actions"]) > 0
-        ), "suggested_actions is empty — LLM gets no guidance"
+        assert "suggested_actions" in data, (
+            f"Triage missing suggested_actions. Keys: {list(data.keys())}"
+        )
+        assert len(data["suggested_actions"]) > 0, (
+            "suggested_actions is empty — LLM gets no guidance"
+        )
 
     def test_triage_severity_matches_error_rate(self, microservice):
         """Microservice fixture has 8% error rate (16/200) -> medium severity."""
@@ -399,8 +402,7 @@ class TestOutputInformationDensity:
         ]
         for i in range(1, len(timestamps)):
             assert timestamps[i] >= timestamps[i - 1], (
-                f"Timeline not chronological at index {i}: "
-                f"{timestamps[i - 1]} > {timestamps[i]}"
+                f"Timeline not chronological at index {i}: {timestamps[i - 1]} > {timestamps[i]}"
             )
 
     def test_correlate_shows_service_flow(self, microservice):
@@ -425,9 +427,9 @@ class TestOutputInformationDensity:
         detected = data.get("detected_formats", {})
         # BSD syslog without <priority> prefix may be detected as either
         has_valid_format = "Syslog" in detected or "PlainText" in detected
-        assert (
-            has_valid_format
-        ), f"Expected Syslog or PlainText in detected_formats, got: {detected}"
+        assert has_valid_format, (
+            f"Expected Syslog or PlainText in detected_formats, got: {detected}"
+        )
 
     def test_ids_returns_all_id_types(self, microservice):
         """IDs command returns thread_ids, correlation_ids, trace_ids, services."""
@@ -464,9 +466,9 @@ class TestEdgeCasesLLM:
                 microservice,
             ]
         )
-        assert (
-            result.returncode != EXIT_SUCCESS
-        ), f"Expected non-zero exit for bogus correlation, got {result.returncode}"
+        assert result.returncode != EXIT_SUCCESS, (
+            f"Expected non-zero exit for bogus correlation, got {result.returncode}"
+        )
 
     def test_hierarchy_empty_result_has_structure(self, microservice):
         """Hierarchy on non-existent trace returns valid structure."""
@@ -516,9 +518,9 @@ class TestEdgeCasesLLM:
             ]
         )
         # Invalid level should produce exit 1 (no results), 2 (user error), or 3 (internal)
-        assert (
-            result.returncode != EXIT_SUCCESS
-        ), f"Expected non-zero exit for invalid level BANANA, got {result.returncode}"
+        assert result.returncode != EXIT_SUCCESS, (
+            f"Expected non-zero exit for invalid level BANANA, got {result.returncode}"
+        )
 
 
 class TestRealLogStress:
@@ -528,9 +530,9 @@ class TestRealLogStress:
         """Triage on all 4 fixtures returns exit 0."""
         for name, path in all_fixtures.items():
             result = run_llm_command(["triage", path])
-            assert (
-                result.returncode == EXIT_SUCCESS
-            ), f"Triage failed on {name} (exit {result.returncode}): {result.stderr[:200]}"
+            assert result.returncode == EXIT_SUCCESS, (
+                f"Triage failed on {name} (exit {result.returncode}): {result.stderr[:200]}"
+            )
             data = json.loads(result.stdout)
             assert "assessment" in data, f"{name}: triage missing assessment"
 
@@ -538,14 +540,14 @@ class TestRealLogStress:
         """Search on all 4 fixtures returns parseable JSON."""
         for name, path in all_fixtures.items():
             result = run_llm_command(["search", path, "--limit", "10"])
-            assert (
-                result.returncode == EXIT_SUCCESS
-            ), f"Search failed on {name} (exit {result.returncode}): {result.stderr[:200]}"
+            assert result.returncode == EXIT_SUCCESS, (
+                f"Search failed on {name} (exit {result.returncode}): {result.stderr[:200]}"
+            )
             data = json.loads(result.stdout)
             assert "results" in data, f"{name}: search missing results key"
-            assert (
-                len(data["results"]) == 10
-            ), f"{name}: expected 10 results, got {len(data['results'])}"
+            assert len(data["results"]) == 10, (
+                f"{name}: expected 10 results, got {len(data['results'])}"
+            )
 
     def test_correlate_microservice_fixture(self, microservice):
         """Correlate a known corr-000 in microservice fixture."""
@@ -557,9 +559,9 @@ class TestRealLogStress:
     def test_massive_file_triage(self, massive):
         """Triage on 10K massive_incident.log completes and fits token budget."""
         result = run_llm_command(["triage", massive], timeout=120)
-        assert (
-            result.returncode == EXIT_SUCCESS
-        ), f"Triage failed on massive file (exit {result.returncode}): {result.stderr[:200]}"
+        assert result.returncode == EXIT_SUCCESS, (
+            f"Triage failed on massive file (exit {result.returncode}): {result.stderr[:200]}"
+        )
         output_size = len(result.stdout.encode())
         assert output_size < 4000, (
             f"Massive file triage is {output_size}B (~{output_size // BYTES_PER_TOKEN} tokens), "

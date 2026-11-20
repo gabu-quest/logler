@@ -195,15 +195,15 @@ def _speedup_indicator(speedup: float) -> str:
     elif speedup >= 0.95:
         return "~same"
     else:
-        return f"{1/speedup:.2f}x slower"
+        return f"{1 / speedup:.2f}x slower"
 
 
 def _format_ms(ms: float) -> str:
     """Format milliseconds for display."""
     if ms >= 10000:
-        return f"{ms/1000:.1f}s"
+        return f"{ms / 1000:.1f}s"
     elif ms >= 1000:
-        return f"{ms/1000:.2f}s"
+        return f"{ms / 1000:.2f}s"
     elif ms >= 10:
         return f"{ms:.1f}ms"
     elif ms >= 0.1:
@@ -280,7 +280,7 @@ def _pick_max_scale_deltas(deltas: list[dict]) -> list[dict]:
         by_scenario.setdefault(d["scenario"], []).append(d)
 
     result = []
-    for scenario, scenario_deltas in by_scenario.items():
+    for scenario_deltas in by_scenario.values():
         # Try to pick the one with the largest numeric value
         best = None
         for d in scenario_deltas:
@@ -346,7 +346,7 @@ def _plot_before_after_bars(
     )
 
     # Speedup annotations
-    for i, (ba, sp) in enumerate(zip(bars_before, speedups)):
+    for i, (_ba, sp) in enumerate(zip(bars_before, speedups, strict=False)):
         y_pos = max(baseline_medians[i], current_medians[i])
         if sp >= 1.1:
             label_text = f"{sp:.0f}x" if sp >= 10 else f"{sp:.1f}x"
@@ -444,7 +444,7 @@ def _plot_speedup_summary(
     )
 
     # Value labels
-    for bar, sp in zip(bars, speedups):
+    for bar, sp in zip(bars, speedups, strict=False):
         x_pos = bar.get_width()
         label = f"{sp:.0f}x" if sp >= 10 else f"{sp:.1f}x"
         ax.text(
@@ -525,7 +525,7 @@ def _write_comparison_report(
         )
 
     if regressions:
-        lines.append(f"**{len(regressions)} regressions detected** " f"(median slowed by >10%).")
+        lines.append(f"**{len(regressions)} regressions detected** (median slowed by >10%).")
     else:
         lines.append("**Zero regressions detected.**")
 

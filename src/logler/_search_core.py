@@ -8,37 +8,43 @@ from here — never the reverse.
 Public API surface is re-exported by :mod:`logler.investigate`.
 """
 
+import contextlib
 import json
+import re
 import warnings
-from typing import List, Optional, Dict, Any
-from datetime import datetime
-from collections import defaultdict
+from datetime import timedelta
+from typing import Any
 
+from ._loading import load_files
 from .cache import get_cached_investigator
-from .safe_regex import try_compile
 
 # ---------------------------------------------------------------------------
 # Rust backend initialisation
 # ---------------------------------------------------------------------------
 
+# How to build the extension in a source checkout: the one spelling, quoted in every message.
+BUILD_HINT = "maturin develop --release -m crates/logler-py/Cargo.toml"
+
 try:
     import logler_rs
+    from logler_rs import InvalidPatternError, LineNotFoundError
 
     RUST_AVAILABLE = True
-except ImportError:
-    try:
-        from .bootstrap import ensure_rust_backend
+except ImportError as _exc:
+    RUST_AVAILABLE = False
 
-        if ensure_rust_backend():
-            import logler_rs  # type: ignore
+    class LineNotFoundError(ValueError):  # type: ignore[no-redef]
+        """Stands in for the extension's error of that name, which cannot be raised here."""
 
-            RUST_AVAILABLE = True
-        else:
-            RUST_AVAILABLE = False
-            warnings.warn("Rust backend not available. Using Python fallback.", stacklevel=2)
-    except (ImportError, AttributeError, OSError):
-        RUST_AVAILABLE = False
-        warnings.warn("Rust backend not available. Using Python fallback.", stacklevel=2)
+    class InvalidPatternError(ValueError):  # type: ignore[no-redef]
+        """Stands in for the extension's error of that name, which cannot be raised here."""
+
+    warnings.warn(
+        f"logler's compiled extension (logler_rs) could not be imported: {_exc}. "
+        "Search, hierarchy, comparison and sampling need it and will raise "
+        f"RuntimeError. Reinstall logler; in a source checkout, build it with `{BUILD_HINT}`.",
+        stacklevel=2,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -46,148 +52,48 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def _normalize_entry(entry: Dict[str, Any]) -> None:
-    """Normalize a single log entry in-place (uppercase level, detect format)."""
-    if "level" in entry:
-        raw_level = str(entry["level"]).upper().strip()
-        entry["level"] = _LEVEL_MAP.get(raw_level, raw_level)
+def level_text(level: Any) -> str:
+    """The text of an entry's level: upper case, and ``UNKNOWN`` for a line with none.
 
-    # Infer syslog level if missing
-    if not entry.get("level") and entry.get("fields", {}).get("priority"):
-        inferred = _infer_syslog_level(entry["fields"]["priority"])
-        if inferred:
-            entry["level"] = inferred
+    The one owner of that spelling: the engine gives ``null`` for a line with no level.
+    """
+    return str(level or "").strip().upper() or "UNKNOWN"
+
+
+def _normalize_entry(entry: dict[str, Any]) -> None:
+    """Normalize a single log entry in-place (level text, numeric fields)."""
+    if "level" in entry:
+        entry["level"] = level_text(entry["level"])
 
     # Convert numeric fields
     for key in ("duration_ms",):
         if key in entry and entry[key] is not None:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 entry[key] = float(entry[key])
-            except (ValueError, TypeError):
-                pass
 
 
-def _normalize_entries(entries: List[Dict[str, Any]]) -> None:
+def _normalize_entries(entries: list[dict[str, Any]]) -> None:
     """Batch-normalize entries."""
     for entry in entries:
         _normalize_entry(entry)
 
 
-def _normalize_search_result_levels(result: Dict[str, Any]) -> None:
+def _normalize_search_result_levels(result: dict[str, Any]) -> None:
     """Normalize search result level casing and map aliases."""
     for item in result.get("results", []):
-        entry = item.get("entry", {})
-        _normalize_entry(entry)
-    for item in result.get("context_before", []):
-        _normalize_entry(item)
-    for item in result.get("context_after", []):
-        _normalize_entry(item)
+        _normalize_entry(item.get("entry", {}))
+        _normalize_entries(item.get("context_before", []))
+        _normalize_entries(item.get("context_after", []))
 
 
-def _apply_custom_regex_to_results(result: Dict[str, Any], custom_regex: Optional[str]) -> None:
-    """Apply custom regex to fill missing fields in search results."""
-    if not custom_regex:
-        return
-    compiled = try_compile(custom_regex)
-    if not compiled:
-        return
-    for item in result.get("results", []):
-        _apply_custom_regex_to_entry(item.get("entry", {}), compiled)
-    # Also apply to pattern examples if present
-    for pattern in result.get("patterns", []):
-        for example in pattern.get("examples", []):
-            _apply_custom_regex_to_entry(example, compiled)
-
-
-def _apply_custom_regex_to_entry(entry: Dict[str, Any], compiled_regex) -> None:
-    """Apply a compiled regex to a single entry to fill missing fields."""
-    message = entry.get("raw_line") or entry.get("message") or ""
-    if not message:
-        return
-    match = compiled_regex.search(message)
-    if not match:
-        return
-    groups = match.groupdict()
-    for key, value in groups.items():
-        if value is not None:
-            # Only fill if the entry field is missing or empty
-            if key == "level":
-                if not entry.get("level"):
-                    entry["level"] = value.upper()
-            elif key == "timestamp":
-                if not entry.get("timestamp"):
-                    entry["timestamp"] = value
-            elif key == "thread_id":
-                if not entry.get("thread_id"):
-                    entry["thread_id"] = value
-            elif key == "correlation_id":
-                if not entry.get("correlation_id"):
-                    entry["correlation_id"] = value
-            elif key == "trace_id":
-                if not entry.get("trace_id"):
-                    entry["trace_id"] = value
-            elif key == "service_name":
-                if not entry.get("service_name"):
-                    entry["service_name"] = value
-            elif key == "message":
-                if not entry.get("message") or entry["message"] == message:
-                    entry["message"] = value
-            else:
-                # Put in fields dict
-                fields = entry.setdefault("fields", {})
-                if key not in fields:
-                    fields[key] = value
-    # Re-normalize after regex application
-    _normalize_entry(entry)
-
-
-def _normalize_pattern_examples(result: Dict[str, Any]) -> None:
+def _normalize_pattern_examples(result: dict[str, Any]) -> None:
     """Normalize examples inside pattern results."""
     for pattern in result.get("patterns", []):
         for example in pattern.get("examples", []):
             _normalize_entry(example)
 
 
-def _infer_syslog_level(priority) -> Optional[str]:
-    """Infer syslog level from a priority field value."""
-    try:
-        pri = int(priority)
-        severity = pri & 0x07
-        severity_map = {
-            0: "FATAL",
-            1: "FATAL",
-            2: "FATAL",
-            3: "ERROR",
-            4: "WARN",
-            5: "INFO",
-            6: "INFO",
-            7: "DEBUG",
-        }
-        return severity_map.get(severity)
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_timestamp_flex(value: str) -> Optional[str]:
-    """Parse a timestamp string in common formats, return ISO-8601 or None."""
-    formats = [
-        "%Y-%m-%dT%H:%M:%S.%fZ",
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%dT%H:%M:%S.%f%z",
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-    ]
-    for fmt in formats:
-        try:
-            dt = datetime.strptime(value, fmt)
-            return dt.isoformat()
-        except ValueError:
-            continue
-    return None
-
-
-def _normalize_context_payload(result: Dict[str, Any]) -> None:
+def _normalize_context_payload(result: dict[str, Any]) -> None:
     """Normalize context payload from Rust (rename keys to match API)."""
     target = result.get("target")
     if target:
@@ -198,89 +104,102 @@ def _normalize_context_payload(result: Dict[str, Any]) -> None:
         _normalize_entry(entry)
 
 
-def _build_time_range(
-    time_start: Optional[str] = None,
-    time_end: Optional[str] = None,
-    duration: Optional[str] = None,
-) -> Dict[str, str]:
-    """Build a time_range dict from CLI-style arguments.
+_DURATION = re.compile(r"^(\d+)(s|m|h|d)$")
+_DURATION_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 
-    Supports ISO timestamps for start/end, and duration strings like ``30m``,
-    ``2h``, ``1d`` relative to now or to a given start/end.
+
+def parse_duration(text: str) -> timedelta:
+    """A relative duration (``30s``, ``2h``, ``1d``; the unit in either case) as a timedelta.
+
+    The one parser of a duration. Raises ``ValueError`` for anything else.
     """
-    result: Dict[str, str] = {}
-
-    if time_start:
-        parsed = _parse_timestamp_flex(time_start)
-        if parsed:
-            result["start"] = parsed
-        else:
-            result["start"] = time_start  # Pass through, let Rust parse
-
-    if time_end:
-        parsed = _parse_timestamp_flex(time_end)
-        if parsed:
-            result["end"] = parsed
-        else:
-            result["end"] = time_end
-
-    if duration and not (time_start and time_end):
-        import re as _re
-        from datetime import timedelta
-
-        m = _re.match(r"^(\d+)(s|m|h|d)$", duration.lower())
-        if m:
-            value = int(m.group(1))
-            unit = m.group(2)
-            delta = {
-                "s": timedelta(seconds=value),
-                "m": timedelta(minutes=value),
-                "h": timedelta(hours=value),
-                "d": timedelta(days=value),
-            }[unit]
-
-            now = datetime.utcnow()
-            if time_start and not time_end:
-                result["end"] = (now).isoformat() + "Z"
-            elif not time_start:
-                result["start"] = (now - delta).isoformat() + "Z"
-                if not time_end:
-                    result["end"] = now.isoformat() + "Z"
-
-    return result
+    match = _DURATION.match(text.lower())
+    if not match:
+        raise ValueError(f"Invalid duration format: {text}. Use format like '30m', '2h', '1d'")
+    return timedelta(**{_DURATION_UNITS[match.group(2)]: int(match.group(1))})
 
 
-# Level normalisation map — values must be Rust enum variant names (title case).
-_LEVEL_MAP = {
-    "trace": "Trace",
-    "debug": "Debug",
-    "info": "Info",
-    "warn": "Warn",
-    "warning": "Warn",
-    "error": "Error",
-    "fatal": "Fatal",
-    "critical": "Fatal",
-}
+def level_name(word: str) -> str:
+    """The Rust name (``Warn``) of the level a user-given word names (``warning``, ``ERR``).
+
+    The words are the Rust parser's own table, read through the extension, so a level the
+    parser reads can be asked for by the same word. Raises ``ValueError`` for a word that
+    names no level.
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+    name = logler_rs.level_name(word)
+    if name is None:
+        raise ValueError(f"Unknown log level: {word.strip().lower()}")
+    return name
 
 
-def _parse_levels(level_str: str) -> List[str]:
+def _parse_levels(level_str: str) -> list[str]:
     """Parse a comma-separated level string into Rust-enum names.
 
     Example::
 
-        >>> _parse_levels("ERROR,warn,info")
-        ["Error", "Warn", "Info"]
+        >>> _parse_levels("ERROR,warn,crit")
+        ["Error", "Warn", "Fatal"]
     """
-    result = []
-    for part in level_str.split(","):
-        part = part.strip().lower()
-        if not part:
-            continue
-        mapped = _LEVEL_MAP.get(part)
-        if not mapped:
-            raise ValueError(f"Unknown log level: {part}")
-        result.append(mapped)
-    return result
+    return [level_name(part) for part in level_str.split(",") if part.strip()]
+
+
+def _build_filters(
+    level: str | None = None,
+    exclude_level: str | None = None,
+    exclude_query: str | None = None,
+    thread_id: str | None = None,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+    service_name: str | None = None,
+    time_start: str | None = None,
+    time_end: str | None = None,
+) -> dict[str, Any]:
+    """The engine's filter dict for search's keyword arguments (the one builder).
+
+    An id argument is a comma list: one value goes under the singular key, several under
+    the plural key.  Raises ``ValueError`` for a level word that names no level.
+    """
+    filters: dict[str, Any] = {
+        "levels": _parse_levels(level) if level else [],
+        "exclude_levels": _parse_levels(exclude_level) if exclude_level else [],
+    }
+    if exclude_query:
+        filters["exclude_pattern"] = exclude_query
+    for single, plural, value in (
+        ("thread_id", "thread_ids", thread_id),
+        ("correlation_id", "correlation_ids", correlation_id),
+        ("trace_id", "trace_ids", trace_id),
+        ("service_name", "service_names", service_name),
+    ):
+        parts = [p.strip() for p in (value or "").split(",") if p.strip()]
+        if len(parts) == 1:
+            filters[single] = parts[0]
+        elif parts:
+            filters[plural] = parts
+    if time_start or time_end:
+        time_range: dict[str, str] = {}
+        if time_start:
+            time_range["start"] = time_start
+        if time_end:
+            time_range["end"] = time_end
+        filters["time_range"] = time_range
+    return filters
+
+
+def _investigator_for(
+    files: list[str],
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> Any:
+    """The investigator for a call: a freshly loaded one when the caller names a format
+    (it never reaches the cache), otherwise the cached one for ``files``."""
+    if parser_format or custom_regex:
+        investigator = logler_rs.PyInvestigator()
+        load_files(investigator, files, parser_format, custom_regex)
+        return investigator
+    return get_cached_investigator(files)
 
 
 # ---------------------------------------------------------------------------
@@ -289,27 +208,27 @@ def _parse_levels(level_str: str) -> List[str]:
 
 
 def search(
-    files: List[str],
-    query: Optional[str] = None,
-    level: Optional[str] = None,
-    exclude_level: Optional[str] = None,
-    exclude_query: Optional[str] = None,
-    thread_id: Optional[str] = None,
-    correlation_id: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    service_name: Optional[str] = None,
-    limit: Optional[int] = None,
-    tail: Optional[int] = None,
-    time_start: Optional[str] = None,
-    time_end: Optional[str] = None,
+    files: list[str],
+    query: str | None = None,
+    level: str | None = None,
+    exclude_level: str | None = None,
+    exclude_query: str | None = None,
+    thread_id: str | None = None,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+    service_name: str | None = None,
+    limit: int | None = None,
+    tail: int | None = None,
+    time_start: str | None = None,
+    time_end: str | None = None,
     context_lines: int = 3,
     output_format: str = "full",
-    fields: Optional[List[str]] = None,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
+    fields: list[str] | None = None,
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
     count_only: bool = False,
     offset: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Search log entries across one or more files.
 
     Performs full-text search with optional filtering by level, thread,
@@ -318,15 +237,18 @@ def search(
 
     Args:
         files: Log file paths to search.  Supports glob patterns.
-        query: Regex pattern to match against log messages.
+        query: A regex, matched without regard to letter case against the whole line as
+            written in the file (a JSON line: its keys and other fields too) and against
+            the message read from it. A pattern that is not a regex raises
+            ``InvalidPatternError`` (a ``ValueError``). An empty query is no filter.
         level: Comma-separated log levels to include (e.g. ``"ERROR,WARN"``).
         exclude_level: Comma-separated log levels to exclude.
-        exclude_query: Regex pattern to exclude matching entries.
+        exclude_query: A regex of lines to leave out, read as ``query`` is.
         thread_id: Filter by thread ID (comma-separated for multi).
         correlation_id: Filter by correlation ID (comma-separated for multi).
         trace_id: Filter by trace ID (comma-separated for multi).
         service_name: Filter by service name (comma-separated for multi).
-        limit: Maximum number of results (first *N* by relevance).
+        limit: Maximum number of results (the first *N* in time order).
             ``0`` means no cap (bypasses ``DEFAULT_MAX_RESULTS``).
             ``None`` applies the safety cap (10K).
         tail: Return last *N* matches by timestamp.
@@ -345,16 +267,30 @@ def search(
             for page 2).  Applied Rust-side before materialization.
 
     Returns:
-        SearchResult dict with shape::
+        With ``output_format="full"``, a SearchResult dict with shape::
 
             {
+                "results": [
+                    {
+                        "entry": {...},
+                        "context_before": [{...}, ...],
+                        "context_after": [{...}, ...],
+                        "relevance_score": float
+                    },
+                    ...
+                ],
                 "total_matches": int,
-                "results": [{"entry": {...}, ...}, ...],
-                "query": str | None,
-                "files": [str, ...],
-                "filters": {"level": str | None, ...},
-                "metadata": {"level_counts": {...}, "files_searched": int, ...}
+                "search_time_ms": int
             }
+
+        With ``fields=[...]`` the shape is ``ProjectedSearchResult``: the same, but each
+        ``entry`` holds only the asked keys (the context entries stay whole).
+
+        Every entry, the context entries included, has its level in upper case (``INFO``);
+        a line with no level reads ``UNKNOWN``.
+        ``"summary"``, ``"count"`` and ``"compact"`` return the shapes of
+        ``SearchSummaryResult``, ``SearchCountResult`` and ``SearchCompactResult``
+        (``logler.types``).
 
     Example::
 
@@ -364,57 +300,21 @@ def search(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    if parser_format or custom_regex:
-        investigator = logler_rs.PyInvestigator()
-        _load_files_with_config(investigator, files, parser_format, custom_regex)
-    else:
-        investigator = get_cached_investigator(files)
+    investigator = _investigator_for(files, parser_format, custom_regex)
 
-    # Build filters
-    filters: Dict[str, Any] = {"levels": [], "exclude_levels": []}
-    if level:
-        filters["levels"] = _parse_levels(level)
-    if exclude_level:
-        filters["exclude_levels"] = _parse_levels(exclude_level)
-    if exclude_query:
-        filters["exclude_pattern"] = exclude_query
+    filters = _build_filters(
+        level=level,
+        exclude_level=exclude_level,
+        exclude_query=exclude_query,
+        thread_id=thread_id,
+        correlation_id=correlation_id,
+        trace_id=trace_id,
+        service_name=service_name,
+        time_start=time_start,
+        time_end=time_end,
+    )
 
-    # ID filters — comma-separated → multi-value
-    if thread_id:
-        parts = [p.strip() for p in thread_id.split(",") if p.strip()]
-        if len(parts) == 1:
-            filters["thread_id"] = parts[0]
-        else:
-            filters["thread_ids"] = parts
-    if correlation_id:
-        parts = [p.strip() for p in correlation_id.split(",") if p.strip()]
-        if len(parts) == 1:
-            filters["correlation_id"] = parts[0]
-        else:
-            filters["correlation_ids"] = parts
-    if trace_id:
-        parts = [p.strip() for p in trace_id.split(",") if p.strip()]
-        if len(parts) == 1:
-            filters["trace_id"] = parts[0]
-        else:
-            filters["trace_ids"] = parts
-    if service_name:
-        parts = [p.strip() for p in service_name.split(",") if p.strip()]
-        if len(parts) == 1:
-            filters["service_name"] = parts[0]
-        else:
-            filters["service_names"] = parts
-
-    # Time range — push to Rust
-    if time_start or time_end:
-        tr: Dict[str, str] = {}
-        if time_start:
-            tr["start"] = time_start
-        if time_end:
-            tr["end"] = time_end
-        filters["time_range"] = tr
-
-    query_dict: Dict[str, Any] = {
+    query_dict: dict[str, Any] = {
         "files": files,
         "query": query,
         "filters": filters,
@@ -427,12 +327,20 @@ def search(
         query_dict["count_only"] = True
     if offset > 0:
         query_dict["offset"] = offset
+    if output_format in ("summary", "count"):
+        # The engine counts every match; the page (``limit``, ``tail``, ``offset``) is only
+        # where the summary's samples come from, so it needs no context, and a count none.
+        query_dict["context_lines"] = 0
+        if output_format == "summary":
+            query_dict["aggregate"] = "messages"
+        else:
+            query_dict["aggregate"] = "counts"
+            query_dict["count_only"] = True
 
     # Call Rust engine
     result_json = investigator.search(json.dumps(query_dict))
     result = json.loads(result_json)
     _normalize_search_result_levels(result)
-    _apply_custom_regex_to_results(result, custom_regex)
 
     # Field projection
     if fields and output_format == "full":
@@ -457,10 +365,10 @@ def search(
 
 
 def extract_ids(
-    files: List[str],
-    time_start: Optional[str] = None,
-    time_end: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: list[str],
+    time_start: str | None = None,
+    time_end: str | None = None,
+) -> dict[str, Any]:
     """Extract all unique IDs (thread, correlation, trace, service) from files.
 
     Args:
@@ -472,17 +380,23 @@ def extract_ids(
         ExtractedIds dict with shape::
 
             {
-                "thread_ids": [str, ...],
-                "correlation_ids": [str, ...],
-                "trace_ids": [str, ...],
-                "services": [str, ...],
-                "total_entries": int
+                "thread_ids": [{"id": str, "count": int, "first_seen": str | None,
+                                "last_seen": str | None}, ...],
+                "correlation_ids": [{...}, ...],
+                "trace_ids": [{...}, ...],
+                "services": [{...}, ...],
+                "total_entries": int,
+                "time_range": {"start": str, "end": str} | None
             }
+
+        Each list holds the most frequent id first; ``time_range`` is ``None`` when no
+        entry has a timestamp.
 
     Example::
 
         >>> ids = extract_ids(["app.log"])
         >>> print(f"{len(ids['thread_ids'])} threads found")
+        >>> print(ids["thread_ids"][0]["id"], ids["thread_ids"][0]["count"])
     """
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
@@ -491,26 +405,19 @@ def extract_ids(
 
     filters_json = None
     if time_start or time_end:
-        f: Dict[str, Any] = {}
-        tr: Dict[str, str] = {}
-        if time_start:
-            tr["start"] = time_start
-        if time_end:
-            tr["end"] = time_end
-        f["time_range"] = tr
-        filters_json = json.dumps(f)
+        filters_json = json.dumps(_build_filters(time_start=time_start, time_end=time_end))
 
     return json.loads(investigator.extract_ids(filters_json))
 
 
 def follow_thread(
-    files: List[str],
-    thread_id: Optional[str] = None,
-    correlation_id: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: list[str],
+    thread_id: str | None = None,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Follow a thread/correlation/trace through log files.
 
     Args:
@@ -540,18 +447,7 @@ def follow_thread(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Lazy import to avoid circular dependency
-    from .investigate import Investigator
-
-    # Use Investigator when custom parsing is requested so parsing honors the config.
-    if parser_format or custom_regex:
-        inv = Investigator()
-        inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
-        return inv.follow_thread(
-            thread_id=thread_id, correlation_id=correlation_id, trace_id=trace_id
-        )
-
-    investigator = get_cached_investigator(files)
+    investigator = _investigator_for(files, parser_format, custom_regex)
     result_json = investigator.follow_thread(files, thread_id, correlation_id, trace_id)
     result = json.loads(result_json)
     _normalize_entries(result.get("entries", []))
@@ -563,7 +459,7 @@ def get_context(
     line_number: int,
     lines_before: int = 10,
     lines_after: int = 10,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get context around a specific log line.
 
     Args:
@@ -578,7 +474,8 @@ def get_context(
             {
                 "target": {...},
                 "context_before": [...],
-                "context_after": [...]
+                "context_after": [...],
+                "related_threads": [{"thread_id": str, "entries": [...]}, ...]
             }
 
     Example::
@@ -597,11 +494,11 @@ def get_context(
 
 
 def find_patterns(
-    files: List[str],
+    files: list[str],
     min_occurrences: int = 3,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Find repeated patterns and anomalies in logs.
 
     Args:
@@ -615,9 +512,19 @@ def find_patterns(
 
             {
                 "patterns": [
-                    {"pattern": str, "occurrences": int, "first_seen": str, ...}
+                    {
+                        "pattern_type": "RepeatedError",
+                        "pattern": str,
+                        "occurrences": int,
+                        "first_seen": str,
+                        "last_seen": str,
+                        "affected_threads": [str, ...],
+                        "examples": [{...}, ...]
+                    }
                 ]
             }
+
+        Nothing else is returned: there is no total or file list.
 
     Example::
 
@@ -628,23 +535,14 @@ def find_patterns(
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
 
-    # Lazy import to avoid circular dependency
-    from .investigate import Investigator
-
-    if parser_format or custom_regex:
-        inv = Investigator()
-        inv.load_files(files, parser_format=parser_format, custom_regex=custom_regex)
-        return inv.find_patterns(min_occurrences=min_occurrences)
-
-    investigator = get_cached_investigator(files)
+    investigator = _investigator_for(files, parser_format, custom_regex)
     result_json = investigator.find_patterns(files, min_occurrences)
     result = json.loads(result_json)
     _normalize_pattern_examples(result)
-    _apply_custom_regex_to_results(result, custom_regex)
     return result
 
 
-def get_metadata(files: List[str]) -> Dict[str, Any]:
+def get_metadata(files: list[str]) -> list[dict[str, Any]]:
     """Get metadata about log files.
 
     Args:
@@ -653,12 +551,21 @@ def get_metadata(files: List[str]) -> Dict[str, Any]:
     Returns:
         List of file metadata dicts with shape::
 
-            [{"path": str, "size_bytes": int, "lines": int, "format": str, ...}]
+            [{
+                "path": str, "size_bytes": int, "lines": int, "entry_count": int, "format": str,
+                "time_range": {"start": str, "end": str} | None,
+                "available_fields": [str, ...],
+                "unique_threads": int, "unique_correlation_ids": int,
+                "log_levels": {"INFO": int, ...}
+            }]
 
     Example::
 
         >>> meta = get_metadata(["app.log"])
-        >>> print(f"Total lines: {sum(f['lines'] for f in meta)}")
+        >>> print(f"Total entries: {sum(f['entry_count'] for f in meta)}")
+
+    ``lines`` counts the lines of the file, blank ones too; ``entry_count`` counts its entries
+    (a blank line is none), and ``log_levels`` adds up to it.
     """
     if not RUST_AVAILABLE:
         raise RuntimeError("Rust backend not available")
@@ -668,144 +575,80 @@ def get_metadata(files: List[str]) -> Dict[str, Any]:
     return json.loads(result_json)
 
 
+def get_thread_level_counts(files: list[str]) -> dict[str, dict[str, int]]:
+    """Count each thread's entries by level.
+
+    Args:
+        files: Log file paths to count.
+
+    Returns:
+        A dict mapping every thread id in the files to a dict of its entry count per upper-case
+        level name (``UNKNOWN`` for an entry with no level; only levels that occur) and
+        ``total``, the thread's number of entries. Several files add up. An entry with no
+        thread id is in no thread's counts.
+
+    Example::
+
+        >>> counts = get_thread_level_counts(["app.log"])
+        >>> counts["worker-1"]
+        {'ERROR': 2, 'INFO': 3, 'total': 5}
+    """
+    if not RUST_AVAILABLE:
+        raise RuntimeError("Rust backend not available")
+
+    investigator = get_cached_investigator(files)
+    return json.loads(investigator.thread_level_counts(files))
+
+
 # ---------------------------------------------------------------------------
 # Token-efficient output formatters
 # ---------------------------------------------------------------------------
 
 
-def _format_as_summary(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert full search results to token-efficient summary format.
+def _format_as_summary(result: dict[str, Any]) -> dict[str, Any]:
+    """Convert search results to the token-efficient summary format.
 
-    Instead of returning all log entries, groups them by message and
-    provides aggregated statistics with a few examples.
+    Every count is the engine's, over every match of the query (``result["aggregates"]``);
+    the samples come from the returned page (``result["results"]``). In ``top_messages``
+    two messages of equal count come in the order of their first match.
     """
-    results = result.get("results", [])
-    if not results:
+    total = result["total_matches"]
+    if not total:
         return {
-            "total_matches": 0,
+            "total_matches": total,
             "unique_messages": 0,
             "log_levels": {},
             "top_messages": [],
             "sample_entries": [],
         }
-
-    # Group by message
-    message_groups = defaultdict(
-        lambda: {
-            "count": 0,
-            "first_seen": None,
-            "last_seen": None,
-            "levels": defaultdict(int),
-            "examples": [],
-        }
-    )
-
-    level_counts = defaultdict(int)
-    file_counts = defaultdict(int)
-
-    for item in results:
-        entry = item.get("entry", {})
-        message = entry.get("message", "").strip()
-        level = entry.get("level", "INFO")
-        timestamp = entry.get("timestamp")
-        file_path = entry.get("file", "")
-
-        # Update level counts
-        level_counts[level] += 1
-        file_counts[file_path] += 1
-
-        # Update message group
-        group = message_groups[message]
-        group["count"] += 1
-        group["levels"][level] += 1
-
-        if group["first_seen"] is None or (timestamp and timestamp < group["first_seen"]):
-            group["first_seen"] = timestamp
-
-        if group["last_seen"] is None or (timestamp and timestamp > group["last_seen"]):
-            group["last_seen"] = timestamp
-
-        # Keep up to 2 examples per message
-        if len(group["examples"]) < 2:
-            group["examples"].append(
-                {
-                    "file": file_path,
-                    "line": entry.get("line_number"),
-                    "timestamp": timestamp,
-                    "level": level,
-                }
-            )
-
-    # Convert to sorted list (most frequent first)
-    top_messages = []
-    for message, data in sorted(message_groups.items(), key=lambda x: x[1]["count"], reverse=True)[
-        :20
-    ]:
-        top_messages.append(
-            {
-                "message": message[:200],  # Truncate long messages
-                "count": data["count"],
-                "first_seen": data["first_seen"],
-                "last_seen": data["last_seen"],
-                "levels": dict(data["levels"]),
-                "examples": data["examples"],
-            }
-        )
-
-    # Sample entries (diverse selection)
-    sample_entries = _select_diverse_samples(results, max_samples=5)
-
+    counts = result["aggregates"]
     return {
-        "total_matches": len(results),
-        "unique_messages": len(message_groups),
-        "log_levels": dict(level_counts),
-        "by_file": dict(file_counts),
-        "top_messages": top_messages,
-        "sample_entries": sample_entries,
+        "total_matches": total,
+        "unique_messages": counts["unique_messages"],
+        "log_levels": counts["by_level"],
+        "by_file": counts["by_file"],
+        "top_messages": counts["top_messages"],
+        "sample_entries": _select_diverse_samples(result["results"], max_samples=5),
         "full_results_available": True,
     }
 
 
-def _format_as_count(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert full search results to count-only format (minimal tokens).
-
-    Returns only statistics, no actual log content.
-    """
-    results = result.get("results", [])
-    if not results:
-        return {"total_matches": 0, "by_level": {}, "by_file": {}, "time_range": None}
-
-    level_counts = defaultdict(int)
-    file_counts = defaultdict(int)
-    timestamps = []
-
-    for item in results:
-        entry = item.get("entry", {})
-        level = entry.get("level", "INFO")
-        file_path = entry.get("file", "")
-        timestamp = entry.get("timestamp")
-
-        level_counts[level] += 1
-        file_counts[file_path] += 1
-
-        if timestamp:
-            timestamps.append(timestamp)
-
-    # Time range
-    time_range = None
-    if timestamps:
-        timestamps.sort()
-        time_range = {"start": timestamps[0], "end": timestamps[-1]}
-
+def _format_as_count(result: dict[str, Any]) -> dict[str, Any]:
+    """Convert search results to the count format (minimal tokens): the engine's counts
+    over every match of the query, and no log content."""
+    total = result["total_matches"]
+    if not total:
+        return {"total_matches": total, "by_level": {}, "by_file": {}, "time_range": None}
+    counts = result["aggregates"]
     return {
-        "total_matches": len(results),
-        "by_level": dict(level_counts),
-        "by_file": dict(file_counts),
-        "time_range": time_range,
+        "total_matches": total,
+        "by_level": counts["by_level"],
+        "by_file": counts["by_file"],
+        "time_range": counts["time_range"],
     }
 
 
-def _format_as_compact(result: Dict[str, Any]) -> Dict[str, Any]:
+def _format_as_compact(result: dict[str, Any]) -> dict[str, Any]:
     """Convert full search results to compact format.
 
     Returns only essential fields, removing raw logs and extra context.
@@ -831,7 +674,7 @@ def _format_as_compact(result: Dict[str, Any]) -> Dict[str, Any]:
     return {"matches": compact_matches, "total": len(results)}
 
 
-def _select_diverse_samples(results: List[Dict], max_samples: int = 5) -> List[Dict]:
+def _select_diverse_samples(results: list[dict], max_samples: int = 5) -> list[dict]:
     """Select a diverse set of sample entries.
 
     Tries to include:
@@ -878,74 +721,3 @@ def _select_diverse_samples(results: List[Dict], max_samples: int = 5) -> List[D
                 indices_used.add(idx)
 
     return samples[:max_samples]
-
-
-# ---------------------------------------------------------------------------
-# File loading with config
-# ---------------------------------------------------------------------------
-
-
-def _load_files_with_config(
-    inv: Any,
-    files: List[str],
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-):
-    """Load files with optional parser config; falls back to plain load if config not supported.
-
-    When no explicit parser_format or custom_regex is given, auto-discovers
-    .logler/formats.yaml and matches file patterns to select the right format.
-    """
-    # Auto-discover config when no explicit format is given
-    if not parser_format and not custom_regex and files:
-        custom_regex = _auto_detect_format_from_config(files)
-
-    try:
-        if parser_format or custom_regex:
-            return inv.load_files_with_config(files, parser_format, custom_regex)
-    except Exception:
-        # Fall back silently to default loader if enhanced path fails
-        pass
-    return inv.load_files(files)
-
-
-def _auto_detect_format_from_config(files: List[str]) -> Optional[str]:
-    """Try to find a matching format in .logler/formats.yaml for the given files.
-
-    Searches from the directory of the first file. If a config is found and
-    any file matches a format's file_patterns, returns that format's regex.
-    Only returns a regex if ALL files match the SAME format (or have no match).
-    """
-    try:
-        from pathlib import Path as _Path
-
-        from .config import find_config, get_format_for_file, load_config
-
-        if not files:
-            return None
-
-        # Search from the directory of the first file
-        start_dir = _Path(files[0]).resolve().parent
-        config_path = find_config(start_dir)
-        if not config_path:
-            return None
-
-        config = load_config(config_path)
-        if not config.formats:
-            return None
-
-        # Find format for the first file that has a match
-        matched_regex = None
-        for f in files:
-            fmt = get_format_for_file(config, f)
-            if fmt:
-                if matched_regex is None:
-                    matched_regex = fmt.regex
-                elif matched_regex != fmt.regex:
-                    # Multiple files match different formats — don't auto-select
-                    return None
-
-        return matched_regex
-    except Exception:
-        # Config loading should never break file loading
-        return None

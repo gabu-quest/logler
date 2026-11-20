@@ -18,7 +18,6 @@ from logler.context import (
     get_correlation_id,
 )
 
-
 # ---------------------------------------------------------------------------
 # correlation_context / get_correlation_id
 # ---------------------------------------------------------------------------
@@ -45,10 +44,9 @@ class TestCorrelationContext:
 
     def test_exception_resets_context(self):
         """correlation_id is reset even if exception occurs inside context."""
-        with pytest.raises(RuntimeError):
-            with correlation_context("will-fail"):
-                assert get_correlation_id() == "will-fail"
-                raise RuntimeError("boom")
+        with pytest.raises(RuntimeError), correlation_context("will-fail"):
+            assert get_correlation_id() == "will-fail"
+            raise RuntimeError("boom")
         assert get_correlation_id() is None
 
 
@@ -444,10 +442,12 @@ class TestOtelBridge:
 
     def test_otel_bridge_without_otel_installed(self):
         """otel_bridge=True gracefully handles missing opentelemetry."""
-        with patch.dict("sys.modules", {"opentelemetry": None}):
-            with correlation_context("job-456", otel_bridge=True) as cid:
-                assert cid == "job-456"
-                assert get_correlation_id() == "job-456"
+        with (
+            patch.dict("sys.modules", {"opentelemetry": None}),
+            correlation_context("job-456", otel_bridge=True) as cid,
+        ):
+            assert cid == "job-456"
+            assert get_correlation_id() == "job-456"
         assert get_correlation_id() is None
 
     def test_otel_bridge_with_mock_otel(self):
@@ -495,9 +495,11 @@ class TestOtelBridge:
                 "opentelemetry.context": mock_context,
             },
         ):
-            with pytest.raises(RuntimeError, match="boom"):
-                with correlation_context("job-explode", otel_bridge=True):
-                    raise RuntimeError("boom")
+            with (
+                pytest.raises(RuntimeError, match="boom"),
+                correlation_context("job-explode", otel_bridge=True),
+            ):
+                raise RuntimeError("boom")
 
             # detach must still be called despite the exception
             mock_context.detach.assert_called_once_with(mock_token)

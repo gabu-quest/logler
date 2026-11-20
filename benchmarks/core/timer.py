@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import statistics
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from .base import TimingStats
 

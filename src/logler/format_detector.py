@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
+from .parser import is_blank_line
 
 # ============================================================================
 # Format Detection (M6.1 + M6.2)
@@ -28,7 +30,7 @@ class FormatCandidate:
     format: str
     confidence: float
     match_rate: float
-    detected_fields: List[str] = field(default_factory=list)
+    detected_fields: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -39,9 +41,9 @@ class FormatDetection:
     confidence: float
     sample_size: int
     match_rate: float
-    alternatives: List[Dict[str, Any]]
-    detected_fields: List[str]
-    sample_lines: List[str]
+    alternatives: list[dict[str, Any]]
+    detected_fields: list[str]
+    sample_lines: list[str]
     mixed: bool = False
 
 
@@ -59,16 +61,16 @@ _LOGFMT_KV = re.compile(r"[a-zA-Z_][\w]*=[^\s]+")
 def detect_format(
     file_path: str,
     sample_size: int = 50,
-    custom_formats: Optional[Dict[str, Any]] = None,
+    custom_formats: dict[str, Any] | None = None,
 ) -> FormatDetection:
     """Detect the log format of a file by sampling lines.
 
-    Reads up to sample_size non-empty lines and scores each against
+    Reads up to sample_size non-blank lines and scores each against
     known format patterns. Returns the best match with confidence.
 
     Args:
         file_path: Path to the log file.
-        sample_size: Number of non-empty lines to sample.
+        sample_size: Number of non-blank lines to sample.
         custom_formats: Optional dict of {name: {regex: str}} from config.
 
     Returns:
@@ -86,7 +88,7 @@ def detect_format(
             sample_lines=[],
         )
 
-    candidates: List[FormatCandidate] = []
+    candidates: list[FormatCandidate] = []
 
     # Test JSON
     candidates.append(_score_json(lines))
@@ -153,24 +155,25 @@ def detect_format(
     )
 
 
-def _read_sample_lines(file_path: str, max_lines: int) -> List[str]:
-    """Read up to max_lines non-empty, non-comment lines from a file."""
-    lines: List[str] = []
+def _read_sample_lines(file_path: str, max_lines: int) -> list[str]:
+    """Read up to max_lines lines of a file that are neither blank (no entry, by the one
+    rule of ``parser.is_blank_line``) nor a ``#`` comment."""
+    lines: list[str] = []
     try:
-        with open(file_path, "r", errors="replace") as f:
+        with open(file_path, errors="replace") as f:
             for raw in f:
                 stripped = raw.rstrip("\n\r")
-                if not stripped or stripped.startswith("#"):
+                if is_blank_line(stripped) or stripped.startswith("#"):
                     continue
                 lines.append(stripped)
                 if len(lines) >= max_lines:
                     break
-    except (OSError, IOError):
+    except OSError:
         pass
     return lines
 
 
-def _score_json(lines: List[str]) -> FormatCandidate:
+def _score_json(lines: list[str]) -> FormatCandidate:
     """Score lines as JSON format."""
     matches = 0
     all_fields: set = set()
@@ -197,7 +200,7 @@ def _score_json(lines: List[str]) -> FormatCandidate:
     )
 
 
-def _score_syslog(lines: List[str]) -> FormatCandidate:
+def _score_syslog(lines: list[str]) -> FormatCandidate:
     """Score lines as syslog format (BSD or RFC5424)."""
     matches = 0
     for line in lines:
@@ -216,7 +219,7 @@ def _score_syslog(lines: List[str]) -> FormatCandidate:
     )
 
 
-def _score_common_log(lines: List[str]) -> FormatCandidate:
+def _score_common_log(lines: list[str]) -> FormatCandidate:
     """Score lines as Apache/Nginx Common Log Format."""
     matches = 0
     for line in lines:
@@ -235,7 +238,7 @@ def _score_common_log(lines: List[str]) -> FormatCandidate:
     )
 
 
-def _score_logfmt(lines: List[str]) -> FormatCandidate:
+def _score_logfmt(lines: list[str]) -> FormatCandidate:
     """Score lines as logfmt (key=value pairs)."""
     matches = 0
     all_fields: set = set()
@@ -258,7 +261,7 @@ def _score_logfmt(lines: List[str]) -> FormatCandidate:
     )
 
 
-def _score_custom(lines: List[str], name: str, regex_str: str) -> Optional[FormatCandidate]:
+def _score_custom(lines: list[str], name: str, regex_str: str) -> FormatCandidate | None:
     """Score lines against a custom regex format."""
     try:
         pattern = re.compile(regex_str)
@@ -295,15 +298,15 @@ class LogTemplate:
 
     template: str
     count: int
-    examples: List[str]
-    variable_positions: List[int]
+    examples: list[str]
+    variable_positions: list[int]
 
 
 @dataclass
 class TemplateResult:
     """Result of template mining."""
 
-    templates: List[Dict[str, Any]]
+    templates: list[dict[str, Any]]
     total_lines: int
     unique_templates: int
     coverage: float
@@ -315,19 +318,19 @@ class _DrainNode:
     __slots__ = ("children", "clusters")
 
     def __init__(self) -> None:
-        self.children: Dict[str, _DrainNode] = {}
-        self.clusters: List[_DrainCluster] = []
+        self.children: dict[str, _DrainNode] = {}
+        self.clusters: list[_DrainCluster] = []
 
 
 class _DrainCluster:
     """A cluster of log messages sharing a common template."""
 
-    __slots__ = ("tokens", "count", "examples")
+    __slots__ = ("count", "examples", "tokens")
 
-    def __init__(self, tokens: List[str]) -> None:
+    def __init__(self, tokens: list[str]) -> None:
         self.tokens = list(tokens)
         self.count = 1
-        self.examples: List[str] = []
+        self.examples: list[str] = []
 
     def template_str(self) -> str:
         return " ".join(self.tokens)
@@ -360,10 +363,10 @@ class DrainParser:
         self.max_clusters = max_clusters
         self.max_examples = max_examples
         # Root: token_count -> DrainNode
-        self._root: Dict[int, _DrainNode] = {}
+        self._root: dict[int, _DrainNode] = {}
         self._cluster_count = 0
 
-    def add_message(self, message: str) -> Optional[_DrainCluster]:
+    def add_message(self, message: str) -> _DrainCluster | None:
         """Process a single log message through the Drain tree.
 
         Returns the cluster the message was assigned to, or None if skipped.
@@ -418,16 +421,16 @@ class DrainParser:
             self._cluster_count += 1
             return new_cluster
 
-    def get_clusters(self) -> List[_DrainCluster]:
+    def get_clusters(self) -> list[_DrainCluster]:
         """Collect all clusters from the tree."""
-        clusters: List[_DrainCluster] = []
+        clusters: list[_DrainCluster] = []
         self._collect(self._root, clusters)
         return clusters
 
     def _collect(
         self,
         nodes: Any,
-        result: List[_DrainCluster],
+        result: list[_DrainCluster],
     ) -> None:
         if isinstance(nodes, dict):
             for v in nodes.values():
@@ -438,7 +441,7 @@ class DrainParser:
                 self._collect(child, result)
 
 
-def _tokenize(message: str) -> List[str]:
+def _tokenize(message: str) -> list[str]:
     """Split a log message into tokens."""
     return message.split()
 
@@ -458,24 +461,24 @@ def _is_variable_token(token: str) -> bool:
     if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", token):
         return True
     # Paths (start with /)
-    if token.startswith("/") and len(token) > 1:
-        return True
-    return False
+    return token.startswith("/") and len(token) > 1
 
 
-def _sequence_similarity(tokens_a: List[str], tokens_b: List[str]) -> float:
+def _sequence_similarity(tokens_a: list[str], tokens_b: list[str]) -> float:
     """Compute fraction of matching tokens between two sequences."""
     if len(tokens_a) != len(tokens_b):
         return 0.0
     if not tokens_a:
         return 0.0
-    matches = sum(1 for a, b in zip(tokens_a, tokens_b) if a == b or a == "<*>" or b == "<*>")
+    matches = sum(
+        1 for a, b in zip(tokens_a, tokens_b, strict=False) if a == b or a == "<*>" or b == "<*>"
+    )
     return matches / len(tokens_a)
 
 
-def _merge_tokens(template: List[str], tokens: List[str]) -> None:
+def _merge_tokens(template: list[str], tokens: list[str]) -> None:
     """Merge new tokens into template, replacing mismatches with <*>."""
-    for i, (t, tok) in enumerate(zip(template, tokens)):
+    for i, (t, tok) in enumerate(zip(template, tokens, strict=False)):
         if t != tok and t != "<*>":
             template[i] = "<*>"
 
@@ -514,7 +517,7 @@ def mine_templates(
     clusters = parser.get_clusters()
     clusters.sort(key=lambda c: c.count, reverse=True)
 
-    templates: List[Dict[str, Any]] = []
+    templates: list[dict[str, Any]] = []
     for cluster in clusters:
         template_str = cluster.template_str()
         variable_positions = [i for i, t in enumerate(cluster.tokens) if t == "<*>"]

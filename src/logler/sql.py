@@ -10,23 +10,141 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import duckdb
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
+from ._search_core import level_text
+from .metrics import extract_numeric_fields
+from .parser import format_time, without_leap_second
 
-    from logler.investigate import LogIndex
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+_LOGS_COLUMNS = (
+    ("file", "TEXT"),
+    ("line_number", "INTEGER"),
+    ("timestamp", "TIMESTAMP"),
+    ("level", "TEXT"),
+    ("message", "TEXT"),
+    ("thread_id", "TEXT"),
+    ("correlation_id", "TEXT"),
+    ("trace_id", "TEXT"),
+    ("span_id", "TEXT"),
+    ("raw", "TEXT"),
+)
+
+_METRICS_COLUMNS = (
+    ("file", "TEXT"),
+    ("line_number", "INTEGER"),
+    ("timestamp", "TIMESTAMP"),
+    ("field_name", "TEXT"),
+    ("value", "DOUBLE"),
+    ("unit", "TEXT"),
+)
+
+
+def _create_table(conn: duckdb.DuckDBPyConnection, name: str, columns: tuple) -> None:
+    ddl = ", ".join(f"{col} {kind}" for col, kind in columns)
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {name} ({ddl})")
+
+
+# Characters per bulk load: the temp CSV holds this much and at most one row more. Each
+# load costs DuckDB around a tenth of a second, so the chunk is large: a log of half a
+# million ordinary lines goes in at once.
+_CHUNK_CHARS = 256_000_000
+# DuckDB's default ``max_line_size``, in bytes.
+_CSV_LINE_LIMIT = 2_000_000
+
+
+def _bulk_insert(
+    conn: duckdb.DuckDBPyConnection, name: str, columns: tuple, path: str, longest_row: int
+) -> None:
+    """Append a headerless CSV to a table (DuckDB parses it in C++: ~230x faster than
+    ``executemany``).
+
+    The dialect is spelled out, so DuckDB reads the file the way ``csv.writer`` wrote it and
+    guesses nothing from the rows: left to guess the line end, it refuses a file where a
+    field holds a bare carriage return. ``longest_row`` (in characters, at most four bytes
+    each) raises the line limit for a row longer than DuckDB allows by default."""
+    spec = ", ".join(f"'{col}': '{kind}'" for col, kind in columns)
+    limit = max(_CSV_LINE_LIMIT, 4 * longest_row)
+    conn.execute(
+        f"INSERT INTO {name} SELECT * FROM read_csv('{path}', header=false, nullstr='', "
+        f"auto_detect=false, delim=',', quote='\"', escape='\"', new_line='\\n', "
+        f"max_line_size={limit}, columns={{{spec}}})"
+    )
+
+
+class _Staged:
+    """One table's rows on their way in: written to a temp CSV and bulk-loaded every
+    ``_CHUNK_CHARS`` characters, so the file never holds more than one chunk."""
+
+    def __init__(
+        self, conn: duckdb.DuckDBPyConnection, name: str, columns: tuple, path: str
+    ) -> None:
+        self._conn = conn
+        self._name = name
+        self._columns = columns
+        self._path = path
+        self._out: Any = None
+        self._writerow: Any = None
+        self._chars = 0
+        self._longest = 0
+        self.rows = 0
+
+    def add(self, row: list) -> None:
+        if self._out is None:
+            self._out = open(self._path, "w", newline="", encoding="utf-8")  # noqa: SIM115 - opened on the first row, closed by abandon()
+            self._writerow = csv.writer(self._out, lineterminator="\n").writerow
+        # writerow returns what the file's write returns: the row's length in characters.
+        written = self._writerow(row)
+        if written > self._longest:
+            self._longest = written
+        self.rows += 1
+        self._chars += written
+        if self._chars >= _CHUNK_CHARS:
+            self.flush()
+
+    def flush(self) -> None:
+        """Load the rows written since the last load."""
+        if self._out is None:
+            return
+        self.abandon()
+        _bulk_insert(self._conn, self._name, self._columns, self._path, self._longest)
+        self._chars = 0
+        self._longest = 0
+
+    def abandon(self) -> None:
+        """Close the file without loading it."""
+        if self._out is not None:
+            self._out.close()
+            self._out = None
+
+
+def _json_value(value: Any) -> Any:
+    """A query result value as JSON holds it: a time is written the way an entry's time is,
+    also inside a list or a struct. A ``TIMESTAMP`` carries no zone and the load stores UTC;
+    a time that carries its zone keeps its instant."""
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return format_time(value)
+    if isinstance(value, (list, tuple)):
+        return [_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_value(item) for key, item in value.items()}
+    return value
 
 
 class SqlEngine:
     """SQL query engine for log investigation.
 
-    Loads log entries into an in-memory DuckDB database and provides
-    SQL query capabilities for advanced analysis.
+    Loads log entries into an in-memory DuckDB database (a ``logs`` and a ``metrics``
+    table) and provides SQL query capabilities for advanced analysis.
 
     Not thread-safe — create one instance per thread.
     """
@@ -38,19 +156,22 @@ class SqlEngine:
             db_path: Optional path for a disk-backed DuckDB database.
                      Defaults to in-memory (``":memory:"``).
         """
-        self.conn = duckdb.connect(db_path or ":memory:")
-        # External access locked lazily before first user SQL — load_files()
-        # needs filesystem access for bulk CSV loading via read_csv().
+        self.conn: duckdb.DuckDBPyConnection | None = duckdb.connect(db_path or ":memory:")
+        # External access is locked lazily before the first user SQL —
+        # load_entries() needs filesystem access for the bulk CSV load.
         self._external_access_locked = False
-        self._tables_loaded: list[str] = []
 
-    def _lock_external_access(self) -> None:
-        """Disable filesystem access. One-way — cannot be re-enabled."""
+    def _lock_external_access(self) -> duckdb.DuckDBPyConnection:
+        """Disable filesystem access. One-way — cannot be re-enabled.
+
+        Returns the open connection; raises ``RuntimeError`` once the engine is closed.
+        """
         if self.conn is None:
             raise RuntimeError("SqlEngine has been closed")
         if not self._external_access_locked:
             self.conn.execute("SET enable_external_access = false")
             self._external_access_locked = True
+        return self.conn
 
     def close(self) -> None:
         """Close the underlying DuckDB connection."""
@@ -58,213 +179,116 @@ class SqlEngine:
             self.conn.close()
             self.conn = None
 
-    def load_files(self, indices: Mapping[str, LogIndex]) -> None:
-        """Load log files into SQL tables.
+    @staticmethod
+    def reads_only_logs(sql: str) -> bool:
+        """True when DuckDB's own parser says the query reads the ``logs`` table and nothing
+        else. A caller that loads for this one query can then leave the metrics table out
+        (``load_entries(..., metrics=False)``), which is close to half the load's time. Any
+        doubt (no table named, another table, a query the parser refuses) is ``False``.
 
-        Creates a 'logs' table with all entries from the provided indices.
+        The query is read on a throwaway connection with file access off. To name a query's
+        tables DuckDB opens a file or URL the query reads, and the caller asks before the
+        load, when the engine's own connection must still read its temp CSVs."""
+        probe = duckdb.connect(":memory:", config={"enable_external_access": "false"})
+        try:
+            names = probe.get_table_names(sql)
+        except duckdb.Error:
+            return False
+        finally:
+            probe.close()
+        return {name.lower() for name in names} == {"logs"}
 
-        Args:
-            indices: Mapping of file paths to LogIndex objects
+    def load_entries(self, entries: Iterable[Mapping[str, Any]], *, metrics: bool = True) -> int:
+        """Load log entries into the ``logs`` and ``metrics`` tables, reading them once.
+
+        Each entry is a dict in the shape the Rust index gives: ``file``, ``line_number``,
+        ``timestamp`` (RFC 3339 text or None), ``level``, ``message``, ``thread_id``,
+        ``correlation_id``, ``trace_id``, ``span_id``, ``raw`` and ``fields``. Entries are
+        written to temp CSVs as they come and loaded a chunk at a time, so none is held
+        after its row is written and the temp files stay one chunk long.
+
+        A leap second (``23:59:60``) is stored as the last second of its minute.
+
+        The metrics table enables queries like::
+
+            SELECT field_name, AVG(value), MAX(value) FROM metrics GROUP BY field_name
+            SELECT m.*, l.message FROM metrics m JOIN logs l
+                ON m.file = l.file AND m.line_number = l.line_number WHERE m.value > 1000
+
+        ``metrics=False`` leaves the metrics table out altogether: not filled and not
+        created, so a query that reaches for it fails instead of reading an empty table.
+
+        Must be called before the first query: the CSV load needs filesystem access.
+
+        Returns:
+            The number of rows added to ``logs``.
         """
         if self.conn is None:
             raise RuntimeError("SqlEngine has been closed")
-        # Create logs table
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS logs (
-                file TEXT,
-                line_number INTEGER,
-                timestamp TIMESTAMP,
-                level TEXT,
-                message TEXT,
-                thread_id TEXT,
-                correlation_id TEXT,
-                trace_id TEXT,
-                span_id TEXT,
-                raw TEXT
+        _create_table(self.conn, "logs", _LOGS_COLUMNS)
+        if metrics:
+            _create_table(self.conn, "metrics", _METRICS_COLUMNS)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logs = _Staged(self.conn, "logs", _LOGS_COLUMNS, os.path.join(tmpdir, "logs.csv"))
+            numbers = _Staged(
+                self.conn, "metrics", _METRICS_COLUMNS, os.path.join(tmpdir, "metrics.csv")
             )
-        """
-        )
-
-        # Materialize entries once per file — avoids double-iteration if
-        # index.entries is a one-shot iterable (generator / cursor).
-        materialized: dict[str, list] = {}
-        for file_path, index in indices.items():
-            entries = list(getattr(index, "entries", None) or [])
-            if entries:
-                materialized[file_path] = entries
-
-        # Bulk-load entries via temp CSV + read_csv() (230x faster than
-        # executemany at scale — DuckDB parses CSV in C++, zero Python overhead).
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
-        try:
-            writer = csv.writer(tmp, lineterminator="\n")
-            row_count = 0
-
-            for file_path, entries in materialized.items():
+            try:
                 for entry in entries:
-                    ts = getattr(entry, "timestamp", None)
-                    if ts is not None:
-                        if isinstance(ts, datetime):
-                            ts = ts.isoformat()
-                        elif hasattr(ts, "to_rfc3339"):
-                            ts = ts.to_rfc3339()
-
-                    level = getattr(entry, "level", None)
-                    if level is not None and hasattr(level, "value"):
-                        level = level.value
-                    elif level is not None and not isinstance(level, str):
-                        level = str(level)
-
-                    writer.writerow(
+                    timestamp = entry.get("timestamp")
+                    if timestamp:
+                        timestamp = without_leap_second(timestamp)
+                    logs.add(
                         [
-                            file_path,
-                            getattr(entry, "line_number", None),
-                            ts,
-                            level,
-                            getattr(entry, "message", None),
-                            getattr(entry, "thread_id", None),
-                            getattr(entry, "correlation_id", None),
-                            getattr(entry, "trace_id", None),
-                            getattr(entry, "span_id", None),
-                            getattr(entry, "raw", None),
+                            entry.get("file"),
+                            entry.get("line_number"),
+                            timestamp,
+                            level_text(entry.get("level")),
+                            entry.get("message"),
+                            entry.get("thread_id"),
+                            entry.get("correlation_id"),
+                            entry.get("trace_id"),
+                            entry.get("span_id"),
+                            entry.get("raw"),
                         ]
                     )
-                    row_count += 1
+                    if not metrics:
+                        continue
+                    for name, points in extract_numeric_fields([entry]).items():
+                        for point in points:
+                            # A point's time is its entry's.
+                            numbers.add(
+                                [
+                                    point.file,
+                                    point.line_number,
+                                    timestamp,
+                                    name,
+                                    point.value,
+                                    point.unit,
+                                ]
+                            )
+                logs.flush()
+                numbers.flush()
+            finally:
+                logs.abandon()
+                numbers.abandon()
 
-        finally:
-            tmp.close()
+        return logs.rows
 
-        try:
-            if row_count > 0:
-                self.conn.execute(
-                    f"INSERT INTO logs SELECT * FROM read_csv('{tmp.name}', "
-                    "header=false, nullstr='', columns={"
-                    "'file': 'TEXT', 'line_number': 'INTEGER', "
-                    "'timestamp': 'TIMESTAMP', 'level': 'TEXT', "
-                    "'message': 'TEXT', 'thread_id': 'TEXT', "
-                    "'correlation_id': 'TEXT', 'trace_id': 'TEXT', "
-                    "'span_id': 'TEXT', 'raw': 'TEXT'})"
-                )
-        finally:
-            os.unlink(tmp.name)
+    def execute(self, sql: str) -> tuple[list[str], list[dict[str, Any]]]:
+        """Run a query; return its column names and its rows as dicts of JSON values.
 
-        if "logs" not in self._tables_loaded:
-            self._tables_loaded.append("logs")
-
-        # Also populate metrics table from numeric extraction
-        self._load_metrics(indices, materialized)
-
-    def _load_metrics(
-        self,
-        indices: Mapping[str, LogIndex],
-        materialized: dict[str, list] | None = None,
-    ) -> None:
-        """Extract numeric values from log entries and load into a metrics table.
-
-        Called only from load_files() before external access is locked.
-        Do NOT call after _lock_external_access() — read_csv() needs filesystem access.
-
-        This enables SQL queries like:
-            SELECT field_name, AVG(value), MAX(value) FROM metrics GROUP BY field_name
-            SELECT m.*, l.message FROM metrics m JOIN logs l
-                ON m.file = l.file AND m.line_number = l.line_number
-                WHERE m.value > 1000
-
-        Args:
-            indices: Original indices mapping (used as fallback).
-            materialized: Pre-materialized ``{path: [entry, ...]}`` from
-                :meth:`load_files`.  When provided the entries are reused
-                instead of re-iterating ``index.entries`` (which may be
-                exhausted if it was a one-shot iterable).
+        Raises ``duckdb.Error`` for a SQL error.
         """
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS metrics (
-                file TEXT,
-                line_number INTEGER,
-                timestamp TIMESTAMP,
-                field_name TEXT,
-                value DOUBLE,
-                unit TEXT
-            )
-        """
-        )
-
-        from .metrics import extract_numeric_fields
-
-        # Prefer pre-materialized entries; fall back to indices for
-        # callers that invoke _load_metrics directly.
-        source = (
-            materialized
-            if materialized is not None
-            else {fp: list(getattr(idx, "entries", None) or []) for fp, idx in indices.items()}
-        )
-
-        # Collect all metric points across all files, then bulk-load via CSV.
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
-        try:
-            writer = csv.writer(tmp, lineterminator="\n")
-            row_count = 0
-
-            for file_path, entries in source.items():
-                if not entries:
-                    continue
-
-                entry_dicts = []
-                for entry in entries:
-                    ts = getattr(entry, "timestamp", None)
-                    if ts is not None:
-                        if isinstance(ts, datetime):
-                            ts = ts.isoformat()
-                        elif hasattr(ts, "to_rfc3339"):
-                            ts = ts.to_rfc3339()
-
-                    entry_dicts.append(
-                        {
-                            "file": file_path,
-                            "line_number": getattr(entry, "line_number", None),
-                            "timestamp": ts,
-                            "message": getattr(entry, "message", None)
-                            or getattr(entry, "raw", None)
-                            or "",
-                            "fields": getattr(entry, "fields", None) or {},
-                        }
-                    )
-
-                all_series = extract_numeric_fields(entry_dicts)
-
-                for field_name, points in all_series.items():
-                    for point in points:
-                        writer.writerow(
-                            [
-                                point.file,
-                                point.line_number,
-                                point.timestamp,
-                                field_name,
-                                point.value,
-                                point.unit,
-                            ]
-                        )
-                        row_count += 1
-
-        finally:
-            tmp.close()
-
-        try:
-            if row_count > 0:
-                self.conn.execute(
-                    f"INSERT INTO metrics SELECT * FROM read_csv('{tmp.name}', "
-                    "header=false, nullstr='', columns={"
-                    "'file': 'TEXT', 'line_number': 'INTEGER', "
-                    "'timestamp': 'TIMESTAMP', 'field_name': 'TEXT', "
-                    "'value': 'DOUBLE', 'unit': 'TEXT'})"
-                )
-        finally:
-            os.unlink(tmp.name)
-
-        if "metrics" not in self._tables_loaded:
-            self._tables_loaded.append("metrics")
+        conn = self._lock_external_access()
+        result = conn.execute(sql)
+        columns = [desc[0] for desc in result.description]
+        rows = [
+            {col: _json_value(value) for col, value in zip(columns, row, strict=False)}
+            for row in result.fetchall()
+        ]
+        return columns, rows
 
     def query(self, sql: str) -> str:
         """Execute a SQL query and return results as JSON.
@@ -275,22 +299,7 @@ class SqlEngine:
         Returns:
             JSON string containing array of result objects
         """
-        self._lock_external_access()
-        result = self.conn.execute(sql)
-        columns = [desc[0] for desc in result.description]
-
-        rows = []
-        for row in result.fetchall():
-            obj: dict[str, Any] = {}
-            for i, col_name in enumerate(columns):
-                value = row[i]
-                # Convert datetime to ISO format string
-                if isinstance(value, datetime):
-                    value = value.isoformat()
-                obj[col_name] = value
-            rows.append(obj)
-
-        return json.dumps(rows)
+        return json.dumps(self.execute(sql)[1])
 
     def get_tables(self) -> list[str]:
         """Get available tables.
@@ -298,9 +307,9 @@ class SqlEngine:
         Returns:
             List of table names
         """
-        self._lock_external_access()
-        result = self.conn.execute(
-            "SELECT table_name FROM information_schema.tables " "WHERE table_schema = 'main'"
+        conn = self._lock_external_access()
+        result = conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         )
         return [row[0] for row in result.fetchall()]
 
@@ -314,8 +323,6 @@ class SqlEngine:
             JSON string with schema information, or empty array for
             invalid/nonexistent tables.
         """
-        import re
-
         self._lock_external_access()
         if not re.fullmatch(r"[A-Za-z_]\w*", table):
             return json.dumps([])

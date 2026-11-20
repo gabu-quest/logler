@@ -1,10 +1,10 @@
 # Logler
 
-Rust-powered log viewer optimized for AI agents. Three-tier architecture:
-Rust core -> PyO3 bridge -> Python API/CLI.
+Rust-powered log viewer optimized for AI agents. Three tiers: Rust core -> PyO3 bridge ->
+Python API/CLI. Layers, data flow, memory and limits: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Active Roadmaps
-- [Sqler Bridge](./ROADMAP.md) — current milestone: M-2 (complete)
+- [Sqler Bridge](./ROADMAP.md) — M-1 to M-3 complete, M-4 paused
 
 ## Architecture
 
@@ -13,7 +13,7 @@ crates/logler-core/src/     — Rust engine (parser, index, investigate, hierarc
 crates/logler-py/src/lib.rs — PyO3 FFI bridge
 src/logler/investigate.py   — Python API re-export facade (wraps submodules)
 src/logler/llm_cli/         — LLM CLI package (JSON output, 8 submodules)
-src/logler/cli.py            — Human CLI (view, stats, investigate)
+src/logler/cli.py           — Human CLI (view, stats, investigate, watch)
 ```
 
 ### Python Modules
@@ -22,31 +22,26 @@ src/logler/cli.py            — Human CLI (view, stats, investigate)
 |--------|---------|
 | `investigate.py` | Re-export facade + Investigator class + M5/M6 wrappers |
 | `_search_core.py` | Core search, follow, context, patterns, metadata (Rust FFI) |
+| `_loading.py` | The one loader: each file goes into an investigator with its own format |
+| `cache.py` | Parsed files behind the module-level functions (10 file sets, oldest out) |
 | `hierarchy.py` | Thread hierarchy, error flow, bottleneck analysis, correlation chains |
 | `comparison.py` | Thread/period comparison, cross-service timeline |
 | `sampling.py` | Smart sampling strategies |
-| `session.py` | InvestigationSession class (stateful investigations) |
+| `session.py` | InvestigationSession (stateful investigations) |
 | `export.py` | Jaeger/Zipkin trace export |
-| `types.py` | TypedDict definitions for all return shapes |
-| `llm_cli/` | Click CLI package (8 submodules, see below) |
-| `cli.py` | Human CLI (rich terminal output) |
-| `config.py` | `.logler.toml` config loader (Pydantic v2 models) |
-| `correlator.py` | Virtual trace correlation engine (field match + temporal) |
-| `event_correlator.py` | Cross-file event correlation (time windows + triggers) |
+| `types.py`, `models.py` | TypedDicts for every return shape; Pydantic v2 models of the same |
+| `config.py` | Loader for `.logler/formats.yaml` and `.logler/correlations.yaml` |
+| `correlator.py`, `event_correlator.py` | Rule-based and time-window correlation across files |
 | `metrics.py` | Numeric value extraction, stats, z-score anomaly detection |
-| `format_detector.py` | Format auto-detection + Drain template mining |
-| `builtin_formats.py` | Built-in format library (syslog, logfmt, CLF, etc.) |
-| `models.py` | Pydantic v2 data models |
-| `tree_formatter.py` | Tree and waterfall rendering |
+| `format_detector.py`, `builtin_formats.py` | Format detection, Drain templates, built-in formats |
 | `sql.py` | DuckDB-powered SQL queries |
-| `tracker.py` | Thread/correlation tracking |
-| `parser.py` | Log format parsing |
-| `safe_regex.py` | Regex compilation with safety limits |
-| `cache.py` | LRU caching |
-| `helpers.py` | Shared utilities |
-| `watcher.py` | File watcher (watchdog) |
-| `terminal.py` | Rich terminal rendering |
-| `bootstrap.py` | Package initialization |
+| `parser.py` | `LogParser`, a thin adapter over the Rust parser |
+| `log_reader.py`, `watcher.py` | Lines of a file forwards, backwards and followed; file watcher |
+| `db_source.py` | Reads a sqler database as a log source (`--db`) |
+| `context.py` | Correlation IDs for programs that write logs |
+| `helpers.py` | Shortcuts for common investigations |
+| `cli.py`, `terminal.py`, `tree_formatter.py` | Human CLI and its Rich rendering |
+| `tracker.py`, `safe_regex.py` | Thread tracking; regex compilation with limits |
 
 ### LLM CLI Package (`llm_cli/`)
 
@@ -61,238 +56,100 @@ src/logler/cli.py            — Human CLI (view, stats, investigate)
 | `_correlation.py` | correlation group (list, run), correlate-events |
 | `_metrics.py` | verify-pattern, emit, metrics, detect, templates |
 
+Every command, flag and output shape: `docs/LLM_CLI_REFERENCE.md`. Exit codes: 0=success,
+1=no results, 2=user error, 3=internal error.
+
+`--db path/to/sqler.db` reads a sqler database beside or instead of FILES (qler tables are
+detected). Without it: `context`, `format list/test/validate`, `correlation list`,
+`session list/note/conclude`.
+
 ### Public API Contract (logler-web imports)
 
-These 13+ functions are imported by logler-web's FastAPI backend:
+logler-web's FastAPI backend imports these from `logler.investigate`; keep their names,
+arguments and return keys (`types.py`):
 
 ```python
-from logler.investigate import (
-    search, extract_ids, follow_thread, get_context, find_patterns,
-    get_metadata, follow_thread_hierarchy, get_hierarchy_summary,
-    analyze_error_flow, cross_service_timeline, compare_threads,
-    smart_sample, extract_metrics, detect_formats, mine_log_templates,
-)
+search, extract_ids, follow_thread, get_context, find_patterns,
+get_metadata, follow_thread_hierarchy, get_hierarchy_summary,
+analyze_error_flow, cross_service_timeline, compare_threads,
+smart_sample, extract_metrics, detect_formats, mine_log_templates
 ```
-
-All return TypedDict-documented dicts. See `types.py` for shapes.
 
 ### Module Split Architecture
 
 ```
 investigate.py (facade)
-  ├── _search_core.py     ← foundation, zero circular imports
-  ├── hierarchy.py         ← imports from _search_core
-  ├── comparison.py        ← imports from _search_core
-  ├── sampling.py          ← imports from _search_core
-  ├── session.py           ← imports from investigate (facade)
-  └── export.py            ← standalone
+  ├── _search_core.py     ← foundation; imports only _loading and cache
+  │     ├── _loading.py   ← imports config, nothing from _search_core
+  │     └── cache.py      ← imports _loading and config
+  ├── hierarchy.py, comparison.py, sampling.py   ← import from _search_core
+  ├── session.py          ← imports from _search_core and comparison
+  └── export.py           ← standalone
 ```
 
-**Key rule:** `_search_core.py` has zero logler submodule imports (only `.safe_regex` and conditional `logler_rs`). All other modules import from `_search_core` — never the reverse.
+**Key rule:** from the package, `_search_core.py` imports only `_loading` and `cache` (and
+`logler_rs`, conditionally). Other modules import from `_search_core`, never the reverse.
 
 ## Philosophy: Not a SQL Wrapper
 
-Logler's value is in its **own algorithms** — Rust parsing/indexing, Python correlation engines,
-sampling strategies, metrics extraction, format detection. DuckDB/SQL is an optional power-user
-escape hatch (`sql.py`), not the foundation.
+Logler's value is its **own algorithms**: Rust parsing and indexing, correlation, sampling,
+metrics, format detection. DuckDB (`sql.py`) is an escape hatch for ad-hoc queries, not the
+foundation: search, hierarchy, correlation, metrics and sampling use logler's own engines.
 
-**SQL passthrough is OK** where it genuinely makes sense (ad-hoc queries, aggregations DuckDB
-is built for). Don't reinvent the wheel. But the library's core paths (search, hierarchy,
-correlation, metrics, sampling) must use logler's own engines.
-
-**Tests and tours MUST test the library, not DuckDB.** Every test exercises logler's public API
-(`search()`, `follow_thread()`, `extract_metrics()`, etc.). Testing SQL passthrough would be
-testing DuckDB, not logler. Tours demonstrate logler's capabilities, not SQL syntax.
+**Tests and tours test the library, not DuckDB.** They call the public API (`search()`,
+`follow_thread()`, `extract_metrics()`, ...), never raw SQL.
 
 ## Build
 
 ```bash
-cargo build --release --all
-uv sync --all-groups
+uv sync --extra dev        # builds the Rust extension with maturin, installs the dev tools
+uv run ruff check && uv run ruff format --check
+uv run mypy                # settings in [tool.mypy]; 0 errors expected
 ```
 
-### Stale .so gotcha
-
-After Rust changes, `maturin develop` may not update the extension.
-Manual fix:
+**Stale extension:** the extension is one abi3 file, `src/logler_rs/logler_rs.abi3.so`.
+`uv sync` and `uv run` do not rebuild it when only Rust sources change. After a Rust change:
 
 ```bash
-cp target/release/liblogler_rs.so \
-   .venv/lib/python3.12/site-packages/logler_rs/logler_rs.cpython-312-x86_64-linux-gnu.so
+uv sync --extra dev --reinstall-package logler
 ```
 
 ## Test
 
 ```bash
-uv run pytest              # 1000+ Python tests
-cargo test --workspace     # 26 Rust tests
+uv run pytest
+cargo test --workspace
 ```
 
-### Test Patterns
-
-- Deterministic fixtures with documented exact counts
+- Deterministic fixtures with documented exact counts; assert exact values, not types or existence
 - CLI tests use subprocess (`run_llm_command` helper)
-- Assert exact values, not types or existence
-- README contract tests (C02-C10) in `tests/test_readme.py` enforce public API examples
+- README contract tests (C02-C10) in `tests/test_readme.py` pin the public API examples of `docs/API.md`
 - Tour notebook tests in `tests/test_tour_notebooks.py` (17 tours)
-- **Tests exercise logler's API, never raw SQL** — we test the library, not DuckDB
-
-### Known Flaky Tests
-
-- `test_rust_investigator` — fails with relative paths when run outside repo root
-- `test_tail_glob_on_real_fixtures` — glob finds 0 files outside repo root
-
-## CLI
-
-```bash
-python -m logler.cli llm <command>
-```
-
-Exit codes: 0=success, 1=no results, 2=user error, 3=internal error
-
-### Database Source (`--db`)
-
-All file-based LLM commands accept `--db path/to/sqler.db` as an alternative to FILES.
-Converts sqler database rows to JSONL on the fly; auto-detects qler tables.
-Can combine `--db` with FILES to search both sources.
-Only `context` (needs file+line) and session commands lack `--db`.
-
-### LLM Commands (JSON output)
-
-**Assessment:** triage, summarize, schema
-**Discovery:** ids
-**Search:** search, sql
-**Tracing:** correlate, hierarchy, bottleneck
-**Comparison:** compare, diff
-**Utilities:** sample, context, export, emit, session, verify-pattern
-
-**Metrics & Detection (M5/M6):**
-- `metrics` — Extract numeric values with stats (min/max/mean/p95/p99), anomaly detection
-- `detect` — Auto-detect log format with confidence scoring
-- `templates` — Drain algorithm template mining
-
-**Custom Formats (M1):**
-- `format list` — List configured formats
-- `format test` — Test a format against a file
-- `format validate` — Validate a format definition against a file
-
-**Correlations (M2/M3):**
-- `correlation list` — List configured correlation rules
-- `correlation run` — Run correlation rules (all or by group)
-- `correlate-events` — Cross-file event correlation with time windows
-
-### Search CLI Flags
-
-Key flags for `logler llm search`:
-- `--count-only` — Rust-side: skips materialization entirely, returns `{"total_matches": N}` with zero memory overhead
-- `--offset N` — Rust-side pagination: candidates are sorted once, then `skip(N).take(limit)` before materialization
-- `--compact` — Short field names (ln/ts/lv/msg/src/th/cid/trc/sid/svc)
-- `--metadata-only` — Aggregations only, no results array
-- `--max-bytes N` — Truncate output to fit byte budget
-- `--after/--before` — Supports relative time: `--after=-1h --before=-30m`
-
-Pagination example: `--offset 100 --limit 100` fetches page 2. `has_more` in the response indicates more pages exist.
-
-`--max-bytes` also available on: correlate, hierarchy, bottleneck, summarize.
+- Known flaky outside the repo root (relative paths): `test_rust_investigator`, `test_tail_glob_on_real_fixtures`
 
 ## Configuration
 
-### `.logler.toml`
+Custom formats live in `.logler/formats.yaml` (found by walking up from the log file's
+folder) and correlation rules in `.logler/correlations.yaml`. Schema, examples and what a
+broken file does: `docs/CONFIGURATION.md`.
 
-```toml
-# Custom log format (M1)
-[formats.my-app]
-pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+(?P<level>\w+)\s+\[(?P<thread_id>[\w-]+)\]\s+(?P<message>.*)'
-timestamp_format = "%Y-%m-%dT%H:%M:%S%.fZ"
+In `config.py`: Pydantic v2 field validators only catch `ValueError`/`AssertionError`, so
+`re.error` is caught and re-raised as `ValueError`. In format regexes `\w+` does not match
+hyphens; use `[\w-]+` for IDs like `TH-042`.
 
-# Correlation rules (M2)
-[correlations.request-tracking]
-rules = [
-  { type = "field_match", source_field = "correlation_id", target_field = "correlation_id" },
-  { type = "temporal", window = "5s", anchor_field = "trace_id" },
-]
-```
+## Log Formats and Levels
 
-### Config Module Gotchas
+JSON (recommended), syslog (RFC 3164/5424 + BSD), logfmt, plaintext, Apache CLF; the parser
+detects the format. BSD syslog without `<priority>` has no parsed timestamp.
 
-- Pydantic v2 field validators only catch `ValueError`/`AssertionError`
-- `re.error` must be caught and re-raised as `ValueError` in validators
-- `\w+` doesn't match hyphens — use `[\w-]+` for IDs like `TH-042`
+The Rust level enum expects title case (`Error`, `Warn`, `Info`): `_parse_levels()` converts
+user input, `_normalize_entry()` uppercases for display.
 
-## Log Formats Supported
+## Benchmarks, Hooks, Commits
 
-JSON (recommended), syslog (RFC 3164/5424 + BSD), logfmt, plaintext, Apache CLF.
-Parser auto-detects format. BSD syslog without `<priority>` prefix uses
-pattern-based level inference (auth failures -> ERROR, OOM -> FATAL, etc.).
-
-## Known Limitations
-
-- BSD syslog entries without `<priority>` prefix have no parsed timestamps; time-based filtering is unavailable for these entries
-- `_search_core.py` has `except Exception: return None` patterns that silently swallow errors — ensure all imports are local inside these try blocks
-- Rust level enum expects title case (`Error`, `Warn`, `Info`) — `_parse_levels()` converts user input, `_normalize_entry()` uppercases for display
-- **Investigator index holds all entries in memory** — the Rust backend (`PyInvestigator`) parses entire files into an in-memory index. At 600K+ entries, `load_files()` alone uses ~800 MB. Mitigations: `Investigator(sql_db_path=...)` for disk-backed DuckDB, engine caching to avoid redundant rebuilds, and **two-phase search** (filter+score with lightweight ~40-byte candidates, materialize only the final N results) which prevents `search()` from amplifying the index cost. A `DEFAULT_MAX_RESULTS` (10K) safety cap prevents unbounded queries; callers needing more can pass an explicit `limit`. `count_only=True` skips materialization entirely, and `offset` enables pagination without re-materializing skipped entries. Deferred: lazy/paginated Rust-side loading that indexes file offsets without holding all entries in memory (requires Rust refactor of `PyInvestigator`)
-- **comparison.py OOM mitigations** — `compare_time_periods()` pushes time windows to Rust via `time_start`/`time_end` instead of materialising all entries. `cross_service_timeline()` fallback (no correlation/trace ID) is capped at `_DEFAULT_TIMELINE_LIMIT` (10K). `_analyze_thread()` computes duration from `min()`/`max()` timestamps instead of positional first/last (robust to unsorted input).
-- **CLI `sql` command streams into DuckDB** — log entries are parsed and inserted in batches of 5,000 via `executemany()` instead of accumulating all entries in a list then building all tuples. Eliminates ~300 MB peak at 600K entries.
-- **`_get_sql_engine()` direct index iteration** — uses Rust `get_entries_page(offset, limit)` to iterate the in-memory index directly — O(page_size) per call, O(N) total. No search/filter/sort overhead. Each page is converted to SimpleNamespace, inserted into DuckDB, then discarded. Memory stays bounded to ~one page (~50 MB) regardless of total entry count. Previous approach used `search(limit=N, offset=M)` which was O(N²) due to re-scanning all entries per page.
-
-## Key Dependencies
-
-Rust: chrono, serde, regex, rayon (parallel), pyo3
-Python: click, rich, duckdb, pydantic, watchdog
-
-## Benchmarks
-
-```bash
-uv run python -m benchmarks run --scale small       # Run all 19 scenarios
-uv run python -m benchmarks list                      # List available scenarios
-uv run python -m benchmarks plot -i results/latest.json  # Generate charts
-uv run python -m benchmarks compare -b v1.json -c v2.json -o results/v2  # Before/after comparison
-```
-
-- 19 scenarios across 7 suites (search, hierarchy, correlation, output, sampling, memory, db_source)
-- Scales: small (1K/10K/50K), medium (10K/50K/100K), large (50K/100K/500K)
-- Memory scenarios use fixed scales (10K/50K/100K) ignoring config.scale for cross-run comparability
-- Deterministic data generation (seeded RNG), precision timing (warmup + percentiles)
-- v1 baseline preserved at `benchmarks/results/v1/baseline.json`
-- Comparison report generator produces scientific before/after analysis with confidence levels
-
-### Memory Measurement Rules
-
-**NEVER use `ru_maxrss` for memory benchmarks.** `resource.getrusage(RUSAGE_SELF).ru_maxrss` is the
-peak RSS for the entire process lifetime — once the high-water mark is set (by pytest imports,
-Rust bindings, etc.), subsequent operations that stay below it report 0 KB "allocated." This
-produces meaningless results that look like proof but prove nothing.
-
-**Use `tracemalloc` for Python allocations, VmRSS for total process memory.** Always report both
-for operations involving native code (Rust/C).
-
-`tracemalloc` tracks actual Python heap allocations during the measured call:
-```python
-import tracemalloc
-tracemalloc.start()
-# ... measured work ...
-current, peak = tracemalloc.get_traced_memory()
-tracemalloc.stop()
-```
-This gives real numbers: "list version peaked at 45 MB, generator peaked at 2 MB."
-
-VmRSS from `/proc/self/status` tracks total process resident memory including Rust/C:
-```python
-def _get_vmrss_kb() -> int:
-    with open("/proc/self/status") as f:
-        for line in f:
-            if line.startswith("VmRSS:"):
-                return int(line.split()[1])
-    return 0
-```
-Read VmRSS before and after the measured call; the delta shows total memory growth
-including allocations invisible to tracemalloc (e.g., Rust `PyInvestigator` index).
-
-## Pre-commit Hooks
-
-black, ruff, fix-end-of-files, trim-trailing-whitespace, cargo-fmt.
-First commit attempt often fails (ruff/black auto-fix). Re-stage and commit again.
-
-## Commit Rules
-
-No Co-Authored-By lines. Git user is sole author.
+- Benchmark commands, scales and the memory measurement rules: `benchmarks/README.md`; the
+  published report is `docs/benchmarks/REPORT.md`. Never measure memory with `ru_maxrss`;
+  use `tracemalloc` and VmRSS.
+- Pre-commit hooks: ruff (lint and format), fix-end-of-files, trim-trailing-whitespace,
+  cargo-fmt. A first commit attempt often fails (ruff auto-fixes): re-stage and commit again.
+- No Co-Authored-By lines. Git user is sole author.

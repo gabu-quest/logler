@@ -7,92 +7,150 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  version:
+    name: Tag equals the package version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare the tag with pyproject.toml and Cargo.toml
+        run: |
+          py="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          rs="$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")"
+          if [ "${GITHUB_REF_NAME}" != "v${py}" ] || [ "${py}" != "${rs}" ]; then
+            echo "Tag ${GITHUB_REF_NAME}, pyproject.toml ${py} and Cargo.toml ${rs} must name one version" >&2
+            exit 1
+          fi
+
+  tests:
+    name: Tests
+    uses: ./.github/workflows/ci.yml
+
+  # One stable-ABI (cp312-abi3) wheel per platform serves Python 3.12 and later.
+  # Not built: musllinux, 32-bit, free-threaded.
   build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.artifact }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: wheels-linux
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: wheels-windows
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: wheels-macos-x86
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: wheels-macos-arm
+          - runner: ubuntu-latest
+            target: x86_64
+            artifact: wheels-linux-x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64
+            artifact: wheels-linux-aarch64
+          - runner: macos-15-intel
+            target: x86_64
+            artifact: wheels-macos-x86_64
+          - runner: macos-latest
+            target: aarch64
+            artifact: wheels-macos-arm64
+          - runner: windows-latest
+            target: x64
+            artifact: wheels-windows-x64
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install maturin
-        run: pip install maturin
+          python-version: "3.12"
 
       - name: Build wheel
-        run: maturin build --release --target ${{ matrix.target }}
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --locked --out dist
+          # Linux wheels are built in the manylinux2014 container; other systems ignore this.
+          manylinux: auto
+
+      - name: The wheel is the stable-ABI one
+        shell: bash
+        run: ls dist/logler-*-cp312-abi3-*.whl
+
+      # Every wheel is built on its own kind of machine, so each is installed and
+      # imported on the oldest and the newest supported Python before anything is uploaded.
+      - name: Import on Python 3.12
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl
+          python -c "import logler_rs, logler; print(logler.__version__)"
+
+      - name: Setup Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Import on Python 3.14
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl
+          python -c "import logler_rs, logler; print(logler.__version__)"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: target/wheels/*.whl
+          path: dist/*.whl
+          if-no-files-found: error
 
   sdist:
     name: Build sdist
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
-
-      - name: Install maturin
-        run: pip install maturin
+          python-version: "3.12"
 
       - name: Build sdist
-        run: maturin sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      # A source install compiles the Rust crates from the archive alone.
+      - name: Install from the sdist and import
+        run: |
+          python -m pip install dist/*.tar.gz
+          cd "${RUNNER_TEMP}"
+          python -c "import logler_rs, logler; print(logler.__version__)"
 
       - name: Upload sdist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sdist
-          path: target/wheels/*.tar.gz
+          path: dist/*.tar.gz
+          if-no-files-found: error
 
   publish:
     name: Publish to PyPI
+    # Only this repository publishes: a fork or a copy that pushes a tag builds and stops here.
+    if: github.repository == 'gabu-quest/logler'
     runs-on: ubuntu-latest
-    needs: [build, sdist]
+    needs: [version, tests, build, sdist]
     environment: pypi
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist/
           merge-multiple: true

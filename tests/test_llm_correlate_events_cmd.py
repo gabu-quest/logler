@@ -103,9 +103,8 @@ def _make_mock_search(log_files_dict):
                     except ValueError:
                         continue
                 level_filter = kwargs.get("level")
-                if level_filter:
-                    if entry.get("level", "").upper() != level_filter.upper():
-                        continue
+                if level_filter and entry.get("level", "").upper() != level_filter.upper():
+                    continue
                 query = kwargs.get("query")
                 if query:
                     msg = entry.get("message", "") + entry.get("raw", "")
@@ -269,3 +268,62 @@ class TestCorrelateEventsCmd:
                 assert "level" in entry
                 # Should be filename only (no directory separators)
                 assert "/" not in entry["file"]
+
+    def test_trigger_under_a_formats_file_that_cannot_be_used_is_a_user_error(
+        self, runner, log_files, tmp_path
+    ):
+        """The format file's error reaches the user; the log file is not skipped in silence."""
+        (tmp_path / ".logler").mkdir()
+        formats = tmp_path / ".logler" / "formats.yaml"
+        formats.write_text("not: valid: yaml: {{{")
+
+        result = runner.invoke(
+            llm, ["correlate-events", "-f", log_files["sensor"], "--trigger-level", "ERROR"]
+        )
+        assert result.exit_code == EXIT_USER_ERROR, result.output
+        error = json.loads(result.output)["error"]
+        assert str(formats) in error
+        assert "Invalid YAML" in error
+
+    def test_anchor_file_under_a_formats_file_that_cannot_be_used_says_so(
+        self, runner, log_files, tmp_path
+    ):
+        (tmp_path / ".logler").mkdir()
+        formats = tmp_path / ".logler" / "formats.yaml"
+        formats.write_text("not: valid: yaml: {{{")
+
+        result = runner.invoke(
+            llm,
+            [
+                "correlate-events",
+                "-f",
+                log_files["plc"],
+                "--anchor-file",
+                log_files["sensor"],
+                "--anchor-line",
+                "3",
+            ],
+        )
+        assert result.exit_code == EXIT_USER_ERROR, result.output
+        error = json.loads(result.output)["error"]
+        assert error.startswith(f"Unusable format file: {formats}: Invalid YAML")
+
+    def test_anchor_file_that_cannot_be_read_keeps_its_own_wording(
+        self, runner, log_files, tmp_path
+    ):
+        gone = str(tmp_path / "gone.log")
+        result = runner.invoke(
+            llm,
+            [
+                "correlate-events",
+                "-f",
+                log_files["plc"],
+                "--anchor-file",
+                gone,
+                "--anchor-line",
+                "3",
+            ],
+        )
+        assert result.exit_code == EXIT_USER_ERROR, result.output
+        error = json.loads(result.output)["error"]
+        assert error == f"Failed to read anchor file: [Errno 2] No such file or directory: '{gone}'"

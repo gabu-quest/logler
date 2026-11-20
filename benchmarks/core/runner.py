@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .base import BenchmarkResult, Scenario
@@ -26,10 +26,10 @@ class BenchmarkRunner:
 
         for i, scenario in enumerate(scenarios, 1):
             label = f"[{i}/{total}] {scenario.suite}/{scenario.name}"
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"  {label}")
             print(f"  {scenario.description}")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
 
             try:
                 scenario.setup(self.config)
@@ -59,7 +59,7 @@ class BenchmarkRunner:
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         suffix = f"_{tag}" if tag else ""
         filename = f"bench_{self.config.scale.name}{suffix}_{ts}.json"
         path = output_dir / filename

@@ -3,15 +3,43 @@ Command-line interface for Logler.
 """
 
 import asyncio
-import click
 import sys
-from typing import Optional
+from typing import Any
 
-from .terminal import TerminalViewer
+import click
+
+from .config import FormatFileError
 from .llm_cli import llm as llm_group
+from .llm_cli._core import file_error_message
+from .terminal import TerminalViewer
 
 
-@click.group(invoke_without_command=True)
+def _exit_on_file_error(e: BaseException) -> None:
+    """A file a command cannot open, read or write is the user's to fix: name it, exit 2.
+
+    Returns when ``e`` names no file, so the caller handles it as any other failure.
+    """
+    message = file_error_message(e)
+    if message is not None:
+        click.echo(f"❌ Error: {message}", err=True)
+        sys.exit(2)
+
+
+class _LoglerGroup(click.Group):
+    """The one place a plain command turns a formats.yaml that cannot be used into its exit."""
+
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except FormatFileError as e:
+            click.echo(f"Error: unusable format file: {e}", err=True)
+            sys.exit(2)
+        except OSError as e:
+            _exit_on_file_error(e)
+            raise
+
+
+@click.group(cls=_LoglerGroup, invoke_without_command=True)
 @click.pass_context
 @click.version_option()
 def main(ctx):
@@ -34,11 +62,11 @@ def main(ctx):
 @click.option("--no-color", is_flag=True, help="Disable colored output")
 def view(
     files: tuple,
-    lines: Optional[int],
+    lines: int | None,
     follow: bool,
-    level: Optional[str],
-    grep: Optional[str],
-    thread: Optional[str],
+    level: str | None,
+    grep: str | None,
+    thread: str | None,
     no_color: bool,
 ):
     """
@@ -69,7 +97,10 @@ def view(
         except KeyboardInterrupt:
             click.echo("\n👋 Goodbye!")
             sys.exit(0)
+        except FormatFileError:
+            raise
         except Exception as e:
+            _exit_on_file_error(e)
             click.echo(f"❌ Error: {e}", err=True)
             sys.exit(1)
 
@@ -85,18 +116,17 @@ def stats(files: tuple, output_json: bool):
         logler stats app.log             # Show statistics
         logler stats app.log --json      # Output as JSON
     """
-    from .parser import LogParser
     from rich.console import Console
     from rich.table import Table
 
+    from .parser import LogParser, read_entry_lines
+
     console = Console()
-    parser = LogParser()
-
     for file_path in files:
-        with open(file_path, "r") as f:
-            entries = [parser.parse_line(i + 1, line.rstrip()) for i, line in enumerate(f)]
+        parser = LogParser.for_file(file_path)
+        entries = [parser.parse_line(number, line) for number, line in read_entry_lines(file_path)]
 
-        stats_data = {
+        stats_data: dict[str, Any] = {
             "total": len(entries),
             "by_level": {},
             "by_thread": {},
@@ -176,14 +206,14 @@ def investigate(
     auto_insights: bool,
     errors: bool,
     patterns: bool,
-    thread: Optional[str],
-    correlation: Optional[str],
-    trace: Optional[str],
+    thread: str | None,
+    correlation: str | None,
+    trace: str | None,
     hierarchy: bool,
     waterfall: bool,
     flamegraph: bool,
     show_error_flow: bool,
-    max_depth: Optional[int],
+    max_depth: int | None,
     min_confidence: float,
     context: int,
     output: str,
@@ -204,16 +234,18 @@ def investigate(
         logler investigate app.log --hierarchy --show-error-flow  # Analyze error propagation
         logler investigate app.log --output summary    # Token-efficient output
     """
+    from rich.console import Console
+    from rich.markup import escape
+    from rich.table import Table
+
     from .investigate import (
-        search,
+        analyze_error_flow,
         follow_thread,
         follow_thread_hierarchy,
-        get_hierarchy_summary,
-        analyze_error_flow,
         format_error_flow,
+        get_hierarchy_summary,
+        search,
     )
-    from rich.console import Console
-    from rich.table import Table
 
     console = Console()
     file_list = list(files)
@@ -250,7 +282,7 @@ def investigate(
 
         # Thread/correlation following mode
         elif thread or correlation or trace:
-            identifier = thread or correlation or trace
+            identifier = thread or correlation or trace or ""  # one of them is set here
             id_type = "thread" if thread else "correlation" if correlation else "trace"
 
             # Hierarchy mode
@@ -272,7 +304,7 @@ def investigate(
                         return
 
                     # Import tree formatter
-                    from .tree_formatter import format_tree, format_waterfall, format_flamegraph
+                    from .tree_formatter import format_flamegraph, format_tree, format_waterfall
 
                     # Show summary first
                     summary = get_hierarchy_summary(hier_result)
@@ -311,8 +343,11 @@ def investigate(
                             error_flow_str = format_error_flow(error_analysis)
                             console.print(error_flow_str)
 
+                except FormatFileError:
+                    raise
                 except Exception as e:
-                    console.print(f"[red]❌ Error building hierarchy: {e}[/red]")
+                    _exit_on_file_error(e)
+                    console.print(f"[red]❌ Error building hierarchy: {escape(str(e))}[/red]")
                     console.print("[yellow]Falling back to regular thread following...[/yellow]\n")
                     hierarchy = False  # Fall through to regular mode
 
@@ -421,9 +456,7 @@ def investigate(
             total = result.get("total_matches", 0)
             console.print(f"[bold]Total matches:[/bold] {total}\n")
 
-            if output == "summary":
-                console.print_json(data=result)
-            elif output == "count":
+            if output == "summary" or output == "count":
                 console.print_json(data=result)
             else:
                 results = result.get("results", [])
@@ -434,8 +467,11 @@ def investigate(
                     message = entry.get("message", "")[:100]
                     console.print(f"[dim]{timestamp}[/dim] {level:8s} {message}")
 
+    except FormatFileError:
+        raise
     except Exception as e:
-        console.print(f"[red]❌ Error:[/red] {e}", err=True)
+        _exit_on_file_error(e)
+        Console(stderr=True).print(f"[red]❌ Error:[/red] {escape(str(e))}")
         if "--debug" in sys.argv:
             import traceback
 
@@ -445,7 +481,13 @@ def investigate(
 
 @main.command()
 @click.argument("pattern", required=True)
-@click.option("--directory", "-d", default=".", help="Directory to watch")
+@click.option(
+    "--directory",
+    "-d",
+    default=".",
+    type=click.Path(exists=True, file_okay=False),
+    help="Directory to watch",
+)
 @click.option("--recursive", "-r", is_flag=True, help="Watch recursively")
 def watch(pattern: str, directory: str, recursive: bool):
     """
@@ -456,8 +498,9 @@ def watch(pattern: str, directory: str, recursive: bool):
         logler watch "app-*.log" -d /var/log  # Watch specific directory
         logler watch "*.log" -r             # Watch recursively
     """
-    from .watcher import FileWatcher
     from rich.console import Console
+
+    from .watcher import FileWatcher
 
     console = Console()
     console.print(f"👀 Watching for files matching: [cyan]{pattern}[/cyan]")

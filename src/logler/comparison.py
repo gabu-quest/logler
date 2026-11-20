@@ -5,11 +5,11 @@ Public API surface is re-exported by :mod:`logler.investigate`.
 """
 
 import warnings
-from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+from typing import Any
 
-from ._search_core import search, follow_thread
+from ._search_core import follow_thread, level_text, search
 
 _DEFAULT_TIMELINE_LIMIT = 10_000
 
@@ -19,14 +19,14 @@ _DEFAULT_TIMELINE_LIMIT = 10_000
 
 
 def cross_service_timeline(
-    files: Dict[str, List[str]],
-    time_window: Optional[Tuple[str, str]] = None,
-    correlation_id: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    limit: Optional[int] = None,
-    parser_format: Optional[str] = None,
-    custom_regex: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: dict[str, list[str]],
+    time_window: tuple[str, str] | None = None,
+    correlation_id: str | None = None,
+    trace_id: str | None = None,
+    limit: int | None = None,
+    parser_format: str | None = None,
+    custom_regex: str | None = None,
+) -> dict[str, Any]:
     """Create a unified timeline across multiple services/log files.
 
     Perfect for investigating distributed systems where a single request
@@ -46,7 +46,8 @@ def cross_service_timeline(
         CrossServiceTimelineResult dict with shape::
 
             {
-                "timeline": [{"service": str, "timestamp": str, "entry": {...}, "relative_time_ms": int}],
+                "timeline": [{"service": str, "timestamp": str | None, "entry": {...},
+                              "relative_time_ms": int | None}],
                 "services": [str, ...],
                 "total_entries": int,
                 "duration_ms": int | None,
@@ -68,8 +69,8 @@ def cross_service_timeline(
         raise RuntimeError("Rust backend not available")
 
     # Collect entries from all services
-    all_entries = []
-    service_counts = defaultdict(int)
+    all_entries: list[dict[str, Any]] = []
+    service_counts: defaultdict[str, int] = defaultdict(int)
 
     for service_name_key, service_files in files.items():
         if correlation_id:
@@ -103,22 +104,22 @@ def cross_service_timeline(
     if time_window:
         start_time, end_time = time_window
         try:
-            start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            start_dt = datetime.fromisoformat(start_time)
+            end_dt = datetime.fromisoformat(end_time)
             filtered = []
             for e in all_entries:
                 ts_str = e["timestamp_str"]
                 if not ts_str:
                     continue
                 try:
-                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    ts = datetime.fromisoformat(ts_str)
                 except (ValueError, TypeError):
                     continue
                 if start_dt <= ts <= end_dt:
                     filtered.append(e)
             all_entries = filtered
-        except Exception as e:
-            warnings.warn(f"Could not parse time window: {e}", stacklevel=2)
+        except Exception as exc:
+            warnings.warn(f"Could not parse time window: {exc}", stacklevel=2)
 
     # Parse timestamps and sort by actual datetime (lexicographic sort
     # fails when timestamps have mixed timezone offsets)
@@ -126,7 +127,7 @@ def cross_service_timeline(
         ts_str = e["timestamp_str"]
         if ts_str:
             try:
-                e["timestamp"] = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                e["timestamp"] = datetime.fromisoformat(ts_str)
             except (ValueError, TypeError):
                 e["timestamp"] = None
         else:
@@ -184,14 +185,14 @@ def cross_service_timeline(
 
 
 def compare_threads(
-    files: List[str],
-    thread_a: Optional[str] = None,
-    thread_b: Optional[str] = None,
-    correlation_a: Optional[str] = None,
-    correlation_b: Optional[str] = None,
-    trace_a: Optional[str] = None,
-    trace_b: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: list[str],
+    thread_a: str | None = None,
+    thread_b: str | None = None,
+    correlation_a: str | None = None,
+    correlation_b: str | None = None,
+    trace_a: str | None = None,
+    trace_b: str | None = None,
+) -> dict[str, Any]:
     """Compare two threads/requests to find differences.
 
     Perfect for root cause analysis: *"What's different between the successful
@@ -262,12 +263,12 @@ def compare_threads(
 
 
 def compare_time_periods(
-    files: List[str],
+    files: list[str],
     period_a_start: str,
     period_a_end: str,
     period_b_start: str,
     period_b_end: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compare two time periods to find what changed.
 
     Perfect for questions like *"What changed after the deployment?"* or
@@ -326,7 +327,7 @@ def compare_time_periods(
 # ---------------------------------------------------------------------------
 
 
-def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
+def _analyze_thread(entries: list[dict], thread_id: str) -> dict[str, Any]:
     """Analyse a single thread's entries."""
     if not entries:
         return {
@@ -342,13 +343,13 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
         }
 
     # Count log levels
-    level_counts = defaultdict(int)
+    level_counts: defaultdict[str, int] = defaultdict(int)
     error_count = 0
     messages = []
     services = set()
 
     for entry in entries:
-        level = entry.get("level", "INFO")
+        level = level_text(entry.get("level"))
         level_counts[level] += 1
         if level in ["ERROR", "FATAL"]:
             error_count += 1
@@ -368,7 +369,7 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
             for e in entries:
                 ts_str = e.get("timestamp", "")
                 if ts_str:
-                    timestamps.append(datetime.fromisoformat(ts_str.replace("Z", "+00:00")))
+                    timestamps.append(datetime.fromisoformat(ts_str))
             if len(timestamps) >= 2:
                 duration_ms = int((max(timestamps) - min(timestamps)).total_seconds() * 1000)
         except (ValueError, TypeError, AttributeError):
@@ -383,11 +384,11 @@ def _analyze_thread(entries: List[Dict], thread_id: str) -> Dict[str, Any]:
         "log_levels": dict(level_counts),
         "unique_messages": len(set(messages)),
         "messages": messages,
-        "services": list(services),
+        "services": sorted(services),
     }
 
 
-def _compute_differences(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
+def _compute_differences(analysis_a: dict, analysis_b: dict) -> dict[str, Any]:
     """Compute differences between two thread analyses."""
     # Duration difference
     duration_diff_ms = analysis_b["duration_ms"] - analysis_a["duration_ms"]
@@ -396,14 +397,15 @@ def _compute_differences(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
     error_diff = analysis_b["error_count"] - analysis_a["error_count"]
 
     # Message differences
+    # In the order each message first appears in its own thread, repeats dropped
     messages_a = set(analysis_a["messages"])
     messages_b = set(analysis_b["messages"])
-    only_in_a = list(messages_a - messages_b)
-    only_in_b = list(messages_b - messages_a)
+    only_in_a = [m for m in dict.fromkeys(analysis_a["messages"]) if m not in messages_b]
+    only_in_b = [m for m in dict.fromkeys(analysis_b["messages"]) if m not in messages_a]
 
     # Log level changes
     level_changes = {}
-    all_levels = set(list(analysis_a["log_levels"].keys()) + list(analysis_b["log_levels"].keys()))
+    all_levels = sorted(set(analysis_a["log_levels"]) | set(analysis_b["log_levels"]))
     for level in all_levels:
         count_a = analysis_a["log_levels"].get(level, 0)
         count_b = analysis_b["log_levels"].get(level, 0)
@@ -420,7 +422,7 @@ def _compute_differences(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
     }
 
 
-def _generate_comparison_summary(analysis_a: Dict, analysis_b: Dict, differences: Dict) -> str:
+def _generate_comparison_summary(analysis_a: dict, analysis_b: dict, differences: dict) -> str:
     """Generate human-readable summary of comparison."""
     parts = []
 
@@ -452,14 +454,14 @@ def _generate_comparison_summary(analysis_a: Dict, analysis_b: Dict, differences
     return ". ".join(parts)
 
 
-def _analyze_period(entries: List[Dict], start: str, end: str) -> Dict[str, Any]:
+def _analyze_period(entries: list[dict], start: str, end: str) -> dict[str, Any]:
     """Analyse a time period's entries."""
-    level_counts = defaultdict(int)
+    level_counts: defaultdict[str, int] = defaultdict(int)
     error_messages = []
     threads = set()
 
     for entry in entries:
-        level = entry.get("level", "INFO")
+        level = level_text(entry.get("level"))
         level_counts[level] += 1
 
         if level in ["ERROR", "FATAL"]:
@@ -485,7 +487,7 @@ def _analyze_period(entries: List[Dict], start: str, end: str) -> Dict[str, Any]
     }
 
 
-def _compute_period_changes(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any]:
+def _compute_period_changes(analysis_a: dict, analysis_b: dict) -> dict[str, Any]:
     """Compute changes between two time periods."""
     # Volume change
     if analysis_a["total_logs"] > 0:
@@ -502,10 +504,11 @@ def _compute_period_changes(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any
         error_rate_multiplier = float("inf") if analysis_b["error_rate"] > 0 else 1.0
 
     # New vs resolved errors
+    # top_errors is already in order of first appearance; keep that order
     errors_a = set(analysis_a["top_errors"])
     errors_b = set(analysis_b["top_errors"])
-    new_errors = list(errors_b - errors_a)
-    resolved_errors = list(errors_a - errors_b)
+    new_errors = [e for e in analysis_b["top_errors"] if e not in errors_a]
+    resolved_errors = [e for e in analysis_a["top_errors"] if e not in errors_b]
 
     return {
         "log_volume_change_pct": volume_change_pct,
@@ -517,7 +520,7 @@ def _compute_period_changes(analysis_a: Dict, analysis_b: Dict) -> Dict[str, Any
     }
 
 
-def _generate_period_summary(analysis_a: Dict, analysis_b: Dict, changes: Dict) -> str:
+def _generate_period_summary(analysis_a: dict, analysis_b: dict, changes: dict) -> str:
     """Generate human-readable summary of period comparison."""
     parts = []
 
@@ -545,16 +548,16 @@ def _generate_period_summary(analysis_a: Dict, analysis_b: Dict, changes: Dict) 
     return ". ".join(parts)
 
 
-def _in_time_range(entry: Dict, start: str, end: str) -> bool:
+def _in_time_range(entry: dict, start: str, end: str) -> bool:
     """Check if entry timestamp is within range."""
     timestamp_str = entry.get("timestamp")
     if not timestamp_str:
         return False
 
     try:
-        timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        timestamp = datetime.fromisoformat(timestamp_str)
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
         return start_dt <= timestamp <= end_dt
     except (ValueError, TypeError, AttributeError):
         return False

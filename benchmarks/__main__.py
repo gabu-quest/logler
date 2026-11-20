@@ -69,10 +69,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         from pathlib import Path
 
         p = Path(args.changes)
-        if p.exists():
-            changes_md = p.read_text()
-        else:
-            changes_md = args.changes
+        changes_md = p.read_text() if p.exists() else args.changes
 
     generate_comparison(args.baseline, args.current, args.output, changes_md)
 

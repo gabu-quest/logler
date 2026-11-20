@@ -6,69 +6,38 @@ Logler is built with Rust for maximum performance. This guide explains performan
 
 ## Measured Performance
 
-Numbers from the [benchmark suite](../benchmarks/results/REPORT.md)
-(14 scenarios, 3 iterations, Python 3.12, Rust backend, 8 cores):
+Medians from the [benchmark report](benchmarks/REPORT.md)
+(19 scenarios, logler 1.3.1, Python 3.12, Rust backend, 8 cores):
 
 | Operation | Measured | Scale |
 |-----------|----------|-------|
-| Search (level filter) | **7ms** / **39ms** / **694ms** | 1K / 10K / 50K entries |
-| Search (combined filters) | **4ms** / **25ms** / **173ms** | 1K / 10K / 50K entries |
-| Follow thread | **2.6ms** / **28ms** / **259ms** | 1K / 10K / 50K entries |
-| Cross-service timeline | **5ms** / **7ms** / **13ms** | 2 / 3 / 5 services |
-| Error flow analysis | **0.15ms** / **0.8ms** / **1.7ms** | 1K / 5K / 10K entries |
-| Smart sampling | **64ms** / **778ms** / **9.1s** | 1K / 10K / 50K entries |
-| Token savings (count vs full) | **2540x** | 100 ERRORs, 50K entries |
+| Search (level filter) | **5.6ms** / **8.9ms** / **40ms** | 1K / 10K / 50K entries |
+| Search (combined filters) | **0.9ms** / **7.5ms** / **19ms** | 1K / 10K / 50K entries |
+| Follow thread | **0.36ms** / **8.0ms** / **145ms** | 1K / 10K / 50K entries |
+| Cross-service timeline | **3.3ms** / **5.5ms** / **10.6ms** | 2 / 3 / 5 services |
+| Error flow analysis | **0.14ms** / **0.81ms** / **2.3ms** | small / medium / large hierarchy |
+| Smart sampling | **67ms** / **157ms** / **622ms** | 1K / 10K / 50K entries |
+| Token savings (count vs full) | **2540x** | 202 bytes against 513,018 for the same query |
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Python Layer                         │
-│  logler.investigate.* (convenience functions)           │
-│  logler.helpers.* (shortcuts)                           │
-└─────────────────────┬───────────────────────────────────┘
-                      │ PyO3 FFI (minimal overhead)
-┌─────────────────────▼───────────────────────────────────┐
-│                    Rust Core                            │
-│                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │   Parser     │  │   Indexer    │  │ Investigator │ │
-│  │              │  │              │  │              │ │
-│  │ • JSON       │  │ • Thread IDs │  │ • Search     │ │
-│  │ • Plain text │  │ • Trace IDs  │  │ • Timeline   │ │
-│  │ • Regex      │  │ • Levels     │  │ • Patterns   │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │         SQL Engine (optional)                    │  │
-│  │         • DuckDB for custom queries              │  │
-│  │         • Z-score anomaly detection              │  │
-│  │         • Correlation matrices                   │  │
-│  └──────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
-                      │
-                      │ Memory-mapped I/O
-┌─────────────────────▼───────────────────────────────────┐
-│                  Log Files                              │
-│  • Lazy loading (only accessed regions)                 │
-│  • Parallel parsing with Rayon                          │
-│  • Zero-copy when possible                              │
-└─────────────────────────────────────────────────────────┘
-```
+The Rust core parses and indexes; Python adds the API, the command line and SQL. The picture
+of the layers is in [ARCHITECTURE.md](../ARCHITECTURE.md). What matters for speed:
+
+- **A file is read once, in file order**, and its lines are parsed on every core (Rayon).
+  The index keeps every parsed entry in memory.
+- **The module-level functions share a cache of parsed files.** `investigate.search()`,
+  `follow_thread()` and the rest keep up to 10 sets of files; a set is parsed again only
+  when one of its files, or the `.logler/formats.yaml` that applies to it, has changed.
+- **SQL is DuckDB, in Python.** The table is built on the first SQL call, not when the
+  files are loaded, and is kept until the files are loaded again.
 
 ## Performance Characteristics
 
 ### 1. File Loading and Search
 
-Measured on generated JSON-lines log files (benchmark suite, small scale):
-
-| Entries | Search (level) | Search (combined) | Follow thread |
-|---------|---------------|-------------------|---------------|
-| 1,000   | 7ms           | 4ms               | 2.6ms         |
-| 10,000  | 39ms          | 25ms              | 28ms          |
-| 50,000  | 694ms         | 173ms             | 259ms         |
-
-Note: logler re-parses files on each call (no persistent index). Combined filters
+The first call on a set of files parses them; the table under Measured Performance is that
+cost. A later call on the same unchanged files reuses the parsed index. Combined filters
 (level + query) can be faster than level-only when the query narrows results early.
 
 ### 2. Search Performance
@@ -80,7 +49,6 @@ results = investigate.search(
     files=["app.log"],
     level="ERROR"  # Uses level_index
 )
-# Typical: 10-30ms for 1GB file
 ```
 
 **Full-text search**:
@@ -90,7 +58,6 @@ results = investigate.search(
     files=["app.log"],
     query="database timeout"  # Scans all entries
 )
-# Typical: 50-200ms for 1GB file
 ```
 
 **Optimization**: Use indexed fields when possible!
@@ -104,12 +71,10 @@ timeline = investigate.follow_thread(
     files=["app.log"],
     correlation_id="req-12345"
 )
-# Typical: 10-50ms even for 1GB files
 ```
 
-**Performance factors**:
-- Number of entries for that thread (not total file size)
-- Typical request: 5-50 log entries = sub-millisecond
+Once the files are parsed, the cost follows the number of entries for that thread, not the
+size of the file.
 
 ### 4. Pattern Detection
 
@@ -120,7 +85,6 @@ patterns = investigate.find_patterns(
     files=["app.log"],
     min_occurrences=2
 )
-# Typical: 200-500ms for 100K errors
 ```
 
 **Optimization strategies**:
@@ -133,37 +97,35 @@ patterns = investigate.find_patterns(
 **In-memory database** (default):
 ```python
 investigator = Investigator()
-investigator.load_files(["app.log"])  # Loads into DuckDB in-memory
+investigator.load_files(["app.log"])  # Builds the index; DuckDB is not touched yet
 
-# Complex aggregations
+# Errors per minute, and the average gap between two errors.
+# The first SQL call builds the DuckDB table in memory.
 results = investigator.sql_query("""
-    SELECT
-        strftime('%H:%M', timestamp) as minute,
-        COUNT(*) as error_count,
-        AVG((julianday(timestamp) - julianday(LAG(timestamp) OVER (ORDER BY timestamp))) * 86400000) as avg_gap_ms
-    FROM logs
-    WHERE level = 'ERROR'
+    SELECT minute, COUNT(*) AS error_count, AVG(gap_ms) AS avg_gap_ms
+    FROM (
+        SELECT strftime(timestamp, '%H:%M') AS minute,
+               date_diff('millisecond', LAG(timestamp) OVER (ORDER BY timestamp), timestamp) AS gap_ms
+        FROM logs
+        WHERE level = 'ERROR'
+    )
     GROUP BY minute
+    ORDER BY minute
 """)
-# Typical: 300-800ms for 1M rows
 ```
 
 **Disk-backed database** (for large datasets):
 ```python
 investigator = Investigator(sql_db_path="/tmp/investigation.duckdb")
-investigator.load_files(["app.log"])  # DuckDB spills to disk
+investigator.load_files(["app.log"])
 
-# Same API — queries work identically
+# Same API — queries work identically; the table is written to that file
 results = investigator.sql_query("SELECT level, COUNT(*) FROM logs GROUP BY level")
 ```
 
-Use `sql_db_path` when datasets exceed available RAM. DuckDB's disk-backed mode
-uses memory-mapped I/O for speed but spills to disk instead of holding everything
-in memory. The SQL engine is built once and cached across queries (invalidated on
-`load_files()`).
-
-**Memory usage**: ~2-3x the size of log data when in-memory; disk-backed reduces
-this to working set size
+Use `sql_db_path` when the SQL table would not fit in memory: DuckDB then keeps the
+table in that file. The SQL engine is built by the first SQL call and reused by later
+ones, until `load_files()` is called again.
 
 ## Optimization Strategies for LLM Agents
 
@@ -176,7 +138,7 @@ this to working set size
 investigator.load_files(glob.glob("logs/*.log"))  # Slow!
 
 # ✅ Good: Start with metadata
-metadata = investigate.get_metadata(["logs/*.log"])
+metadata = investigate.get_metadata(glob.glob("logs/*.log"))
 
 # Then load only relevant files
 problem_files = [m['path'] for m in metadata if m['log_levels'].get('ERROR', 0) > 10]
@@ -219,12 +181,16 @@ top_errors = investigate.search(
     limit=100  # Only get first 100
 )
 
-# ❌ Bad: Unlimited results
+# Without a limit, search returns at most 10,000 results (the default cap).
+# limit=0 removes the cap; use it only when you want every match.
 all_errors = investigate.search(
     files=["app.log"],
-    level="ERROR"  # Could return millions!
+    level="ERROR",
+    limit=0
 )
 ```
+
+`count_only=True` returns only the number of matches, and `offset` pages through them.
 
 ### 4. Parallel Processing
 
@@ -266,29 +232,18 @@ flow = helpers.trace_request(["app.log"], "req-12345")
 
 ### Memory Usage Patterns
 
-1. **Metadata only** (~1% of file size):
-```python
-metadata = investigate.get_metadata(files)  # ~10MB for 1GB file
-```
+1. **Metadata only**: `investigate.get_metadata(files)` returns counts and ranges per
+   file, not entries.
 
-2. **Indexed** (~10-20% of file size):
-```python
-investigator = Investigator()
-investigator.load_files(files)  # ~200MB for 1GB file
-```
+2. **Indexed**: an `Investigator`, and the cache behind the module-level functions, hold
+   every parsed entry of the loaded files in memory. This is the large cost: plan for it
+   to grow with the number of entries.
 
-3. **SQL loaded in-memory** (~200-300% of file size):
-```python
-investigator.load_files(files)  # Parsed into DuckDB in-memory
-# ~2-3GB for 1GB file (structured representation)
-```
+3. **SQL in memory**: the first SQL call copies the entries into a DuckDB table, a second
+   copy beside the index.
 
-4. **SQL loaded disk-backed** (bounded by working set):
-```python
-investigator = Investigator(sql_db_path="/tmp/inv.duckdb")
-investigator.load_files(files)  # DuckDB spills to disk
-# RSS stays bounded; disk usage ~2-3x file size
-```
+4. **SQL on disk**: with `Investigator(sql_db_path="/tmp/inv.duckdb")` that table is
+   written to the file instead.
 
 ### Memory Optimization
 
@@ -304,7 +259,8 @@ def process_errors_in_batches(files, batch_size=1000):
         results = investigate.search(
             files=files,
             level="ERROR",
-            limit=batch_size
+            limit=batch_size,
+            offset=offset
         )
 
         if not results['results']:
@@ -319,8 +275,8 @@ def process_errors_in_batches(files, batch_size=1000):
 
 ## Benchmarks
 
-The full benchmark suite measures 14 scenarios across 5 suites (search, hierarchy,
-correlation, output, sampling). Run it yourself:
+The full benchmark suite measures 19 scenarios across 7 suites (search, hierarchy,
+correlation, output, sampling, memory, db_source). Run it yourself:
 
 ```bash
 uv pip install "matplotlib>=3.8"
@@ -328,7 +284,7 @@ uv run python -m benchmarks run --scale small -v
 uv run python -m benchmarks plot
 ```
 
-Results: [benchmarks/results/REPORT.md](../benchmarks/results/REPORT.md)
+The run writes to `benchmarks/results/`, which is not tracked. The published report: [benchmarks/REPORT.md](benchmarks/REPORT.md)
 
 ### Comparison with Traditional Tools
 
@@ -337,7 +293,7 @@ awareness. Direct comparisons aren't meaningful — they solve different problem
 string matching, use logler when you need thread tracking, hierarchy building, cross-service
 timelines, or structured investigation.
 
-See the [full benchmark report](../benchmarks/results/REPORT.md) for measured numbers across 14 scenarios.
+See the [full benchmark report](benchmarks/REPORT.md) for measured numbers across 19 scenarios.
 
 ## Performance Testing
 

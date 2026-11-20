@@ -5,6 +5,7 @@ The hierarchy builder should prefer these over timestamp-based calculation.
 """
 
 import json
+
 import pytest
 
 from logler.investigate import follow_thread_hierarchy
@@ -137,6 +138,6 @@ class TestHierarchyDurationMs:
         # If bottleneck is identified, it should have a duration
         bottleneck = result.get("bottleneck")
         if bottleneck:
-            assert (
-                bottleneck.get("duration_ms", 0) > 0
-            ), f"Bottleneck should have duration > 0, got: {bottleneck}"
+            assert bottleneck.get("duration_ms", 0) > 0, (
+                f"Bottleneck should have duration > 0, got: {bottleneck}"
+            )

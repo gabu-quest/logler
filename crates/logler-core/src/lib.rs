@@ -25,6 +25,7 @@
 //!     limit: Some(10),
 //!     count_only: None,
 //!     offset: None,
+//!     aggregate: None,
 //!     tail: None,
 //!     context_lines: Some(3),
 //! };
@@ -38,10 +39,7 @@ pub mod hierarchy;
 pub mod index;
 pub mod investigate;
 pub mod parser;
-#[cfg(feature = "async")]
-pub mod reader;
 pub mod stats;
-pub mod thread_tracker;
 pub mod trace;
 pub mod types;
 
@@ -49,10 +47,7 @@ pub use filter::LogFilter;
 pub use index::{IndexStats, LogIndex};
 pub use investigate::Investigator;
 pub use parser::{LogParser, ParserConfig};
-#[cfg(feature = "async")]
-pub use reader::LogReader;
 pub use stats::LogStats;
-pub use thread_tracker::ThreadTracker;
 pub use trace::TraceExporter;
 pub use types::*;
 
@@ -88,6 +83,7 @@ mod tests {
             limit: Some(10),
             count_only: None,
             offset: None,
+            aggregate: None,
             tail: None,
             context_lines: Some(1),
         };

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from logler.llm_cli import llm, EXIT_SUCCESS, EXIT_NO_RESULTS
+from logler.llm_cli import EXIT_NO_RESULTS, EXIT_SUCCESS, llm
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -32,7 +32,7 @@ def sensor_log():
 @pytest.fixture
 def plain_text_log():
     """Log file with no numeric values."""
-    f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")
+    f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")  # noqa: SIM115 - delete=False; closed before the path is used
     for i in range(10):
         f.write(
             f'{{"timestamp": "2024-01-15T10:00:{i:02d}Z", '
@@ -136,13 +136,13 @@ class TestMetricsBuckets:
     @pytest.fixture
     def json_log_with_metrics(self):
         """JSON log with timestamps that Rust parser can definitely extract."""
-        f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".jsonl")
+        f = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".jsonl")  # noqa: SIM115 - delete=False; closed before the path is used
         for i in range(10):
             entry = json.dumps(
                 {
                     "timestamp": f"2024-01-15T10:00:{i:02d}Z",
                     "level": "INFO",
-                    "message": f"temperature={22.0+i*0.1:.1f}°C",
+                    "message": f"temperature={22.0 + i * 0.1:.1f}°C",
                 }
             )
             f.write(entry + "\n")
@@ -150,21 +150,29 @@ class TestMetricsBuckets:
         yield f.name
         Path(f.name).unlink()
 
-    def test_bucket_output_present(self, runner, json_log_with_metrics):
+    def test_bucket_output(self, runner, json_log_with_metrics):
+        """Ten points one second apart, 22.0 to 22.9, in 5s buckets: two buckets of five."""
         result = runner.invoke(llm, ["metrics", json_log_with_metrics, "--bucket", "5s"])
-        data = json.loads(result.output)
-        if "temperature" in data["fields"]:
-            assert "buckets" in data["fields"]["temperature"]
-            buckets = data["fields"]["temperature"]["buckets"]
-            assert len(buckets) > 0
-            # Each bucket must have required keys
-            for b in buckets:
-                assert "start" in b
-                assert "end" in b
-                assert "min" in b
-                assert "max" in b
-                assert "avg" in b
-                assert "count" in b
+
+        buckets = json.loads(result.output)["fields"]["temperature"]["buckets"]
+        assert buckets == [
+            {
+                "start": "2024-01-15T10:00:00Z",
+                "end": "2024-01-15T10:00:05Z",
+                "min": 22.0,
+                "max": 22.4,
+                "avg": 22.2,
+                "count": 5,
+            },
+            {
+                "start": "2024-01-15T10:00:05Z",
+                "end": "2024-01-15T10:00:10Z",
+                "min": 22.5,
+                "max": 22.9,
+                "avg": 22.7,
+                "count": 5,
+            },
+        ]
 
 
 class TestMetricsPrettyOutput:

@@ -25,10 +25,10 @@ import logging
 import traceback
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
+from typing import Any
 
-_correlation_id: ContextVar[Optional[str]] = ContextVar("_correlation_id", default=None)
+_correlation_id: ContextVar[str | None] = ContextVar("_correlation_id", default=None)
 
 
 @contextmanager
@@ -60,7 +60,7 @@ def correlation_context(correlation_id: str, otel_bridge: bool = False):
     try:
         if otel_bridge:
             try:
-                from opentelemetry import baggage, context  # type: ignore[import-untyped]
+                from opentelemetry import baggage, context
 
                 ctx = baggage.set_baggage("correlation_id", correlation_id)
                 otel_token = context.attach(ctx)
@@ -69,13 +69,13 @@ def correlation_context(correlation_id: str, otel_bridge: bool = False):
         yield correlation_id
     finally:
         if otel_bridge and otel_token is not None:
-            from opentelemetry import context  # type: ignore[import-untyped]
+            from opentelemetry import context
 
             context.detach(otel_token)
         _correlation_id.reset(token)
 
 
-def get_correlation_id() -> Optional[str]:
+def get_correlation_id() -> str | None:
     """Return the current correlation ID, or None if not set."""
     return _correlation_id.get()
 
@@ -94,7 +94,7 @@ class CorrelationFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         if not getattr(record, "correlation_id", None):
-            record.correlation_id = get_correlation_id()  # type: ignore[attr-defined]
+            record.correlation_id = get_correlation_id()
         return True
 
 
@@ -151,7 +151,7 @@ class JsonHandler(logging.Handler):
 
     def __init__(
         self,
-        filename: Optional[str] = None,
+        filename: str | None = None,
         stream=None,
         level: int = logging.NOTSET,
     ):
@@ -159,7 +159,7 @@ class JsonHandler(logging.Handler):
         if filename and stream:
             raise ValueError("Cannot specify both filename and stream")
         if filename:
-            self._stream = open(filename, "a", encoding="utf-8")
+            self._stream = open(filename, "a", encoding="utf-8")  # noqa: SIM115 - the handler owns it and close() closes it
             self._owns_stream = True
         elif stream:
             self._stream = stream
@@ -175,8 +175,8 @@ class JsonHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            entry = {
-                "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            entry: dict[str, Any] = {
+                "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
                 "level": record.levelname,
                 "message": record.getMessage(),
                 "thread_id": record.threadName,

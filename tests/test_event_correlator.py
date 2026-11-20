@@ -14,7 +14,6 @@ from logler.event_correlator import (
     search_around_timestamp,
 )
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -113,9 +112,8 @@ def _make_mock_search(log_data: dict):
                         continue
                 # Level filter
                 level_filter = kwargs.get("level")
-                if level_filter:
-                    if entry.get("level", "").upper() != level_filter.upper():
-                        continue
+                if level_filter and entry.get("level", "").upper() != level_filter.upper():
+                    continue
                 # Query filter
                 query = kwargs.get("query")
                 if query:
@@ -430,7 +428,7 @@ class TestCorrelateEvents:
             )
 
         assert len(result1["clusters"]) == len(result2["clusters"])
-        for c1, c2 in zip(result1["clusters"], result2["clusters"]):
+        for c1, c2 in zip(result1["clusters"], result2["clusters"], strict=True):
             assert c1["virtual_trace_id"] == c2["virtual_trace_id"]
 
     def test_entries_from_multiple_files(self, multi_file_logs):

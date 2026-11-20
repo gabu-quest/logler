@@ -1,10 +1,14 @@
 """Tests for log reader."""
 
 import json
-import pytest
 import tempfile
 from pathlib import Path
+
+import pytest
+
+from logler import log_reader
 from logler.log_reader import LogReader
+from logler.parser import read_lines
 
 
 class TestLogReader:
@@ -213,3 +217,280 @@ class TestLogReader:
 
             assert entry["service"] == expected_last[path.name]["service"]
             assert entry["message"] == expected_last[path.name]["message"]
+
+
+class TestReadLinesCutsLikeSearch:
+    """`LogReader.read_lines` cuts a file the way `parser.read_lines` and the index do."""
+
+    @pytest.fixture
+    def odd_file(self, tmp_path):
+        path = tmp_path / "odd.log"
+        path.write_bytes(b"\xef\xbb\xbfone\rtwo\nthree\r\r\nfour  \n")
+        return str(path)
+
+    def test_a_bare_return_does_not_end_a_line_and_a_bom_is_not_text(self, odd_file):
+        assert list(LogReader(odd_file).read_lines()) == ["one\rtwo", "three\r", "four  "]
+
+    def test_start_line_and_max_lines_count_those_lines(self, odd_file):
+        assert list(LogReader(odd_file).read_lines(start_line=1, max_lines=1)) == ["three\r"]
+
+
+class TestReverseReadYieldsText:
+    """What `read_lines(reverse=True)` yields: `str`, like the forward read, never `bytes`."""
+
+    @pytest.fixture
+    def path(self, tmp_path):
+        path = tmp_path / "app.log"
+        path.write_bytes("alpha\nbeta \xe9\r\ngamma\n".encode())
+        return path
+
+    def test_reverse_read_yields_str_lines_in_reverse_order(self, path):
+        lines = list(LogReader(path).read_lines(reverse=True))
+        assert lines == ["gamma", "beta \xe9", "alpha"]
+        assert [type(x) for x in lines] == [str, str, str]
+
+    def test_forward_read_yields_the_same_type(self, path):
+        lines = list(LogReader(path).read_lines())
+        assert [type(x) for x in lines] == [str, str, str]
+
+
+ODD_BYTES = (
+    b"\xef\xbb\xbfone\rtwo\r\n"  # byte-order mark, a lone return inside a line, CRLF
+    b"spaced  \n"
+    b"bad\xffbyte\n"
+    b"\xe6\x97\xa5\xe6\x9c\xac\r\n"  # multi-byte characters
+    b"end\r\r\n"
+    b"last"  # no final newline
+)
+ODD_LINES = ["one\rtwo", "spaced  ", "bad\ufffdbyte", "\u65e5\u672c", "end\r", "last"]
+
+
+def _parser_lines(path):
+    return [line for _, line in read_lines(str(path))]
+
+
+class _Stop(Exception):
+    pass
+
+
+def _follow(path, count, writes=()):
+    """The lines `tail(follow=True)` yields: the last `count` the file has, then what the
+    `writes` bring. Each time the follow finds nothing new and waits, the next of `writes`
+    is done, a pair of an open mode ("ab" appends, "wb" replaces the file) and the bytes;
+    the wait after the last one ends the follow."""
+    out = []
+    pending = list(writes)
+
+    def wait(_seconds):
+        if not pending:
+            raise _Stop
+        mode, data = pending.pop(0)
+        with open(path, mode) as f:
+            f.write(data)
+
+    original = log_reader.time.sleep
+    log_reader.time.sleep = wait
+    try:
+        for line in LogReader(path).tail(num_lines=count, follow=True):
+            out.append(line)
+    except _Stop:
+        pass
+    finally:
+        log_reader.time.sleep = original
+    return out
+
+
+class TestEveryReaderCutsOneWay:
+    """The forward read, the reverse read, tail, tail(follow=True) and search give the text
+    `parser.read_lines` gives, for a file of every odd ending."""
+
+    @pytest.fixture
+    def odd_file(self, tmp_path):
+        path = tmp_path / "odd.log"
+        path.write_bytes(ODD_BYTES)
+        return path
+
+    def test_the_parser_gives_the_expected_lines(self, odd_file):
+        assert _parser_lines(odd_file) == ODD_LINES
+
+    def test_forward(self, odd_file):
+        assert list(LogReader(odd_file).read_lines()) == ODD_LINES
+
+    def test_reverse(self, odd_file):
+        assert list(LogReader(odd_file).read_lines(reverse=True)) == ODD_LINES[::-1]
+
+    def test_tail(self, odd_file):
+        assert list(LogReader(odd_file).tail(num_lines=10)) == ODD_LINES
+
+    def test_search(self, odd_file):
+        found = list(LogReader(odd_file).search("", regex=True))
+        assert found == list(enumerate(ODD_LINES, start=1))
+
+    def test_tail_follow_gives_every_complete_line(self, tmp_path):
+        path = tmp_path / "odd_nl.log"
+        path.write_bytes(ODD_BYTES + b"\n")
+        assert _follow(path, 10) == ODD_LINES
+
+    def test_tail_follow_last_lines_only(self, tmp_path):
+        path = tmp_path / "odd_nl.log"
+        path.write_bytes(ODD_BYTES + b"\n")
+        assert _follow(path, 2) == ODD_LINES[-2:]
+
+
+class TestEmptyAndSingleLineFiles:
+    @pytest.mark.parametrize(
+        "data,lines",
+        [
+            (b"", []),
+            (b"solo", ["solo"]),
+            (b"\n", [""]),
+            (b"\xef\xbb\xbf", []),  # a byte-order mark and nothing else
+            (b"\xef\xbb\xbf\n", [""]),
+            (b"\xef\xbb\xbfsolo", ["solo"]),
+        ],
+    )
+    def test_every_reader_agrees(self, tmp_path, data, lines):
+        path = tmp_path / "tiny.log"
+        path.write_bytes(data)
+        reader = LogReader(path)
+        # the parser cuts every line; a reader leaves out a blank one
+        entries = [line for line in lines if line.strip()]
+        assert _parser_lines(path) == lines
+        assert list(reader.read_lines()) == entries
+        assert list(reader.read_lines(reverse=True)) == entries
+        assert list(reader.tail(num_lines=5)) == entries
+        assert [text for _, text in reader.search("", regex=True)] == entries
+
+    def test_a_lone_unterminated_line_is_not_followed_until_complete(self, tmp_path):
+        path = tmp_path / "tiny.log"
+        path.write_bytes(b"solo")
+        assert _follow(path, 5) == []
+
+    def test_a_line_written_in_two_parts_is_followed_once_whole(self, tmp_path):
+        path = tmp_path / "grow.log"
+        path.write_bytes(b"first\n")
+        writes = [("ab", b"sec"), ("ab", b"ond\nthird\n")]
+        assert _follow(path, 5, writes) == ["first", "second", "third"]
+
+    @pytest.mark.parametrize("at_open", [b"", b"\xef\xbb"])
+    def test_a_byte_order_mark_written_after_the_follow_began_is_not_part_of_line_one(
+        self, tmp_path, at_open
+    ):
+        path = tmp_path / "late.log"
+        path.write_bytes(at_open)
+        rest = (b"\xef\xbb\xbf" + b"hello\nworld\n")[len(at_open) :]
+        assert _follow(path, 5, [("ab", rest)]) == ["hello", "world"]
+
+    def test_a_file_replaced_by_a_shorter_one_is_followed_from_its_start(self, tmp_path):
+        path = tmp_path / "rotated.log"
+        path.write_bytes(b"a long first line\n")
+        writes = [("wb", b"\xef\xbb\xbfnew\n")]
+        assert _follow(path, 5, writes) == ["a long first line", "new"]
+
+    def test_tail_zero_gives_no_line(self, tmp_path):
+        path = tmp_path / "three.log"
+        path.write_bytes(b"a\nb\nc\n")
+        assert list(LogReader(path).tail(num_lines=0)) == []
+        assert _follow(path, 0) == []
+
+    def test_max_lines_larger_than_the_file(self, tmp_path):
+        path = tmp_path / "three.log"
+        path.write_bytes(b"a\nb\nc\n")
+        assert list(LogReader(path).read_lines(reverse=True, max_lines=99)) == ["c", "b", "a"]
+
+    def test_start_line_skips_from_the_end(self, tmp_path):
+        path = tmp_path / "three.log"
+        path.write_bytes(b"a\nb\nc\n")
+        assert list(LogReader(path).read_lines(reverse=True, start_line=1, max_lines=1)) == ["b"]
+
+
+class TestReverseReadChunkBorders:
+    """A chunk border falls inside a multi-byte character, inside CRLF, and a line is
+    longer than a chunk: the lines are always the parser's, reversed."""
+
+    @pytest.mark.parametrize("buffer_size", [1, 2, 3, 4, 5, 7, 8, 13, 64, 8192])
+    def test_every_chunk_size_gives_the_parser_lines_reversed(self, tmp_path, buffer_size):
+        path = tmp_path / "odd.log"
+        path.write_bytes(ODD_BYTES + b"\n\n" + "x\u00e9\U0001f600".encode() * 20 + b"\r\nz\r\n")
+        reader = LogReader(path, buffer_size=buffer_size)
+        entries = [line for line in _parser_lines(path) if line.strip()]
+        assert list(reader.read_lines(reverse=True)) == entries[::-1]
+        assert list(reader.tail(num_lines=3)) == entries[-3:]
+
+    def test_a_chunk_border_between_the_return_and_the_newline(self, tmp_path):
+        path = tmp_path / "crlf.log"
+        path.write_bytes(b"aaaa\r\nbbbb\r\n")
+        # one byte a chunk, so every "\r" and its "\n" are read apart
+        assert list(LogReader(path, buffer_size=1).read_lines(reverse=True)) == ["bbbb", "aaaa"]
+
+    def test_a_line_longer_than_one_chunk(self, tmp_path):
+        path = tmp_path / "long.log"
+        path.write_bytes(b"first\n" + b"y" * 100 + b"\nlast\n")
+        lines = list(LogReader(path, buffer_size=8).read_lines(reverse=True))
+        assert lines == ["last", "y" * 100, "first"]
+
+
+def _make_big_file(path):
+    """About 50 MB: 100-byte lines, the last ten of them numbered 'tail-0' to 'tail-9'."""
+    block = b"".join(b"line %04d " % i + b"x" * 89 + b"\n" for i in range(1000))
+    with open(path, "wb") as f:
+        for _ in range(525):
+            f.write(block)
+        for i in range(10):
+            f.write(b"tail-%d\n" % i)
+    assert path.stat().st_size > 50_000_000
+
+
+class _CountingFile:
+    def __init__(self, f, counter):
+        self._f = f
+        self._counter = counter
+
+    def read(self, *args):
+        data = self._f.read(*args)
+        self._counter.append(len(data))
+        return data
+
+    def __getattr__(self, name):
+        return getattr(self._f, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return self._f.__exit__(*exc)
+
+
+class TestReverseReadStopsEarly:
+    @pytest.fixture
+    def big(self, tmp_path):
+        path = tmp_path / "big.log"
+        _make_big_file(path)
+        return path
+
+    @pytest.fixture
+    def counter(self, monkeypatch):
+        counts: list[int] = []
+        real_open = open
+
+        def counting_open(*args, **kwargs):
+            return _CountingFile(real_open(*args, **kwargs), counts)
+
+        monkeypatch.setattr(log_reader, "open", counting_open, raising=False)
+        return counts
+
+    def test_the_last_ten_lines_read_under_a_megabyte(self, big, counter):
+        lines = list(LogReader(big).read_lines(reverse=True, max_lines=10))
+        assert lines == [f"tail-{i}" for i in range(9, -1, -1)]
+        assert sum(counter) < 1_000_000
+
+    def test_tail_reads_under_a_megabyte(self, big, counter):
+        lines = list(LogReader(big).tail(num_lines=10))
+        assert lines == [f"tail-{i}" for i in range(10)]
+        assert sum(counter) < 1_000_000
+
+    def test_a_file_of_one_line_is_read_back_whole(self, tmp_path):
+        path = tmp_path / "one.log"
+        path.write_bytes(b"z" * 50_000_000)
+        lines = list(LogReader(path).tail(num_lines=1))
+        assert [len(x) for x in lines] == [50_000_000]

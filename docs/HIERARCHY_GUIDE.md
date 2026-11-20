@@ -109,16 +109,21 @@ When a log entry appears within ~1 second after another with no explicit relatio
 
 ### Viewing Detection Confidence
 
+The tree views do not print confidence. It is in the data: every node of the JSON output
+carries `confidence` and `relationship_evidence`.
+
 ```bash
-# Show confidence scores in output
-logler investigate app.log --hierarchy --correlation req-123
+logler llm hierarchy req-123 --files app.log
 ```
 
-In the tree output, nodes show their relationship evidence:
+```json
+{"id": "db-query", "confidence": 1.0, "relationship_evidence": ["explicit_parent_span_id"]}
+{"id": "worker-1.cache-task", "confidence": 0.8, "relationship_evidence": ["naming_pattern"]}
 ```
-├─ db-query (confidence=1.0, evidence=["Explicit parent_span_id"])
-├─ cache-task (confidence=0.8, evidence=["Naming pattern: dot-separated"])
-```
+
+The evidence values are `explicit_parent_span_id`, `naming_pattern` and `temporal_proximity`.
+The top level names what was used: `detection_method` is one method's name, or `Mixed` with
+the list in `detection_methods`.
 
 ---
 
@@ -248,17 +253,16 @@ for rec in error_analysis['recommendations']:
 ### Performance Analysis
 
 ```python
-# Analyze performance
-perf = investigate.analyze_hierarchy_performance(hierarchy)
+# Where the time went
+perf = investigate.analyze_bottlenecks(hierarchy, threshold_percentage=20.0)
 
-# Critical path
-for node in perf['critical_path']:
-    print(f"{node['id']}: {node['duration_ms']}ms ({node['percentage']:.1f}%)")
+# The slowest node of the tree
+primary = perf['primary_bottleneck']
+print(f"{primary['node_id']}: {primary['duration_ms']}ms ({primary['percentage']:.1f}%)")
 
-# Parallelization opportunities
-for opp in perf['parallelization_opportunities']:
-    print(f"Can parallelize: {opp['nodes']}")
-    print(f"Potential savings: {opp['potential_savings_ms']}ms")
+# Other nodes whose own time is at least the threshold, slowest first
+for node in perf['secondary_bottlenecks']:
+    print(f"{node['id']}: {node['self_time_ms']}ms of its own ({node['self_percentage']:.1f}%)")
 
 # Optimization suggestions
 for suggestion in perf['optimization_suggestions']:
@@ -270,14 +274,14 @@ for suggestion in perf['optimization_suggestions']:
 ```python
 session = investigate.InvestigationSession(files=["app.log"], name="incident")
 
-# Build and explore hierarchy
-session.build_hierarchy(root_identifier="req-123")
-hierarchy = session.current_hierarchy
+# A session records searches and notes; the hierarchy is built with the function
+session.search(level="ERROR")
+hierarchy = investigate.follow_thread_hierarchy(files=["app.log"], root_identifier="req-123")
 
 # Add notes during investigation
 session.add_note("Database connection pool was exhausted")
 
-# Generate report with hierarchy visualization
+# Generate a report of the searches and notes
 report = session.generate_report(format="markdown")
 ```
 
@@ -287,31 +291,38 @@ report = session.generate_report(format="markdown")
 
 ### Tree View
 
-Best for understanding structure and parent-child relationships.
+Best for understanding structure and parent-child relationships. This is
+`format_tree(hierarchy, use_colors=False)` for trace `trace-001` in
+`examples/logs/microservices_trace.log`:
 
 ```
+======================================================================
 THREAD HIERARCHY
 ======================================================================
-Total nodes: 8
-Max depth: 3
-Detection: ExplicitParentId
-Total duration: 520ms
+Total nodes: 7
+Max depth: 4
+Detection: Mixed (ExplicitParentId, NamingPattern, TemporalInference)
+Total duration: 195ms
 
-⚠️  BOTTLENECK: product-service (450ms, 86.5%)
+⚠️  BOTTLENECK: span-gw-1 (195ms, 100.0%)
+
 ❌ 1 node(s) with errors
+
 ----------------------------------------------------------------------
 
-└── api-gateway (10 entries, 520ms)
-    ├── auth-service (5 entries, 45ms)
-    │   ├── jwt-validate (2 entries, 5ms)
-    │   └── user-lookup (3 entries, 25ms)
-    ├── ❌ [1 errors] product-service (8 entries, 450ms)
-    │   ├── inventory-check (4 entries, 340ms)
-    │   │   └── db-query (2 entries, 300ms)
-    │   └── cache-update (2 entries, 45ms)
-    └── response-assembly (3 entries, 10ms)
+└── Incoming request: GET /api/v1/user/12345/orders (4 entries, 195ms)
+    └── Received request for user 12345 (1 entries, <1ms)
+        ├── Querying user database (2 entries, 20ms)
+        └── Fetching orders for user 12345 (1 entries, <1ms)
+            ├── Querying orders database (2 entries, 15ms)
+            └── Checking stock for 3 orders (1 entries, <1ms)
+                └── ❌ [3 errors] Database connection timeout (5 entries, 40ms)
+
 ======================================================================
 ```
+
+A node is named after the first short message among its log lines, and counts its own
+lines, each once.
 
 ### Waterfall View
 
@@ -535,6 +546,6 @@ logler investigate app.log --hierarchy --min-confidence 0.8
 
 ## Further Reading
 
-- [Perfect Log Format](../README.md#-perfect-log-format-for-maximum-features) - Optimal log structure
-- [LLM Investigation API](./LLM_INVESTIGATION_API.md) - Complete API reference
-- [Examples](../examples/en/15_hierarchy_visualization.py) - Working code examples
+- [API reference](./API.md) - The Python API and its tested contracts
+- [Agent command reference](./LLM_CLI_REFERENCE.md) - Every `logler llm` command
+- [Hierarchy tour](../examples/tours/tour_03_hierarchy.py) - A notebook with working code

@@ -39,18 +39,28 @@ All commands use consistent exit codes for automation:
 |------|---------|
 | 0 | Success with results |
 | 1 | Success but no results found |
-| 2 | User error (invalid args, file not found) |
+| 2 | User error (invalid arguments, a file that is missing or cannot be read, a line number the file has no entry for, a formats file that cannot be used, a `--query` or `--exclude-query` that is not a regex) |
 | 3 | Internal error |
+
+An error is a JSON object `{"error": "<text>", "code": <exit code>}`. When the error is a file the command could not open, read or write, the object also has a `file` key with that file's name, and `error` is `<file>: <reason>`:
+
+```json
+{"error": "/var/log/app.log: Permission denied", "code": 2, "file": "/var/log/app.log"}
+```
+
+An error that names no file has no `file` key.
 
 ---
 
 ## Command Reference
 
+With `--db`, each row of the database is one line of JSON that holds its text as read: `日本語` is written as itself, so a `--query` pattern finds it in the line and in the message. A lone surrogate in a stored document (a cut emoji) is written as U+FFFD, the replacement character, and the row keeps its fields.
+
 ### triage
 
 **Quick severity assessment for incident response.**
 
-The first command to run when investigating an issue. Provides severity level, top issues, and suggested actions.
+The first command to run when investigating an issue. Provides a severity level, the error counts and suggested actions. Every count is over every line in the time range, however many there are.
 
 ```bash
 logler llm triage app.log
@@ -72,26 +82,18 @@ logler llm triage app.log --pretty
   "assessment": {
     "severity": "high",
     "confidence": 0.9,
-    "summary": "Error rate: 12.3%, 5 issues detected"
+    "summary": "Error rate: 20.0%, 5 errors in 25 entries"
   },
   "metrics": {
-    "error_rate": 0.123,
-    "error_count": 45,
-    "total_entries": 366,
-    "log_levels": {"INFO": 280, "ERROR": 45, "WARN": 41}
+    "error_rate": 0.2,
+    "error_count": 5,
+    "total_entries": 25,
+    "log_levels": {"INFO": 14, "WARN": 6, "ERROR": 4, "FATAL": 1}
   },
-  "top_issues": [
-    {
-      "type": "error_spike",
-      "severity": "high",
-      "description": "Error rate exceeded 10%",
-      "count": 45
-    }
-  ],
   "suggested_actions": [
-    {"action": "investigate", "reason": "Check database connectivity"}
-  ],
-  "next_steps": ["logler llm search app.log --level ERROR --limit 10"]
+    {"action": "investigate", "reason": "High error rate detected - investigate most common errors"},
+    {"action": "search_errors", "reason": "Run: logler llm search --level ERROR to find error details"}
+  ]
 }
 ```
 
@@ -121,8 +123,8 @@ logler llm search app.log --after=-1h --before=-30m    # Relative time window
 **Options:**
 - `--level LEVEL` - Filter by log level (comma-separated: `ERROR,WARN`)
 - `--exclude-level LEVEL` - Exclude log levels (comma-separated: `DEBUG,INFO`)
-- `--query PATTERN` - Regex pattern to match in message
-- `--exclude-query PATTERN` - Regex pattern to exclude from results
+- `--query PATTERN` - A regex; a line is a result when it matches (see **Patterns** below)
+- `--exclude-query PATTERN` - A regex; a line it matches is left out
 - `--thread ID` - Filter by thread ID (comma-separated for multiple)
 - `--correlation ID` - Filter by correlation ID (comma-separated for multiple)
 - `--trace ID` - Filter by trace ID
@@ -130,18 +132,20 @@ logler llm search app.log --after=-1h --before=-30m    # Relative time window
 - `--after TIME` - Only entries after this time (ISO8601 or relative: `-1h`, `-30m`)
 - `--before TIME` - Only entries before this time (ISO8601 or relative: `-1h`, `-30m`)
 - `--last DURATION` - Only entries in last N duration (e.g., `30m`, `2h`)
-- `--limit N` / `--head N` - Limit number of results (first N by relevance)
+- `--limit N` / `--head N` - Limit number of results (the first N in time order)
 - `--tail N` - Return last N entries by timestamp
 - `--offset N` - Skip first N results (for pagination, use with `--limit`)
 - `--count-only` - Return only match count, no results array
-- `--compact` - Use short field names (`ts`/`lv`/`msg`/`svc`/`th`/`cid`/`trc`)
+- `--compact` - Use short field names (`ln`/`ts`/`lv`/`msg`/`src`/`th`/`cid`/`trc`/`sid`/`svc`)
 - `--metadata-only` - Return aggregations only, no results array
 - `--fields LIST` - Comma-separated fields to include in output (e.g., `timestamp,level,message`)
-- `--context N` - Include N context lines around each match
+- `--context N` - Include N entries before and after each match (a blank line is no entry)
 - `--max-bytes N` - Maximum output size in bytes (truncates results to fit)
 - `--include-raw/--no-raw` - Include raw log line (default: yes)
 - `--aggregate/--no-aggregate` - Include aggregations (default: yes)
 - `--pretty` - Pretty-print JSON output
+
+**Patterns:** `--query` and `--exclude-query` are each one regex, matched without regard to letter case (a part written inside `(?-i:` and `)` keeps its letter case: `--query "(?-i:Timeout)"` does not find `timeout`), against the whole line as it is written in the file and against the message read from it. On a JSON line the first includes the keys and every field, not the message alone: `--query "A-17"` finds a line whose `order` field is `A-17`, and `--query "level"` matches every JSON line. There is no word fallback: `--query "connection timeout"` finds only lines that hold that text, and `--query "timeout|refused"` asks for either. The message is read as well because a JSON line may spell it differently: a quote is written `\"`, and many loggers write `ä` as `\u00e4`. `--query 'said "no"'` and `--query "ärger"` find such a message; in a field beside the message the text is found as it is written (`\\u00e4rger`). `^` and `$` hold at the ends of the line and at the ends of the message. A pattern that is not a regex is exit 2 with the pattern and the reason, for both flags in `search` and `emit`; an empty `--query` is no filter. Every result of a query has `relevance_score` 1.0 and results come in time order, as they do without a query. `search` reads patterns with Rust's regex engine, `emit` with Python's `re`; a pattern of ordinary regex syntax reads the same in both, and they differ at the edges: look-behind, look-ahead and back-references exist only in Python's, so only `emit` accepts them; `\p{L}`, `[[:alpha:]]`, `\z` and a flag switched in the middle of a pattern or switched off for the rest of it (`(?-i)`) exist only in Rust's, so `emit` answers them with exit 2; `emit` refuses a pattern longer than 1000 characters, and it has no limit on the time a pattern may take, where Rust's engine cannot be made slow by a pattern.
 
 **Pagination Pattern:**
 ```bash
@@ -195,6 +199,8 @@ logler llm search app.log --limit 25 --offset 25
 **Discover all unique IDs (threads, correlations, traces, services) in log files.**
 
 Useful for understanding what's in a log file before querying. Returns counts and time ranges for each ID.
+
+An all-zero trace, span or parent span id (16 or 32 characters of `0`, which OpenTelemetry writes for a line made outside a span) means no id: it is never listed, searched by or shown in a hierarchy as an id. A logfmt line keeps the key in its `fields`. Any other id is kept as written.
 
 ```bash
 logler llm ids app.log
@@ -377,42 +383,63 @@ logler llm hierarchy span-001 --min-confidence 0.8
 {
   "roots": [
     {
-      "id": "api-gateway",
-      "name": "HTTP POST /checkout",
-      "span_id": "span-001",
-      "depth": 0,
-      "duration_ms": 520,
-      "entry_count": 3,
-      "error_count": 0,
+      "id": "span-gw-1",
+      "node_type": "Span",
+      "name": "Incoming request: GET /api/v1/user/12345/orders",
+      "parent_id": null,
       "children": [
         {
-          "id": "auth-service",
-          "name": "ValidateToken",
+          "id": "span-user-1",
+          "node_type": "Span",
+          "name": "Received request for user 12345",
+          "parent_id": "span-gw-1",
+          "children": [],
+          "entry_ids": ["8469ba9f-6f26-489e-a1ce-68c1d77f4292"],
+          "start_time": "2024-01-15T10:00:00.120Z",
+          "end_time": "2024-01-15T10:00:00.120Z",
+          "duration_ms": 0,
+          "entry_count": 1,
+          "error_count": 0,
+          "level_counts": {"INFO": 1},
           "depth": 1,
-          "duration_ms": 45,
-          "children": []
-        },
-        {
-          "id": "product-service",
-          "name": "CheckInventory",
-          "depth": 1,
-          "duration_ms": 450,
-          "error_count": 1,
-          "children": []
+          "confidence": 1.0,
+          "relationship_evidence": ["explicit_parent_span_id"]
         }
-      ]
+      ],
+      "entry_ids": ["94ac72f9-4e2a-4356-bb34-df0286ab7bb1", "2bc4dc6b-14f2-4f3c-84c4-a43ab96d433a"],
+      "start_time": "2024-01-15T10:00:00.100Z",
+      "end_time": "2024-01-15T10:00:00.295Z",
+      "duration_ms": 195,
+      "entry_count": 2,
+      "error_count": 0,
+      "level_counts": {"INFO": 2},
+      "depth": 0,
+      "confidence": 0.8,
+      "relationship_evidence": ["naming_pattern", "temporal_proximity"]
     }
   ],
-  "total_duration_ms": 520,
-  "total_nodes": 5,
-  "max_depth": 2,
+  "total_nodes": 2,
+  "max_depth": 1,
+  "total_duration_ms": 195,
+  "concurrent_count": 1,
   "bottleneck": {
-    "node_id": "product-service",
-    "duration_ms": 450,
-    "percentage": 86.5
-  }
+    "node_id": "span-gw-1",
+    "node_name": "Incoming request: GET /api/v1/user/12345/orders",
+    "duration_ms": 195,
+    "percentage": 100.0,
+    "depth": 0
+  },
+  "error_nodes": [],
+  "detection_method": "Mixed",
+  "detection_methods": ["ExplicitParentId", "NamingPattern"]
 }
 ```
+
+The example is shortened to two nodes. `id` is the span ID (or the thread ID of a node that has
+no span). `entry_count`, `error_count` and `level_counts` count the node's own log lines, each
+line once. Sibling nodes come in order of start time. `entry_ids` are internal IDs: each is unique
+among the entries of one run, and none is a stable name for a line (the same line gets another ID in
+the next run, and again when it is read again).
 
 ---
 
@@ -634,16 +661,18 @@ echo "SELECT * FROM logs LIMIT 5" | logler llm sql --stdin -f app.log
 **Table Schema:**
 | Column | Type | Description |
 |--------|------|-------------|
+| `file` | VARCHAR | Source file path |
 | `line_number` | INTEGER | Line number in file |
-| `timestamp` | VARCHAR | ISO8601 timestamp |
+| `timestamp` | TIMESTAMP | Entry time (empty when the line has none) |
 | `level` | VARCHAR | Log level (INFO, ERROR, etc.) |
 | `message` | VARCHAR | Log message |
 | `thread_id` | VARCHAR | Thread identifier |
 | `correlation_id` | VARCHAR | Request correlation ID |
 | `trace_id` | VARCHAR | Distributed trace ID |
 | `span_id` | VARCHAR | Span ID |
-| `file` | VARCHAR | Source file path |
 | `raw` | VARCHAR | Raw log line |
+
+`logler llm sql "DESCRIBE logs" -f app.log` lists the columns of the build you have.
 
 **Output:**
 ```json
@@ -694,7 +723,7 @@ logler llm schema app.log --full
     "thread_id": {"present": 0.95, "patterns": ["worker-\\d+"]},
     "correlation_id": {"present": 0.85, "patterns": ["req-[a-z0-9]+"]}
   },
-  "detected_formats": {"json": 1.0},
+  "detected_formats": {"Json": 1.0},
   "custom_fields": ["component", "error_code", "user_id"],
   "time_range": {
     "earliest": "2024-01-15T00:00:00Z",
@@ -741,10 +770,7 @@ logler llm sample app.log --strategy head --size 20
   },
   "sample": {
     "size": 50,
-    "strategy": "errors_focused",
-    "coverage": {
-      "levels": {"ERROR": 30, "WARN": 15, "INFO": 5}
-    }
+    "strategy": "errors_focused"
   },
   "entries": [
     {
@@ -752,8 +778,7 @@ logler llm sample app.log --strategy head --size 20
       "timestamp": "2024-01-15T10:05:23Z",
       "level": "ERROR",
       "message": "Database timeout",
-      "thread_id": "worker-1",
-      "selection_reason": "error_entry"
+      "thread_id": "worker-1"
     }
   ]
 }
@@ -826,9 +851,14 @@ logler llm context app.log 1523 --before 20 --after 10
 **Options:**
 - `FILE` - Log file path
 - `LINE` - Line number
-- `--before/-B N` - Lines before (default: 10)
-- `--after/-A N` - Lines after (default: 10)
+- `--before/-B N` - Entries before (default: 10)
+- `--after/-A N` - Entries after (default: 10)
+
+Context is counted in entries: a blank line is no entry and takes no place in it.
 - `--pretty` - Pretty-print JSON output
+
+A line number the file has no entry for (0, a negative number, past the end, an empty file)
+is exit code 2: `{"error": "app.log: no entry at line 9999", "code": 2}`.
 
 **Output:**
 ```json
@@ -870,8 +900,8 @@ logler llm emit app.log --exclude-level DEBUG --exclude-query "health"
 **Options:**
 - `--level LEVEL` - Filter by level (comma-separated: `ERROR,WARN`)
 - `--exclude-level LEVEL` - Exclude log levels (comma-separated)
-- `--query PATTERN` - Filter by pattern
-- `--exclude-query PATTERN` - Exclude entries matching regex pattern
+- `--query PATTERN` - A regex a line must match, read as in `search` (**Patterns** above)
+- `--exclude-query PATTERN` - A regex; a line it matches is left out
 - `--service NAME` - Filter by service name (comma-separated)
 - `--fields LIST` - Comma-separated fields to include
 - `--compact` - Minimal JSON (short keys: `ln`, `ts`, `lv`, `msg`, `th`)
@@ -885,6 +915,8 @@ logler llm emit app.log --exclude-level DEBUG --exclude-query "health"
 ```json
 {"file":"app.log","line_number":1523,"timestamp":"2024-01-15T10:05:23Z","level":"ERROR","message":"Database timeout","thread_id":"worker-1"}
 ```
+
+When nothing matches, `emit` prints nothing and exits 1.
 
 ---
 
@@ -906,21 +938,114 @@ logler llm export trace-abc123 --format otlp
 - `--format FORMAT` - Export format: `jaeger` (default), `zipkin`, `otlp`
 - `--pretty` - Pretty-print JSON output
 
+`export` is what `export_to_jaeger`, `export_to_zipkin` or `export_to_otlp` returns for the
+trace (`logler.export`); the command adds `identifier`, `format` and `span_count`.
+
+- **Span ids** are the log's own `span_id` when it is 16 hexadecimal characters (in lower
+  case) and not all zeros; any other id, and a node with no span id, gets a 16-hex id made with SHA-256, the
+  same in every run. No two spans share an id.
+- **The trace id** is `IDENTIFIER` when it is 32 hexadecimal characters and not all zeros,
+  else made from it the same way.
+- **The service** of a span is its hierarchy node's `service` (the `service_name` of the
+  node's first entry that has one), else `logler-export`.
+  Jaeger: one process per service, named by each span's `processID`. Zipkin:
+  `localEndpoint`. OTLP: one `resourceSpans` entry per service.
+
 **Output (jaeger format):**
 ```json
 {
   "identifier": "trace-abc123",
   "format": "jaeger",
-  "span_count": 5,
+  "span_count": 2,
   "export": {
     "data": [{
-      "traceID": "abc12300000000000000000000000000",
-      "spans": [...],
-      "processes": {...}
+      "traceID": "f77fa5b72c92206389a61d9faea3c4b3",
+      "spans": [
+        {"traceID": "f77fa5b72c92206389a61d9faea3c4b3", "spanID": "a1b2c3d4e5f60718",
+         "operationName": "GET /orders", "references": [],
+         "startTime": 1794650460000000, "duration": 1500000,
+         "tags": [{"key": "node_type", "type": "string", "value": "Span"}, ...],
+         "logs": [], "processID": "p1", "warnings": []},
+        {"traceID": "f77fa5b72c92206389a61d9faea3c4b3", "spanID": "1122334455667788",
+         "operationName": "charge card",
+         "references": [{"refType": "CHILD_OF", "traceID": "f77fa5b72c92206389a61d9faea3c4b3",
+                         "spanID": "a1b2c3d4e5f60718"}],
+         "startTime": 1794650460250000, "duration": 250000,
+         "tags": [...], "logs": [], "processID": "p2", "warnings": []}
+      ],
+      "processes": {
+        "p1": {"serviceName": "gateway", "tags": [{"key": "exported_by", "type": "string", "value": "logler"}]},
+        "p2": {"serviceName": "billing", "tags": [{"key": "exported_by", "type": "string", "value": "logler"}]}
+      },
+      "warnings": []
     }]
   }
 }
 ```
+
+**Output (otlp format), `export` only:**
+```json
+{
+  "resourceSpans": [
+    {
+      "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "gateway"}}]},
+      "scopeSpans": [{"scope": {"name": "logler"}, "spans": [
+        {"traceId": "f77fa5b72c92206389a61d9faea3c4b3", "spanId": "a1b2c3d4e5f60718",
+         "name": "GET /orders",
+         "startTimeUnixNano": "1794650460000000000", "endTimeUnixNano": "1794650461500000000",
+         "attributes": [{"key": "node_type", "value": {"stringValue": "Span"}},
+                        {"key": "entry_count", "value": {"intValue": "1"}},
+                        {"key": "error_count", "value": {"intValue": "0"}}]}
+      ]}]
+    },
+    {
+      "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "billing"}}]},
+      "scopeSpans": [{"scope": {"name": "logler"}, "spans": [
+        {"traceId": "f77fa5b72c92206389a61d9faea3c4b3", "spanId": "1122334455667788",
+         "parentSpanId": "a1b2c3d4e5f60718", "name": "charge card", "...": "..."}
+      ]}]
+    }
+  ]
+}
+```
+
+A root span has no `parentSpanId`; a span with errors has `"status": {"code": 2}`.
+
+---
+
+### format test
+
+**Test a format's regex against log files, and see the time the engine reads.**
+
+```bash
+logler llm format test -f "plc_*.log" --name plc
+logler llm format test -f app.log --regex '^(?P<timestamp>\S+ \S+) (?P<message>.*)$' --limit 5
+```
+
+**Options:**
+- `--files, -f FILE` - Log files to test (required, repeatable)
+- `--regex, -r REGEX` - A regex with named groups
+- `--name, -n NAME` - A format of the `.logler/formats.yaml` found from the first file, or a built-in format when the file has none of that name
+- `--limit N` - Lines to show (default 20); the counts cover every line
+
+The regex is looked for anywhere in a line, as the engine looks for it (write `^` to tie it
+to the start). A line is matched with Python's `re`, and each matched line is then read by
+the engine, which reads the files of every command, with the regex and, for `--name`, the
+format's `timestamp_format` (with `--regex` alone, no format). A built-in format is shown for
+your own test: it reads a log only once it is copied into the formats file. Each matched line carries `engine_matched` (false when the
+engine's regex does not match a line Python's matches) and `timestamp`, the time the engine
+reads as ISO 8601, or `null`. The summary adds `timestamp_format` (or `null`),
+`matched_lines_with_timestamp` and `engine_unmatched_lines`.
+
+A regex the engine cannot compile (a look-around, for one) is exit 2 with
+`The regex cannot be compiled by the Rust engine: <reason>`. With `--name`, a formats file that
+cannot be used, among others a `timestamp_format` whose regex has no group the engine reads as a timestamp
+(`timestamp`, `time`, `ts`, `datetime`), is exit 2 with the file and the format.
+
+### format validate
+
+Checks the formats file, or one regex with `--regex`. A format is flagged for a missing
+timestamp group only when none of the names the engine reads as a timestamp is a group.
 
 ---
 

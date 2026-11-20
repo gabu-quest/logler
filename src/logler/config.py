@@ -9,13 +9,23 @@ for proprietary log formats and cross-file correlation rules.
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
+from collections.abc import Iterable
 from datetime import timedelta
+from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Optional, Union
+from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from .safe_regex import RegexPatternTooLongError, RegexTimeoutError, safe_compile
 
@@ -26,10 +36,14 @@ class FormatConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     regex: str = Field(description="Regex with named capture groups for parsing log lines")
-    timestamp_format: Optional[str] = Field(
-        None, description="strftime format for the timestamp capture group"
+    timestamp_format: str | None = Field(
+        None,
+        description=(
+            "How the timestamp group is written, in Python's strptime words; tried before "
+            "the shapes logler knows. An empty string is no format."
+        ),
     )
-    file_patterns: List[str] = Field(
+    file_patterns: list[str] = Field(
         default_factory=list,
         description="Glob patterns to auto-match files",
     )
@@ -49,13 +63,19 @@ class FormatConfig(BaseModel):
             )
         return v
 
+    @field_validator("timestamp_format")
+    @classmethod
+    def empty_timestamp_format_is_none(cls, v: str | None) -> str | None:
+        """An empty ``timestamp_format`` is no format, as if the key were not written."""
+        return v or None
+
 
 class LoglerConfig(BaseModel):
     """Top-level config loaded from .logler/formats.yaml."""
 
     model_config = ConfigDict(extra="forbid")
 
-    formats: Dict[str, FormatConfig] = Field(
+    formats: dict[str, FormatConfig] = Field(
         default_factory=dict,
         description="Named log format definitions",
     )
@@ -85,7 +105,7 @@ def parse_duration(value: str) -> timedelta:
     match = _DURATION_PATTERN.match(value.strip())
     if not match:
         raise ValueError(
-            f"Invalid duration: {value!r}. " f"Expected format like '500ms', '5s', '1m', '2h'."
+            f"Invalid duration: {value!r}. Expected format like '500ms', '5s', '1m', '2h'."
         )
     amount = float(match.group(1))
     unit = match.group(2)
@@ -104,7 +124,7 @@ class FieldSelector(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    file_pattern: Optional[str] = Field(
+    file_pattern: str | None = Field(
         None, description="Glob pattern to match filenames (e.g. 'mes_*.log')"
     )
     field: str = Field(description="Field name in the log entry (e.g. 'batch_id')")
@@ -115,20 +135,20 @@ class EventCondition(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    file_pattern: Optional[str] = Field(
+    file_pattern: str | None = Field(
         None, description="Glob pattern to restrict which files to search"
     )
-    field: Optional[str] = Field(None, description="Field name to evaluate the condition against")
-    condition: Optional[str] = Field(
+    field: str | None = Field(None, description="Field name to evaluate the condition against")
+    condition: str | None = Field(
         None,
         description="Comparison expression for the field value (e.g. '< 2.0', '> 100')",
     )
-    level: Optional[str] = Field(None, description="Match entries at this log level (e.g. 'ERROR')")
-    pattern: Optional[str] = Field(None, description="Regex to match against the message text")
+    level: str | None = Field(None, description="Match entries at this log level (e.g. 'ERROR')")
+    pattern: str | None = Field(None, description="Regex to match against the message text")
 
     @field_validator("pattern")
     @classmethod
-    def validate_pattern(cls, v: Optional[str]) -> Optional[str]:
+    def validate_pattern(cls, v: str | None) -> str | None:
         if v is not None:
             try:
                 safe_compile(v)
@@ -137,7 +157,7 @@ class EventCondition(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def at_least_one_condition(self) -> "EventCondition":
+    def at_least_one_condition(self) -> EventCondition:
         has_any = self.field is not None or self.level is not None or self.pattern is not None
         if not has_any:
             raise ValueError(
@@ -173,7 +193,7 @@ class TemporalRule(BaseModel):
 
 
 CorrelationRule = Annotated[
-    Union[FieldMatchRule, TemporalRule],
+    FieldMatchRule | TemporalRule,
     Field(discriminator="type"),
 ]
 
@@ -183,8 +203,8 @@ class CorrelationGroup(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: Optional[str] = Field(None, description="Human-readable description")
-    rules: List[CorrelationRule] = Field(
+    description: str | None = Field(None, description="Human-readable description")
+    rules: list[CorrelationRule] = Field(
         ..., min_length=1, description="Correlation rules in this group"
     )
 
@@ -194,7 +214,7 @@ class CorrelationsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    correlations: Dict[str, CorrelationGroup] = Field(
+    correlations: dict[str, CorrelationGroup] = Field(
         default_factory=dict,
         description="Named correlation rule groups",
     )
@@ -219,17 +239,20 @@ def _find_config_file(start_dir: str | Path, filename: str) -> Path | None:
     Returns:
         Path to the config file, or None if not found.
     """
-    current = Path(start_dir).resolve()
+    found = _walk_up(os.path.realpath(start_dir), filename)
+    return Path(found) if found else None
 
+
+def _walk_up(directory: str, filename: str) -> str | None:
+    """The one walk: `.logler/<filename>` in `directory` (already resolved) or a parent."""
     while True:
-        candidate = current / CONFIG_DIR / filename
-        if candidate.is_file():
+        candidate = os.path.join(directory, CONFIG_DIR, filename)
+        if os.path.isfile(candidate):
             return candidate
-
-        parent = current.parent
-        if parent == current:
+        parent = os.path.dirname(directory)
+        if parent == directory:
             return None
-        current = parent
+        directory = parent
 
 
 def find_config(start_dir: str | Path) -> Path | None:
@@ -240,6 +263,29 @@ def find_config(start_dir: str | Path) -> Path | None:
 def find_correlations_config(start_dir: str | Path) -> Path | None:
     """Walk parent directories looking for .logler/correlations.yaml."""
     return _find_config_file(start_dir, CORRELATIONS_FILENAME)
+
+
+def _read_mapping(path: Path) -> dict | None:
+    """The top-level mapping of a YAML config file; ``None`` for an empty file."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML: {exc}") from exc
+    if not data:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected a YAML mapping at top level, got {type(data).__name__}")
+    return data
+
+
+def config_problem(exc: Exception) -> str:
+    """Why a config file cannot be used, as text for its user: a schema error is one
+    ``key.path: what is wrong`` per error."""
+    if isinstance(exc, ValidationError):
+        return "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+    return str(exc)
 
 
 def load_config(path: str | Path) -> LoglerConfig:
@@ -253,30 +299,12 @@ def load_config(path: str | Path) -> LoglerConfig:
 
     Raises:
         FileNotFoundError: If the file does not exist.
-        ValueError: If the YAML is invalid or cannot be parsed.
+        ValueError: If the YAML is invalid or cannot be parsed. The message does not name the
+            file; the caller knows which one it asked for.
         pydantic.ValidationError: If the config fails schema validation.
     """
-    path = Path(path)
-
-    if not path.is_file():
-        raise FileNotFoundError(f"Config file not found: {path}")
-
-    raw_text = path.read_text(encoding="utf-8")
-
-    try:
-        data = yaml.safe_load(raw_text)
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
-
-    if not data:
-        return LoglerConfig()
-
-    if not isinstance(data, dict):
-        raise ValueError(
-            f"Expected a YAML mapping at top level in {path}, got {type(data).__name__}"
-        )
-
-    return LoglerConfig.model_validate(data)
+    data = _read_mapping(Path(path))
+    return LoglerConfig() if data is None else LoglerConfig.model_validate(data)
 
 
 def load_correlations_config(path: str | Path) -> CorrelationsConfig:
@@ -293,27 +321,8 @@ def load_correlations_config(path: str | Path) -> CorrelationsConfig:
         ValueError: If the YAML is invalid or cannot be parsed.
         pydantic.ValidationError: If the config fails schema validation.
     """
-    path = Path(path)
-
-    if not path.is_file():
-        raise FileNotFoundError(f"Config file not found: {path}")
-
-    raw_text = path.read_text(encoding="utf-8")
-
-    try:
-        data = yaml.safe_load(raw_text)
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
-
-    if not data:
-        return CorrelationsConfig()
-
-    if not isinstance(data, dict):
-        raise ValueError(
-            f"Expected a YAML mapping at top level in {path}, got {type(data).__name__}"
-        )
-
-    return CorrelationsConfig.model_validate(data)
+    data = _read_mapping(Path(path))
+    return CorrelationsConfig() if data is None else CorrelationsConfig.model_validate(data)
 
 
 def get_format_for_file(config: LoglerConfig, filepath: str | Path) -> FormatConfig | None:
@@ -337,3 +346,176 @@ def get_format_for_file(config: LoglerConfig, filepath: str | Path) -> FormatCon
                 return format_config
 
     return None
+
+
+# =============================================================================
+# Which format parses a file
+# =============================================================================
+
+# Per formats.yaml: (stamp, config, problem), valid while the file's (mtime, size) is
+# unchanged. One of config and problem is None.
+_config_cache: dict[str, tuple] = {}
+
+
+def _stamp(path: Path) -> tuple:
+    stat = path.stat()
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def formats_stamp(file: str | Path) -> tuple | None:
+    """What a change of the format that parses ``file`` would change: the formats.yaml
+    found from the file's directory and its (mtime, size); ``None`` when there is none.
+
+    A cheap check (a ``stat`` per directory up to the config, no parse) for caches of what a
+    file reads as.
+    """
+    found = _walk_up(os.path.dirname(os.path.realpath(file)), CONFIG_FILENAME)
+    if found is None:
+        return None
+    try:
+        return (found, *_stamp(Path(found)))
+    except OSError:
+        return None
+
+
+class FormatFileError(ValueError):
+    """A ``.logler/formats.yaml`` that cannot be used: the message names the file and the
+    problem. A ``ValueError`` because the explicit-regex path raises one for a regex the
+    engine cannot compile, and callers catch that."""
+
+    def __init__(self, path: str | Path, problem: str):
+        super().__init__(f"{path}: {problem}")
+        self.path = str(path)
+        self.problem = problem
+
+
+@lru_cache(maxsize=256)
+def _rust_error(regex: str) -> str | None:
+    """What the Rust engine, the only reader of a custom regex, says about a regex it cannot
+    compile; ``None`` when it compiles."""
+    import logler_rs
+
+    try:
+        logler_rs.PyLineParser(custom_regex=regex)
+    except Exception as exc:
+        return str(exc)
+    return None
+
+
+@lru_cache(maxsize=256)
+def _rust_timestamp_format_error(regex: str, timestamp_format: str) -> str | None:
+    """What the Rust engine says about a ``timestamp_format`` it cannot read (a strptime word
+    it does not support, or no date); ``None`` when it can. ``regex`` compiles."""
+    import logler_rs
+
+    try:
+        logler_rs.PyLineParser(custom_regex=regex, timestamp_format=timestamp_format)
+    except Exception as exc:
+        return str(exc)
+    return None
+
+
+@lru_cache(maxsize=1)
+def _timestamp_keys() -> tuple[str, ...]:
+    """The names the Rust engine reads a line's timestamp under: its own list, so no second
+    list here can drift from the parser's."""
+    import logler_rs
+
+    return tuple(logler_rs.timestamp_keys())
+
+
+def _timestamp_group_choices() -> str:
+    """The engine's timestamp names a regex group can have (`@timestamp` cannot), as words."""
+    names = [key for key in _timestamp_keys() if key.isidentifier()]
+    return f"{', '.join(names[:-1])} or {names[-1]}"
+
+
+def timestamp_group_names(groups: Iterable[str]) -> list[str]:
+    """The group names, in the order given, that the Rust engine reads as a line's timestamp."""
+    keys = _timestamp_keys()
+    return [group for group in groups if group in keys]
+
+
+def load_usable_config(path: str | Path) -> LoglerConfig:
+    """The one decision whether a formats.yaml can be used: ``load_config`` plus the Rust
+    engine's compile of every format's regex and ``timestamp_format``, so the verdict is for
+    the whole file.
+
+    Raises:
+        FormatFileError: naming the file and the problem (and the format, for a regex or a
+            timestamp_format).
+    """
+    try:
+        config = load_config(path)
+    except (OSError, ValueError) as exc:  # pydantic's ValidationError is a ValueError
+        raise FormatFileError(path, config_problem(exc)) from exc
+    for name, fmt in config.formats.items():
+        error = _rust_error(fmt.regex)
+        if error is not None:
+            raise FormatFileError(
+                path, f"format '{name}': the regex cannot be compiled by the Rust engine: {error}"
+            )
+        if fmt.timestamp_format is None:
+            continue
+        error = _rust_timestamp_format_error(fmt.regex, fmt.timestamp_format)
+        if error is not None:
+            raise FormatFileError(
+                path,
+                f"format '{name}': the timestamp_format {fmt.timestamp_format!r} cannot be "
+                f"used: {error}",
+            )
+        groups = list(safe_compile(fmt.regex).groupindex)
+        if not timestamp_group_names(groups):
+            raise FormatFileError(
+                path,
+                f"format '{name}': the timestamp_format {fmt.timestamp_format!r} cannot be "
+                f"used: the regex has no group the engine reads as a timestamp "
+                f"(its groups: {', '.join(groups)}); name the group {_timestamp_group_choices()}",
+            )
+    return config
+
+
+def _load_cached(config_path: Path) -> LoglerConfig:
+    """The usable config of a formats.yaml, loaded once per (mtime, size). A failure is kept
+    the same way, as its text: each call raises a new error, because one error object raised
+    again and again grows its traceback for the life of the process."""
+    key = str(config_path)
+    try:
+        stamp = _stamp(config_path)
+    except OSError as exc:
+        raise FormatFileError(config_path, str(exc)) from exc
+    cached = _config_cache.get(key)
+    if cached is None or cached[0] != stamp:
+        try:
+            cached = (stamp, load_usable_config(config_path), None)
+        except FormatFileError as exc:
+            cached = (stamp, None, exc.problem)
+        _config_cache[key] = cached
+    if cached[2] is not None:
+        raise FormatFileError(config_path, cached[2])
+    return cached[1]
+
+
+def config_for_file(path: str | Path) -> LoglerConfig | None:
+    """The usable ``.logler/formats.yaml`` found from the file's own directory, ``None`` when
+    there is none.
+
+    Raises:
+        FormatFileError: the file found cannot be used (see ``load_usable_config``).
+    """
+    config_path = find_config(Path(path).resolve().parent)
+    return None if config_path is None else _load_cached(config_path)
+
+
+def format_for_file(path: str | Path) -> FormatConfig | None:
+    """The format that parses this file, or ``None`` for the built-in detection.
+
+    This is the one place that decides which format a file gets: the first format of the
+    ``.logler/formats.yaml`` found from the file's own directory whose ``file_patterns`` match
+    the file's name. ``None`` when there is no config or no format names the file.
+
+    Raises:
+        FormatFileError: the config found cannot be used, whichever file is asked for.
+    """
+    config = config_for_file(path)
+    return None if config is None else get_format_for_file(config, path)

@@ -7,12 +7,12 @@ from .system import SystemInfo
 from .timer import PrecisionTimer
 
 __all__ = [
+    "BenchmarkConfig",
     "BenchmarkResult",
-    "TimingStats",
-    "Scenario",
+    "BenchmarkRunner",
     "PrecisionTimer",
     "ScaleConfig",
-    "BenchmarkConfig",
+    "Scenario",
     "SystemInfo",
-    "BenchmarkRunner",
+    "TimingStats",
 ]

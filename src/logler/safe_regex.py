@@ -9,7 +9,6 @@ This module provides a safe_compile function that wraps re.compile with:
 
 import re
 import threading
-from typing import Optional
 
 
 class RegexTimeoutError(Exception):
@@ -102,7 +101,7 @@ def try_compile(
     flags: int = 0,
     timeout: float = COMPILE_TIMEOUT,
     max_length: int = MAX_PATTERN_LENGTH,
-) -> Optional[re.Pattern]:
+) -> re.Pattern | None:
     """
     Try to compile a regex pattern safely, returning None on failure.
 

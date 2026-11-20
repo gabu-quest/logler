@@ -11,7 +11,6 @@ from logler.builtin_formats import (
     list_builtin_format_names,
 )
 
-
 # Sample log lines for each format (at least 3 per format where possible)
 SAMPLE_LINES = {
     "nginx_access": [
@@ -104,9 +103,9 @@ class TestBuiltinFormatsParseSampleLines:
 
             for i, line in enumerate(samples):
                 match = compiled.match(line)
-                assert (
-                    match is not None
-                ), f"Format {name!r} failed to match sample line {i}: {line!r}"
+                assert match is not None, (
+                    f"Format {name!r} failed to match sample line {i}: {line!r}"
+                )
                 # Verify at least one named group captured something
                 groups = match.groupdict()
                 non_empty = {k: v for k, v in groups.items() if v is not None}
@@ -123,9 +122,9 @@ class TestBuiltinFormatsParseSampleLines:
                 match = compiled.match(line)
                 if match:
                     msg = match.group("message")
-                    assert (
-                        msg is not None and len(msg) > 0
-                    ), f"Format {name!r} has empty message for: {line!r}"
+                    assert msg is not None and len(msg) > 0, (
+                        f"Format {name!r} has empty message for: {line!r}"
+                    )
 
 
 class TestBuiltinFormatRegistry:
@@ -165,3 +164,45 @@ class TestBuiltinFormatRegistry:
         for name, fmt in BUILTIN_FORMATS.items():
             compiled = re.compile(fmt.regex)
             assert compiled.groupindex, f"Format {name!r} has no named capture groups"
+
+
+# The timestamp of each sample line, as the engine reads it with the format's regex and its
+# timestamp_format; one row per built-in format that has a timestamp_format.
+SAMPLE_TIMESTAMPS = {
+    "nginx_access": ["2024-10-10T20:55:36Z", "2024-10-10T20:55:37Z", "2024-10-10T20:55:38Z"],
+    "nginx_error": ["2024-10-10T13:55:36Z", "2024-10-10T13:55:37Z", "2024-10-10T13:55:38Z"],
+    "apache_access": ["2024-10-10T20:55:36Z", "2024-10-10T20:55:37Z", "2024-10-10T20:55:38Z"],
+    "log4j": ["2024-10-10T13:55:36.123Z", "2024-10-10T13:55:37.456Z", "2024-10-10T13:55:38.789Z"],
+    "logback": ["2024-10-10T13:55:36.123Z", "2024-10-10T13:55:37.456Z", "2024-10-10T13:55:38.789Z"],
+    "python_logging": [
+        "2024-10-10T13:55:36.123Z",
+        "2024-10-10T13:55:37.456Z",
+        "2024-10-10T13:55:38.789Z",
+    ],
+    "postgresql": [
+        "2024-10-10T13:55:36.123Z",
+        "2024-10-10T13:55:37.456Z",
+        "2024-10-10T13:55:38.789Z",
+    ],
+}
+
+
+class TestBuiltinTimestampFormats:
+    """A built-in format copied into a formats.yaml reads its samples' times."""
+
+    def test_the_formats_with_a_timestamp_format(self) -> None:
+        with_field = sorted(n for n, f in BUILTIN_FORMATS.items() if f.timestamp_format)
+        assert with_field == sorted(SAMPLE_TIMESTAMPS)
+
+    def test_each_reads_the_timestamp_of_its_samples(self) -> None:
+        from logler.parser import LogParser
+
+        assert len(SAMPLE_TIMESTAMPS) == 7
+        for name, expected in SAMPLE_TIMESTAMPS.items():
+            fmt = BUILTIN_FORMATS[name]
+            parser = LogParser(custom_regex=fmt.regex, timestamp_format=fmt.timestamp_format)
+            read = [
+                parser.parse_entry(i, line)["timestamp"]
+                for i, line in enumerate(SAMPLE_LINES[name], 1)
+            ]
+            assert read == expected, name

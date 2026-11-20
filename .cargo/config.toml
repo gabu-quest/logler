@@ -1,0 +1,3 @@
+[env]
+# Extension module: do not link libpython (maturin sets this for wheel builds; this keeps plain cargo build/test working without a Python dev package).
+PYO3_BUILD_EXTENSION_MODULE = "1"

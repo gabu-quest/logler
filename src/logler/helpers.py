@@ -5,21 +5,28 @@ This module provides convenience functions that wrap common investigation
 patterns, making it easier for LLM agents to perform typical tasks.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 import logler.investigate as investigate
+from logler._search_core import get_thread_level_counts
 from logler.investigate import Investigator
+from logler.types import ThreadLevelCounts
 
 
-def quick_summary(files: List[str]) -> Dict[str, Any]:
+def quick_summary(files: list[str]) -> dict[str, Any]:
     """
     Get a quick summary of log files.
 
     Returns a dictionary with:
-    - total_lines: Total number of log entries
-    - time_range: Start and end timestamps
+    - total_entries: Number of log entries (a blank line is none)
+    - total_lines: Number of lines in the file, blank ones too
+    - time_range: ``{"start": str, "end": str}``, or None when no entry has a timestamp
     - log_levels: Count of each log level
-    - error_rate: Percentage of ERROR/FATAL logs
-    - top_threads: Most active threads
+    - error_rate: Percentage of the entries that are ERROR/FATAL/CRITICAL
+    - unique_threads: Number of distinct thread ids
+    - unique_correlations: Number of distinct correlation ids
+
+    Returns an empty dictionary when no file is given.
 
     Example:
         summary = quick_summary(["app.log"])
@@ -30,14 +37,15 @@ def quick_summary(files: List[str]) -> Dict[str, Any]:
         return {}
 
     meta = metadata[0]
-    total = meta["lines"]
+    total = meta["entry_count"]
     levels = meta.get("log_levels", {})
 
     errors = levels.get("ERROR", 0) + levels.get("FATAL", 0) + levels.get("CRITICAL", 0)
     error_rate = (errors / total * 100) if total > 0 else 0
 
     return {
-        "total_lines": total,
+        "total_entries": total,
+        "total_lines": meta["lines"],
         "time_range": meta.get("time_range"),
         "log_levels": levels,
         "error_rate": error_rate,
@@ -47,8 +55,8 @@ def quick_summary(files: List[str]) -> Dict[str, Any]:
 
 
 def search_errors(
-    files: List[str], query: Optional[str] = None, limit: int = 100
-) -> List[Dict[str, Any]]:
+    files: list[str], query: str | None = None, limit: int = 100
+) -> list[dict[str, Any]]:
     """
     Search for ERROR and FATAL level logs.
 
@@ -61,15 +69,17 @@ def search_errors(
     return [r["entry"] for r in results["results"]]
 
 
-def trace_request(files: List[str], correlation_id: str) -> Dict[str, Any]:
+def trace_request(files: list[str], correlation_id: str) -> dict[str, Any]:
     """
     Trace a complete request by correlation ID.
 
     Returns a dictionary with:
     - entries: List of all log entries for this request
-    - duration_ms: Total request duration
+    - duration_ms: Total request duration, or None when it cannot be told
     - error_count: Number of errors in this request
-    - services: List of services involved (if available)
+    - services: Sorted list of the services its entries carry: ``service_name``, or the
+      ``service`` field where a line keeps it there (may be empty)
+    - total_entries: Number of entries of this request
 
     Example:
         trace = trace_request(["app.log"], "req-abc123")
@@ -84,19 +94,20 @@ def trace_request(files: List[str], correlation_id: str) -> Dict[str, Any]:
     # Extract unique services if available
     services = set()
     for entry in timeline["entries"]:
-        if "service" in entry.get("fields", {}):
-            services.add(entry["fields"]["service"])
+        service = entry.get("service_name") or (entry.get("fields") or {}).get("service")
+        if service:
+            services.add(service)
 
     return {
         "entries": timeline["entries"],
         "duration_ms": timeline.get("duration_ms"),
         "error_count": error_count,
-        "services": list(services),
+        "services": sorted(services),
         "total_entries": timeline["total_entries"],
     }
 
 
-def get_error_context(file: str, line_number: int, lines: int = 10) -> Dict[str, Any]:
+def get_error_context(file: str, line_number: int, lines: int = 10) -> dict[str, Any]:
     """
     Get context around an error line.
 
@@ -118,32 +129,24 @@ def get_error_context(file: str, line_number: int, lines: int = 10) -> Dict[str,
     }
 
 
-def analyze_thread_health(files: List[str]) -> Dict[str, Dict[str, int]]:
+def analyze_thread_health(files: list[str]) -> ThreadLevelCounts:
     """
-    Analyze health of each thread.
+    Count each thread's log entries by level.
 
-    Returns a dictionary mapping thread IDs to their log level counts.
+    Returns a dictionary mapping every thread ID in the files to its log level counts: the
+    count per upper-case level name (``UNKNOWN`` for an entry with no level; only levels that
+    occur) and ``total``, the thread's number of entries. Several files add up. An entry with
+    no thread ID is in no thread's counts.
 
     Example:
         health = analyze_thread_health(["app.log"])
-        for thread, counts in health.items():
+        for thread_id, counts in health.items():
             error_rate = counts.get('ERROR', 0) / counts.get('total', 1) * 100
-            print(f"{thread}: {error_rate:.1f}% errors")
     """
-    # Get all entries
-    metadata = investigate.get_metadata(files)
-    inv = Investigator()
-    inv.load_files(files)
-
-    # This is a simplified version - full implementation would track by thread
-    # For now, return basic info
-    return {
-        "note": "Thread health analysis requires SQL queries for full implementation",
-        "total_threads": metadata[0].get("unique_threads", 0),
-    }
+    return get_thread_level_counts(files)
 
 
-def get_timeline_summary(files: List[str], correlation_id: str) -> str:
+def get_timeline_summary(files: list[str], correlation_id: str) -> str:
     """
     Get a human-readable timeline summary for a request.
 
@@ -182,16 +185,16 @@ def get_timeline_summary(files: List[str], correlation_id: str) -> str:
 
 
 # Convenience aliases for common operations
-def errors(files: List[str], **kwargs) -> List[Dict[str, Any]]:
+def errors(files: list[str], **kwargs) -> list[dict[str, Any]]:
     """Shorthand for search_errors()"""
     return search_errors(files, **kwargs)
 
 
-def trace(files: List[str], correlation_id: str) -> Dict[str, Any]:
+def trace(files: list[str], correlation_id: str) -> dict[str, Any]:
     """Shorthand for trace_request()"""
     return trace_request(files, correlation_id)
 
 
-def summary(files: List[str]) -> Dict[str, Any]:
+def summary(files: list[str]) -> dict[str, Any]:
     """Shorthand for quick_summary()"""
     return quick_summary(files)

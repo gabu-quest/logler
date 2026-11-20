@@ -15,12 +15,11 @@ import os
 import sqlite3
 from collections import Counter
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
-
 from benchmarks.core.config import BenchmarkConfig, ScaleConfig
 from benchmarks.generators.database import DatabaseGenerator
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -87,7 +86,7 @@ class TestDatabaseGeneratorDeterminism:
 
 
 class TestDatabaseGeneratorSchema:
-    EXPECTED_COLUMNS = {
+    EXPECTED_COLUMNS: ClassVar[set[str]] = {
         "_id",
         "data",
         "_version",

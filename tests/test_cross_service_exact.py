@@ -17,7 +17,7 @@ Fixture: multi_service_deterministic
 import pytest
 
 try:
-    from logler.investigate import cross_service_timeline, RUST_AVAILABLE
+    from logler.investigate import RUST_AVAILABLE, cross_service_timeline
 except ImportError as e:
     if "logler_rs" in str(e):
         RUST_AVAILABLE = False
@@ -94,9 +94,9 @@ class TestCrossServiceDeduplication:
                 duplicates.append(key)
             seen.add(key)
 
-        assert (
-            len(duplicates) == 0
-        ), f"Found {len(duplicates)} duplicate entries: {duplicates[:5]}..."
+        assert len(duplicates) == 0, (
+            f"Found {len(duplicates)} duplicate entries: {duplicates[:5]}..."
+        )
 
     def test_unique_entries_per_service(self, multi_service_deterministic):
         """Each service should contribute unique entries only."""
@@ -132,9 +132,9 @@ class TestCrossServiceBreakdown:
 
             for service, expected_count in expected.items():
                 actual_count = breakdown.get(service, 0)
-                assert (
-                    actual_count == expected_count
-                ), f"Service {service} should have {expected_count} entries, got {actual_count}"
+                assert actual_count == expected_count, (
+                    f"Service {service} should have {expected_count} entries, got {actual_count}"
+                )
 
     def test_total_entries_matches_breakdown_sum(self, multi_service_deterministic):
         """total_entries should equal sum of service_breakdown."""
@@ -145,9 +145,9 @@ class TestCrossServiceBreakdown:
 
         if breakdown:
             breakdown_sum = sum(breakdown.values())
-            assert breakdown_sum == len(
-                timeline
-            ), f"Breakdown sum ({breakdown_sum}) should equal timeline length ({len(timeline)})"
+            assert breakdown_sum == len(timeline), (
+                f"Breakdown sum ({breakdown_sum}) should equal timeline length ({len(timeline)})"
+            )
 
 
 class TestCrossServiceChronologicalOrder:
@@ -188,9 +188,9 @@ class TestCrossServiceAllServices:
 
         expected_services = {"api-gateway", "auth-service", "db-service"}
 
-        assert (
-            services_found == expected_services
-        ), f"Expected services {expected_services}, found {services_found}"
+        assert services_found == expected_services, (
+            f"Expected services {expected_services}, found {services_found}"
+        )
 
     def test_services_metadata(self, multi_service_deterministic):
         """Result should list all services in metadata."""
@@ -200,9 +200,9 @@ class TestCrossServiceAllServices:
 
         if services:
             expected = {"api-gateway", "auth-service", "db-service"}
-            assert (
-                set(services) == expected
-            ), f"Services metadata should be {expected}, got {set(services)}"
+            assert set(services) == expected, (
+                f"Services metadata should be {expected}, got {set(services)}"
+            )
 
 
 class TestCrossServiceNonexistentCorrelation:
@@ -216,9 +216,9 @@ class TestCrossServiceNonexistentCorrelation:
 
         timeline = result.get("timeline", result.get("entries", []))
 
-        assert (
-            len(timeline) == 0
-        ), f"Non-existent correlation should return 0 entries, got {len(timeline)}"
+        assert len(timeline) == 0, (
+            f"Non-existent correlation should return 0 entries, got {len(timeline)}"
+        )
 
 
 class TestCrossServiceEntryStructure:
@@ -283,9 +283,9 @@ class TestCrossServiceLimit:
 
         timeline = result.get("timeline", result.get("entries", []))
 
-        assert (
-            len(timeline) <= 5
-        ), f"With limit=5, should return at most 5 entries, got {len(timeline)}"
+        assert len(timeline) <= 5, (
+            f"With limit=5, should return at most 5 entries, got {len(timeline)}"
+        )
 
     def test_no_limit_returns_all(self, multi_service_deterministic):
         """No limit should return all 18 entries."""
@@ -294,9 +294,9 @@ class TestCrossServiceLimit:
         timeline = result.get("timeline", result.get("entries", []))
 
         # Should have all 18 entries
-        assert (
-            len(timeline) == 18
-        ), f"Without limit, should return all 18 entries, got {len(timeline)}"
+        assert len(timeline) == 18, (
+            f"Without limit, should return all 18 entries, got {len(timeline)}"
+        )
 
 
 class TestCrossServiceErrorEntries:
@@ -351,9 +351,9 @@ class TestCrossServiceErrorEntries:
             elif level == "INFO":
                 info_count += 1
 
-        assert (
-            error_count == expected_error_count
-        ), f"{correlation_id} should have {expected_error_count} ERROR entries, got {error_count}"
-        assert (
-            info_count == expected_info_count
-        ), f"{correlation_id} should have {expected_info_count} INFO entries, got {info_count}"
+        assert error_count == expected_error_count, (
+            f"{correlation_id} should have {expected_error_count} ERROR entries, got {error_count}"
+        )
+        assert info_count == expected_info_count, (
+            f"{correlation_id} should have {expected_info_count} INFO entries, got {info_count}"
+        )

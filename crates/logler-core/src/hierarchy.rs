@@ -1,4 +1,4 @@
-use crate::types::{LogEntry, LogLevel};
+use crate::types::{sorted_map, LogEntry, LogLevel};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -25,6 +25,10 @@ pub struct SpanNode {
     /// Log entry IDs belonging to this node
     pub entry_ids: Vec<Uuid>,
 
+    /// The service of the first of its entries that names one (a `service_name` that is
+    /// not empty), in entry order; `None` when none does
+    pub service: Option<String>,
+
     /// First log entry timestamp
     pub start_time: Option<DateTime<Utc>>,
 
@@ -41,6 +45,7 @@ pub struct SpanNode {
     pub error_count: usize,
 
     /// Log level distribution
+    #[serde(serialize_with = "sorted_map")]
     pub level_counts: HashMap<String, usize>,
 
     /// Depth in the tree (0 for root)
@@ -155,6 +160,12 @@ pub struct HierarchyBuilder {
     /// All log entries indexed by ID
     entries_by_id: HashMap<Uuid, LogEntry>,
 
+    /// Entry IDs in the order the entries were added (file order)
+    entry_order: Vec<Uuid>,
+
+    /// Where each entry stands in `entry_order`
+    entry_position: HashMap<Uuid, usize>,
+
     /// Map of parent_span_id -> Vec<Uuid> for O(1) child lookup
     children_by_parent: HashMap<String, Vec<Uuid>>,
 
@@ -228,6 +239,8 @@ impl HierarchyBuilder {
             span_entries: HashMap::new(),
             thread_entries: HashMap::new(),
             entries_by_id: HashMap::new(),
+            entry_order: Vec::new(),
+            entry_position: HashMap::new(),
             children_by_parent: HashMap::new(),
             all_ids_sorted: BTreeSet::new(),
             naming_patterns: Self::default_naming_patterns(),
@@ -240,7 +253,10 @@ impl HierarchyBuilder {
         let entry_id = entry.id;
 
         // Index by entry ID
-        self.entries_by_id.insert(entry_id, entry.clone());
+        if self.entries_by_id.insert(entry_id, entry.clone()).is_none() {
+            self.entry_position.insert(entry_id, self.entry_order.len());
+            self.entry_order.push(entry_id);
+        }
 
         // Track span relationships
         if let Some(span_id) = &entry.span_id {
@@ -335,6 +351,7 @@ impl HierarchyBuilder {
                 roots.push(node);
             }
         }
+        self.sort_siblings(&mut roots);
 
         // Calculate hierarchy statistics
         let total_nodes = all_node_ids.len();
@@ -399,13 +416,15 @@ impl HierarchyBuilder {
             }
         }
 
-        // Try correlation_id or trace_id
+        // Try correlation_id or trace_id, in the order the entries were added
         if entries.is_empty() {
-            for entry in self.entries_by_id.values() {
-                if entry.correlation_id.as_deref() == Some(identifier)
-                    || entry.trace_id.as_deref() == Some(identifier)
-                {
-                    entries.push(entry);
+            for id in &self.entry_order {
+                if let Some(entry) = self.entries_by_id.get(id) {
+                    if entry.correlation_id.as_deref() == Some(identifier)
+                        || entry.trace_id.as_deref() == Some(identifier)
+                    {
+                        entries.push(entry);
+                    }
                 }
             }
         }
@@ -442,6 +461,28 @@ impl HierarchyBuilder {
         groups
     }
 
+    /// Put sibling nodes in one fixed order: by start time, a node with no start time
+    /// last; nodes that start together in the order of their first line. They are
+    /// collected from hash maps, whose order differs from run to run, and a node made
+    /// from one line is named by that line's own id, so the id comes last.
+    fn sort_siblings(&self, nodes: &mut [SpanNode]) {
+        nodes.sort_by_cached_key(|node| {
+            let first_line = node
+                .entry_ids
+                .iter()
+                .filter_map(|id| self.entry_position.get(id))
+                .min()
+                .copied()
+                .unwrap_or(usize::MAX);
+            (
+                node.start_time.is_none(),
+                node.start_time,
+                first_line,
+                node.id.clone(),
+            )
+        });
+    }
+
     /// Build a single node in the hierarchy
     fn build_node(
         &self,
@@ -463,6 +504,11 @@ impl HierarchyBuilder {
 
         // Collect entry IDs and calculate stats
         let entry_ids: Vec<Uuid> = entries.iter().map(|e| e.id).collect();
+        let service = entries
+            .iter()
+            .filter_map(|e| e.service_name.as_deref())
+            .find(|s| !s.is_empty())
+            .map(str::to_string);
         let (start_time, end_time) = self.calculate_time_range(entries);
         let duration_ms = self.calculate_duration_for_node(entries, &start_time, &end_time);
         let error_count = entries.iter().filter(|e| self.is_error(e)).count();
@@ -479,6 +525,7 @@ impl HierarchyBuilder {
                 children.push(child_node);
             }
         }
+        self.sort_siblings(&mut children);
 
         // Calculate confidence
         let (confidence, evidence) = self.calculate_confidence(entries, &parent_id);
@@ -490,6 +537,7 @@ impl HierarchyBuilder {
             parent_id,
             children,
             entry_ids,
+            service,
             start_time,
             end_time,
             duration_ms,
@@ -505,12 +553,17 @@ impl HierarchyBuilder {
     /// Find child entries for given parent entries
     fn find_children(&self, parent_entries: &[&LogEntry]) -> HashMap<String, Vec<&LogEntry>> {
         let mut children: HashMap<String, Vec<&LogEntry>> = HashMap::new();
+        // A span with several log lines yields the same child once per line.
+        let mut seen: HashSet<Uuid> = HashSet::new();
 
         // O(1) lookup via children_by_parent index instead of scanning all entries
         for parent in parent_entries {
             if let Some(span_id) = &parent.span_id {
                 if let Some(child_ids) = self.children_by_parent.get(span_id) {
                     for child_id in child_ids {
+                        if !seen.insert(*child_id) {
+                            continue;
+                        }
                         if let Some(entry) = self.entries_by_id.get(child_id) {
                             let key = if let Some(sid) = &entry.span_id {
                                 format!("span:{}", sid)
@@ -558,6 +611,9 @@ impl HierarchyBuilder {
         parent_entries: &[&LogEntry],
     ) -> HashMap<String, Vec<&LogEntry>> {
         let mut children: HashMap<String, Vec<&LogEntry>> = HashMap::new();
+        // One entry is one line of its node, however many parent lines, separators
+        // or id maps lead to it.
+        let mut seen: HashSet<(String, Uuid)> = HashSet::new();
 
         for parent in parent_entries {
             let parent_id = parent
@@ -580,6 +636,9 @@ impl HierarchyBuilder {
                             if let Some(entry_ids) = self.thread_entries.get(candidate_id.as_str())
                             {
                                 for eid in entry_ids {
+                                    if !seen.insert((key.clone(), *eid)) {
+                                        continue;
+                                    }
                                     if let Some(entry) = self.entries_by_id.get(eid) {
                                         children.entry(key.clone()).or_default().push(entry);
                                     }
@@ -587,6 +646,9 @@ impl HierarchyBuilder {
                             }
                             if let Some(entry_ids) = self.span_entries.get(candidate_id.as_str()) {
                                 for eid in entry_ids {
+                                    if !seen.insert((key.clone(), *eid)) {
+                                        continue;
+                                    }
                                     if let Some(entry) = self.entries_by_id.get(eid) {
                                         children.entry(key.clone()).or_default().push(entry);
                                     }
@@ -743,9 +805,9 @@ impl HierarchyBuilder {
     fn calculate_level_counts(&self, entries: &[&LogEntry]) -> HashMap<String, usize> {
         let mut counts = HashMap::new();
         for entry in entries {
-            if let Some(level) = entry.level {
-                *counts.entry(level.as_str().to_string()).or_insert(0) += 1;
-            }
+            // A line with no level is counted, under UNKNOWN, so the counts add up.
+            let level = entry.level.unwrap_or(LogLevel::Unknown);
+            *counts.entry(level.as_str().to_string()).or_insert(0) += 1;
         }
         counts
     }
@@ -980,6 +1042,214 @@ mod tests {
             service_name: None,
             fields,
         }
+    }
+
+    fn span_entry(thread: &str, span: &str, parent: Option<&str>, level: LogLevel) -> LogEntry {
+        let mut e = make_entry_with_fields(None, HashMap::new());
+        e.thread_id = Some(thread.to_string());
+        e.span_id = Some(span.to_string());
+        e.parent_span_id = parent.map(str::to_string);
+        e.level = Some(level);
+        e
+    }
+
+    fn find_span<'a>(node: &'a SpanNode, id: &str) -> Option<&'a SpanNode> {
+        if node.id == id {
+            return Some(node);
+        }
+        node.children.iter().find_map(|c| find_span(c, id))
+    }
+
+    #[test]
+    fn a_child_span_counts_each_log_line_once_when_the_parent_has_two_lines() {
+        let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let a1 = span_entry("req-123", "a", None, LogLevel::Info);
+        let b1 = span_entry("req-123", "b", Some("a"), LogLevel::Info);
+        let b2 = span_entry("req-123", "b", Some("a"), LogLevel::Info);
+        let c1 = span_entry("req-123", "c", Some("a"), LogLevel::Error);
+        let a2 = span_entry("req-123", "a", None, LogLevel::Info);
+        let c1_id = c1.id;
+        for e in [a1, b1, b2, c1, a2] {
+            builder.add_entry(e);
+        }
+        let tree = builder.build("req-123").expect("tree");
+        let root = find_span(&tree.roots[0], "a").expect("root span a");
+        assert_eq!(root.entry_count, 2, "root span a has two log lines");
+        let b = find_span(root, "b").expect("span b");
+        assert_eq!(b.entry_count, 2, "span b has two log lines");
+        assert_eq!(b.entry_ids.len(), 2, "span b lists each line once");
+        let c = find_span(root, "c").expect("span c");
+        assert_eq!(c.entry_count, 1, "span c has one log line");
+        assert_eq!(c.error_count, 1, "span c has one error line");
+        assert_eq!(c.level_counts, HashMap::from([("ERROR".to_string(), 1)]));
+        assert_eq!(c.entry_ids, vec![c1_id], "span c lists its line once");
+    }
+
+    #[test]
+    fn a_naming_inferred_child_counts_each_log_line_once() {
+        let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+        // thread id and span id are the same string, so the candidate is in both maps
+        let p1 = span_entry("worker-1", "worker-1", None, LogLevel::Info);
+        let p2 = span_entry("worker-1", "worker-1", None, LogLevel::Info);
+        let k = span_entry("worker-1.task", "worker-1.task", None, LogLevel::Error);
+        for e in [p1, p2, k] {
+            builder.add_entry(e);
+        }
+        let tree = builder.build("worker-1").expect("tree");
+        let child = find_span(&tree.roots[0], "worker-1.task").expect("inferred child");
+        assert_eq!(child.entry_count, 1, "one log line");
+        assert_eq!(child.entry_ids.len(), 1, "id listed once");
+        assert_eq!(child.error_count, 1, "one error line");
+    }
+
+    fn at(second: i64) -> Option<DateTime<Utc>> {
+        DateTime::from_timestamp(1_700_000_000 + second, 0)
+    }
+
+    #[test]
+    fn a_tree_asked_for_by_trace_id_is_named_after_its_first_line_in_file_order() {
+        // Several builders: each hash map has its own order, so one lucky run cannot pass.
+        for _ in 0..20 {
+            let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+            for line in 0..12 {
+                let mut e = make_entry_with_fields(at(line), HashMap::new());
+                e.trace_id = Some("trace-1".to_string());
+                e.span_id = Some("root".to_string());
+                e.message = format!("step {line}");
+                builder.add_entry(e);
+            }
+            let tree = builder.build("trace-1").expect("tree");
+            assert_eq!(tree.roots.len(), 1, "one root span");
+            assert_eq!(
+                tree.roots[0].name.as_deref(),
+                Some("step 0"),
+                "the root is named after its first line"
+            );
+        }
+    }
+
+    #[test]
+    fn sibling_nodes_come_in_order_of_start_time() {
+        let ids = ["h", "c", "f", "a", "g", "b", "e", "d"];
+        for _ in 0..20 {
+            let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+            let mut root = span_entry("req-1", "root", None, LogLevel::Info);
+            root.timestamp = at(0);
+            builder.add_entry(root);
+            for (i, id) in ids.iter().enumerate() {
+                let mut e = span_entry("req-1", id, Some("root"), LogLevel::Info);
+                e.timestamp = at(1 + i as i64);
+                builder.add_entry(e);
+            }
+            let tree = builder.build("root").expect("tree");
+            let order: Vec<&str> = tree.roots[0]
+                .children
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect();
+            assert_eq!(order, ids, "children in order of start time");
+        }
+    }
+
+    #[test]
+    fn sibling_nodes_with_no_timestamp_come_last_in_file_order() {
+        for _ in 0..20 {
+            let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+            builder.add_entry(span_entry("req-1", "root", None, LogLevel::Info));
+            for id in ["m", "k", "z"] {
+                builder.add_entry(span_entry("req-1", id, Some("root"), LogLevel::Info));
+            }
+            let mut timed = span_entry("req-1", "x", Some("root"), LogLevel::Info);
+            timed.timestamp = at(5);
+            builder.add_entry(timed);
+            let tree = builder.build("root").expect("tree");
+            let order: Vec<&str> = tree.roots[0]
+                .children
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect();
+            assert_eq!(order, ["x", "m", "k", "z"], "timed first, then file order");
+        }
+    }
+
+    #[test]
+    fn nodes_that_start_together_come_in_file_order() {
+        // Lines with a trace id and nothing else: each is its own root, named by a
+        // random entry id, so the id cannot be what orders them.
+        let words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"];
+        for _ in 0..20 {
+            let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+            for word in words {
+                let mut e = make_entry_with_fields(at(0), HashMap::new());
+                e.trace_id = Some("trace-9".to_string());
+                e.message = word.to_string();
+                builder.add_entry(e);
+            }
+            let tree = builder.build("trace-9").expect("tree");
+            let order: Vec<&str> = tree
+                .roots
+                .iter()
+                .map(|r| r.name.as_deref().unwrap_or("no name"))
+                .collect();
+            assert_eq!(order, words, "roots in the order of their lines");
+        }
+    }
+
+    #[test]
+    fn root_nodes_come_in_order_of_start_time() {
+        let ids = ["r3", "r1", "r4", "r2", "r6", "r5"];
+        for _ in 0..20 {
+            let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+            for (i, id) in ids.iter().enumerate() {
+                let mut e = span_entry("req-1", id, None, LogLevel::Info);
+                e.timestamp = at(i as i64);
+                builder.add_entry(e);
+            }
+            let tree = builder.build("req-1").expect("tree");
+            let order: Vec<&str> = tree.roots.iter().map(|r| r.id.as_str()).collect();
+            assert_eq!(order, ids, "roots in order of start time");
+        }
+    }
+
+    #[test]
+    fn a_node_names_the_service_of_its_first_entry_that_has_one() {
+        let mut builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let mut a1 = span_entry("req-1", "a", None, LogLevel::Info);
+        a1.service_name = Some(String::new());
+        let mut a2 = span_entry("req-1", "a", None, LogLevel::Info);
+        a2.service_name = Some("billing".to_string());
+        let mut a3 = span_entry("req-1", "a", None, LogLevel::Info);
+        a3.service_name = Some("gateway".to_string());
+        let b1 = span_entry("req-1", "b", Some("a"), LogLevel::Info);
+        for e in [a1, a2, a3, b1] {
+            builder.add_entry(e);
+        }
+        let tree = builder.build("req-1").expect("a tree");
+        assert_eq!(tree.roots.len(), 1);
+        let a = find_span(&tree.roots[0], "a").expect("span a");
+        assert_eq!(
+            a.service.as_deref(),
+            Some("billing"),
+            "first non-empty, in order"
+        );
+        let b = find_span(&tree.roots[0], "b").expect("span b");
+        assert_eq!(b.service, None, "no entry of b has a service");
+        let written = serde_json::to_value(&tree.roots[0]).unwrap();
+        assert_eq!(written["service"], json!("billing"));
+        assert_eq!(written["children"][0]["service"], json!(null));
+    }
+
+    #[test]
+    fn level_counts_hold_an_entry_with_no_level_as_unknown() {
+        let builder = HierarchyBuilder::new(HierarchyConfig::default());
+        let with_level = make_entry_with_fields(None, HashMap::new());
+        let mut without = make_entry_with_fields(None, HashMap::new());
+        without.level = None;
+        let counts = builder.calculate_level_counts(&[&with_level, &without, &without]);
+        assert_eq!(
+            counts,
+            HashMap::from([("INFO".to_string(), 1), ("UNKNOWN".to_string(), 2)])
+        );
     }
 
     #[test]

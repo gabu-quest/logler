@@ -12,10 +12,16 @@ Fixture: deterministic_log_file
 - 10 each of req-0 through req-9
 """
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 try:
-    from logler.investigate import search, RUST_AVAILABLE
+    from logler.investigate import RUST_AVAILABLE, search
 except ImportError as e:
     if "logler_rs" in str(e):
         RUST_AVAILABLE = False
@@ -55,9 +61,9 @@ class TestSearchLevelFilter:
         # ALL results must match the filter
         for item in result["results"]:
             entry = item.get("entry", item)
-            assert (
-                entry["level"].upper() == level
-            ), f"Entry level {entry['level']} doesn't match filter {level}"
+            assert entry["level"].upper() == level, (
+                f"Entry level {entry['level']} doesn't match filter {level}"
+            )
 
 
 class TestSearchThreadFilter:
@@ -106,9 +112,9 @@ class TestSearchCorrelationFilter:
         """Each correlation ID appears exactly 10 times (100 entries / 10 IDs)."""
         result = search(files=[deterministic_log_file], correlation_id=correlation_id, limit=100)
 
-        assert (
-            result["total_matches"] == expected_count
-        ), f"Correlation {correlation_id} should have exactly {expected_count} matches"
+        assert result["total_matches"] == expected_count, (
+            f"Correlation {correlation_id} should have exactly {expected_count} matches"
+        )
 
         for item in result["results"]:
             entry = item.get("entry", item)
@@ -323,3 +329,387 @@ class TestSearchResultStructure:
                 assert entry.get("line_index") == 0 or "number 0" in entry["message"]
                 break
         assert found, "Should find entry with 'number 0'"
+
+
+NO_LEVEL_LOG = """2024-01-01T10:00:00Z INFO [w-1] hello
+plain line without a level
+another plain line
+2024-01-01T10:00:01Z ERROR [w-1] boom
+plain line without a level
+"""
+
+
+@pytest.fixture
+def no_level_file(tmp_path):
+    path = tmp_path / "nolevel.log"
+    path.write_text(NO_LEVEL_LOG)
+    return str(path)
+
+
+class TestLineWithNoLevelIsUnknown:
+    """A line the engine gives no level reads UNKNOWN through every door, never NONE."""
+
+    def test_search(self, no_level_file):
+        result = search([no_level_file])
+        levels = {i["entry"]["line_number"]: i["entry"]["level"] for i in result["results"]}
+        assert levels == {1: "INFO", 2: "UNKNOWN", 3: "UNKNOWN", 4: "ERROR", 5: "UNKNOWN"}
+        assert search([no_level_file], output_format="count")["by_level"] == {
+            "INFO": 1,
+            "ERROR": 1,
+            "UNKNOWN": 3,
+        }
+
+    def test_search_context_entries(self, no_level_file):
+        result = search([no_level_file], context_lines=1)
+        by_line = {i["entry"]["line_number"]: i for i in result["results"]}
+        assert sorted(by_line) == [1, 2, 3, 4, 5]
+        assert [e["level"] for e in by_line[2]["context_before"]] == ["INFO"]
+        assert [e["level"] for e in by_line[2]["context_after"]] == ["UNKNOWN"]
+        assert [e["level"] for e in by_line[4]["context_before"]] == ["UNKNOWN"]
+        assert [e["level"] for e in by_line[4]["context_after"]] == ["UNKNOWN"]
+
+    def test_investigator_search(self, no_level_file):
+        from logler.investigate import Investigator
+
+        inv = Investigator()
+        inv.load_files([no_level_file])
+        levels = [i["entry"]["level"] for i in inv.search()["results"]]
+        assert sorted(levels) == ["ERROR", "INFO", "UNKNOWN", "UNKNOWN", "UNKNOWN"]
+
+    def test_follow_thread_and_get_context(self, no_level_file):
+        from logler.investigate import follow_thread, get_context
+
+        entries = follow_thread([no_level_file], thread_id="w-1")["entries"]
+        assert entries and all(e["level"] in {"INFO", "ERROR", "UNKNOWN"} for e in entries)
+        context = get_context(no_level_file, 2, 1, 1)
+        assert context["target"]["level"] == "UNKNOWN"
+        assert [e["level"] for e in context["context_before"]] == ["INFO"]
+        assert [e["level"] for e in context["context_after"]] == ["UNKNOWN"]
+
+    def test_find_patterns_examples(self, no_level_file):
+        """The engine only makes patterns of error lines, so no real example lacks a level;
+        the normaliser still gives a level-less example UNKNOWN."""
+        from logler._search_core import _normalize_pattern_examples
+        from logler.investigate import find_patterns
+
+        repeated = find_patterns([no_level_file], min_occurrences=1)["patterns"]
+        assert {e["level"] for p in repeated for e in p["examples"]} == {"ERROR"}
+
+        result = {"patterns": [{"examples": [{"level": None}, {"level": " warn "}]}]}
+        _normalize_pattern_examples(result)
+        assert [e["level"] for e in result["patterns"][0]["examples"]] == ["UNKNOWN", "WARN"]
+
+    def test_parser_adapter_agrees(self):
+        from logler.parser import LogParser
+
+        assert LogParser().parse_line(1, "plain line without a level").level == "UNKNOWN"
+
+
+class TestSyslogLevelComesFromTheEngine:
+    """The Python syslog fallback was dead: the engine maps the priority itself."""
+
+    def test_priority_lines_have_their_levels(self, tmp_path):
+        path = tmp_path / "syslog.log"
+        path.write_text(
+            "<14>Jan  1 10:00:00 host app[1]: info line\n"
+            "<11>Jan  1 10:00:01 host app[1]: err line\n"
+            "<12>Jan  1 10:00:02 host app[1]: warn line\n"
+        )
+        levels = {
+            i["entry"]["line_number"]: i["entry"]["level"] for i in search([str(path)])["results"]
+        }
+        assert levels == {1: "INFO", 2: "ERROR", 3: "WARN"}
+
+
+class TestJsonLevelWrittenAsANumber:
+    """pino and bunyan write 10 to 60, syslog and GELF 0 to 7; a level search finds them."""
+
+    def test_level_search_finds_numbered_lines(self, tmp_path):
+        path = tmp_path / "pino.log"
+        path.write_text(
+            '{"level": 30, "time": "2024-01-15T10:00:00Z", "msg": "started"}\n'
+            '{"level": 50, "time": "2024-01-15T10:00:01Z", "msg": "boom"}\n'
+            '{"level": 3, "time": "2024-01-15T10:00:02Z", "msg": "gelf error"}\n'
+            '{"level": 30, "severity": "ERROR", "time": "2024-01-15T10:00:03Z", "msg": "word"}\n'
+            '{"level": 35, "time": "2024-01-15T10:00:04Z", "msg": "no such level"}\n'
+        )
+        levels = {
+            i["entry"]["line_number"]: i["entry"]["level"] for i in search([str(path)])["results"]
+        }
+        assert levels == {1: "INFO", 2: "ERROR", 3: "ERROR", 4: "ERROR", 5: "UNKNOWN"}
+        errors = search([str(path)], level="ERROR")
+        assert errors["total_matches"] == 3
+        assert [i["entry"]["line_number"] for i in errors["results"]] == [2, 3, 4]
+
+
+class TestExplicitFormatNeverReachesTheCache:
+    def test_custom_regex_then_plain_gives_builtin_reading(self, tmp_path):
+        path = tmp_path / "robot.log"
+        path.write_text("error;3;overtravel\ninfo;1;homed\n")
+        regex = r"^(?P<level>\w+);(?P<axis>\d+);(?P<message>.*)$"
+        custom = search([str(path)], custom_regex=regex)
+        assert {i["entry"]["level"] for i in custom["results"]} == {"ERROR", "INFO"}
+        plain = search([str(path)])
+        assert {i["entry"]["level"] for i in plain["results"]} == {"UNKNOWN"}
+        again = search([str(path)], custom_regex=regex)
+        assert {i["entry"]["level"] for i in again["results"]} == {"ERROR", "INFO"}
+
+    def test_find_patterns_takes_an_explicit_format(self, tmp_path):
+        from logler.investigate import find_patterns
+
+        path = tmp_path / "robot.log"
+        path.write_text("".join(f"2024-01-15T10:00:0{i}Z;error;overtravel\n" for i in range(3)))
+        regex = r"^(?P<timestamp>\S+);(?P<level>\w+);(?P<message>.*)$"
+
+        named = find_patterns([str(path)], custom_regex=regex)["patterns"]
+        assert [
+            (p["pattern"], p["occurrences"], p["first_seen"], p["last_seen"]) for p in named
+        ] == [("overtravel", 3, "2024-01-15T10:00:00Z", "2024-01-15T10:00:02Z")]
+        # Read without the format, the lines have no level, so they are no error pattern.
+        assert find_patterns([str(path)])["patterns"] == []
+
+
+class TestCountFormatIsTheTotal:
+    """`output_format="count"` and `"summary"` report every match, whatever else is asked."""
+
+    def test_count_format_with_count_only_is_the_count(self, deterministic_log_file):
+        full = search(files=[deterministic_log_file], level="ERROR")
+        counted = search(
+            files=[deterministic_log_file], level="ERROR", output_format="count", count_only=True
+        )
+        assert full["total_matches"] == 25
+        assert counted["total_matches"] == 25
+
+    def test_count_format_total_ignores_the_limit(self, deterministic_log_file):
+        counted = search(
+            files=[deterministic_log_file], level="ERROR", output_format="count", limit=5
+        )
+        assert counted["total_matches"] == 25
+        assert counted["by_level"] == {"ERROR": 25}
+        assert counted["by_file"] == {deterministic_log_file: 25}
+        assert counted["time_range"] == {
+            "start": "2024-01-15T10:00:03Z",
+            "end": "2024-01-15T10:01:39Z",
+        }
+
+    def test_summary_format_total_ignores_the_limit(self, deterministic_log_file):
+        summary = search(
+            files=[deterministic_log_file], level="ERROR", output_format="summary", limit=5
+        )
+        assert summary["total_matches"] == 25
+        assert summary["log_levels"] == {"ERROR": 25}
+        assert summary["by_file"] == {deterministic_log_file: 25}
+        assert summary["unique_messages"] == 25
+        assert len(summary["top_messages"]) == 20
+        assert [e["message"] for e in summary["sample_entries"]] == [
+            f"Log message number {i}" for i in (3, 7, 11, 15, 19)
+        ]
+
+    def test_summary_format_limit_bounds_only_the_samples(self, deterministic_log_file):
+        summary = search(
+            files=[deterministic_log_file], level="ERROR", output_format="summary", limit=2
+        )
+        assert summary["log_levels"] == {"ERROR": 25}
+        assert [e["message"] for e in summary["sample_entries"]] == [
+            "Log message number 3",
+            "Log message number 7",
+        ]
+
+    def test_summary_format_limit_zero_and_no_match(self, deterministic_log_file):
+        every = search(files=[deterministic_log_file], output_format="summary", limit=0)
+        assert every["total_matches"] == 100
+        assert every["log_levels"] == {"INFO": 25, "DEBUG": 25, "WARN": 25, "ERROR": 25}
+        none = search(
+            files=[deterministic_log_file], query="zzz-no-such-text", output_format="summary"
+        )
+        assert none == {
+            "total_matches": 0,
+            "unique_messages": 0,
+            "log_levels": {},
+            "top_messages": [],
+            "sample_entries": [],
+        }
+
+    def test_count_format_over_the_engine_cap_counts_every_match(self, tmp_path):
+        """More matches than the 10,000 entries a search returns with no limit."""
+        path = tmp_path / "big.log"
+        path.write_text(_info_then_error_lines(10_000, 2_000))
+        counted = search(files=[str(path)], output_format="count")
+        assert counted["total_matches"] == 12_000
+        assert counted["by_level"] == {"INFO": 10_000, "ERROR": 2_000}
+        assert counted["time_range"] == {
+            "start": "2024-01-15T00:00:00Z",
+            "end": "2024-01-15T03:19:59Z",
+        }
+
+    def test_count_format_limit_zero_is_no_cap(self, deterministic_log_file):
+        counted = search(files=[deterministic_log_file], output_format="count", limit=0)
+        assert counted["total_matches"] == 100
+
+    def test_count_format_no_match_is_zero(self, deterministic_log_file):
+        for kwargs in ({}, {"count_only": True}):
+            counted = search(
+                files=[deterministic_log_file],
+                query="zzz-no-such-text",
+                output_format="count",
+                **kwargs,
+            )
+            assert counted["total_matches"] == 0
+
+
+def _info_then_error_lines(info: int, error: int) -> str:
+    """``info`` INFO lines then ``error`` ERROR lines, one second apart from midnight."""
+    lines = []
+    for i in range(info + error):
+        level = "INFO" if i < info else "ERROR"
+        stamp = f"2024-01-15T{i // 3600:02d}:{i // 60 % 60:02d}:{i % 60:02d}Z"
+        lines.append(f"{stamp} {level} line {i}\n")
+    return "".join(lines)
+
+
+def _json_lines(records: list[dict]) -> str:
+    return "".join(json.dumps(r) + "\n" for r in records)
+
+
+# Seven lines, three messages twice each, first seen in the order beta, alpha, gamma.
+TIES = [
+    ("INFO", "beta"),
+    ("ERROR", "alpha"),
+    ("WARN", "gamma"),
+    ("INFO", "alpha"),
+    ("INFO", "beta"),
+    ("DEBUG", "gamma"),
+    ("INFO", "delta"),
+]
+
+TIES_SCRIPT = """
+import json, sys
+from logler.investigate import search
+out = search(files=[sys.argv[1]], output_format="summary")
+print(json.dumps([(m["message"], m["count"], m["levels"]) for m in out["top_messages"]]))
+"""
+
+
+class TestSummaryCountsEveryMatch:
+    """The summary and count formats are counted by the engine over every match."""
+
+    @pytest.fixture
+    def ties_log(self, tmp_path):
+        path = tmp_path / "ties.log"
+        path.write_text(
+            _json_lines(
+                {"timestamp": f"2024-01-15T10:00:{i:02d}Z", "level": lv, "message": msg}
+                for i, (lv, msg) in enumerate(TIES)
+            )
+        )
+        return str(path)
+
+    def test_equal_counts_come_in_order_of_first_match_in_every_process(self, ties_log):
+        src = str(Path(__file__).resolve().parent.parent / "src")
+        outs = [
+            subprocess.run(
+                [sys.executable, "-c", TIES_SCRIPT, ties_log],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env={**os.environ, "PYTHONHASHSEED": seed, "PYTHONPATH": src},
+                check=True,
+            ).stdout
+            for seed in ("0", "1", "2")
+        ]
+        expected = [
+            ["beta", 2, {"INFO": 2}],
+            ["alpha", 2, {"ERROR": 1, "INFO": 1}],
+            ["gamma", 2, {"WARN": 1, "DEBUG": 1}],
+            ["delta", 1, {"INFO": 1}],
+        ]
+        assert [json.loads(o) for o in outs] == [expected, expected, expected]
+
+    def test_a_long_message_is_cut_to_200_characters(self, tmp_path):
+        path = tmp_path / "long.log"
+        path.write_text(_json_lines([{"level": "ERROR", "message": "x" * 250}] * 2))
+        summary = search(files=[str(path)], output_format="summary")
+        assert [(m["message"], m["count"]) for m in summary["top_messages"]] == [("x" * 200, 2)]
+
+    def test_matches_with_no_timestamp(self, tmp_path):
+        path = tmp_path / "plain.log"
+        path.write_text("alpha one\nERROR beta two\nalpha one\n")
+        summary = search(files=[str(path)], output_format="summary")
+        assert [
+            (m["message"], m["first_seen"], m["last_seen"]) for m in summary["top_messages"]
+        ] == [
+            ("alpha one", None, None),
+            ("ERROR beta two", None, None),
+        ]
+        counted = search(files=[str(path)], output_format="count")
+        assert counted == {
+            "total_matches": 3,
+            "by_level": {"UNKNOWN": 2, "ERROR": 1},
+            "by_file": {str(path): 3},
+            "time_range": None,
+        }
+
+    def test_times_are_compared_as_times(self, tmp_path):
+        """A whole second is written with no fraction: ``05Z`` is before ``05.500Z``."""
+        path = tmp_path / "frac.log"
+        path.write_text(
+            _json_lines(
+                [
+                    {"timestamp": "2024-01-15T10:00:05.500Z", "level": "INFO", "message": "tick"},
+                    {"timestamp": "2024-01-15T10:00:05Z", "level": "INFO", "message": "tick"},
+                ]
+            )
+        )
+        summary = search(files=[str(path)], output_format="summary")
+        tick = summary["top_messages"][0]
+        assert (tick["first_seen"], tick["last_seen"]) == (
+            "2024-01-15T10:00:05Z",
+            "2024-01-15T10:00:05.500Z",
+        )
+        counted = search(files=[str(path)], output_format="count")
+        assert counted["time_range"] == {
+            "start": "2024-01-15T10:00:05Z",
+            "end": "2024-01-15T10:00:05.500Z",
+        }
+
+    def test_tail_bounds_only_the_samples(self, deterministic_log_file):
+        summary = search(
+            files=[deterministic_log_file], level="ERROR", output_format="summary", tail=5
+        )
+        assert summary["total_matches"] == 25
+        assert summary["log_levels"] == {"ERROR": 25}
+        assert summary["unique_messages"] == 25
+        assert [e["message"] for e in summary["sample_entries"]] == [
+            f"Log message number {i}" for i in (83, 87, 91, 95, 99)
+        ]
+
+    def test_two_files(self, deterministic_log_file, tmp_path):
+        other = tmp_path / "other.log"
+        other.write_text(
+            _json_lines(
+                {"timestamp": f"2024-01-15T09:00:{i:02d}Z", "level": "WARN", "message": "o"}
+                for i in range(3)
+            )
+        )
+        counted = search(files=[deterministic_log_file, str(other)], output_format="count")
+        assert counted["total_matches"] == 103
+        assert counted["by_file"] == {str(other): 3, deterministic_log_file: 100}
+        assert counted["by_level"] == {"WARN": 28, "INFO": 25, "DEBUG": 25, "ERROR": 25}
+
+    def test_count_only_summary_has_the_counts_and_no_samples(self, deterministic_log_file):
+        summary = search(
+            files=[deterministic_log_file], level="WARN", output_format="summary", count_only=True
+        )
+        assert summary["total_matches"] == 25
+        assert summary["log_levels"] == {"WARN": 25}
+        assert summary["unique_messages"] == 25
+        assert summary["sample_entries"] == []
+
+    def test_errors_after_the_first_10000_matches_are_counted(self, tmp_path):
+        path = tmp_path / "big.log"
+        path.write_text(_info_then_error_lines(10_000, 2_000))
+        summary = search(files=[str(path)], output_format="summary")
+        assert summary["total_matches"] == 12_000
+        assert summary["log_levels"] == {"INFO": 10_000, "ERROR": 2_000}
+        assert summary["unique_messages"] == 12_000
+        assert len(summary["sample_entries"]) == 5

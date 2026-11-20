@@ -1,19 +1,31 @@
 """
-Shared utilities for the LLM-First CLI.
-
-Exit codes, JSON output helpers, glob expansion, time filters,
-and max-bytes truncation used across all command submodules.
+What every llm command shares: the ``llm`` group, the exit codes, the JSON output and error
+helpers, the ``command`` decorator (error handling and ``--pretty``), level-word options,
+glob expansion, the time filter options and how they resolve to bounds, and the max-bytes
+truncation.
 """
 
-import click
+import functools
 import json
 import os
-import sys
 import re
-from contextlib import contextmanager
+import sys
+from contextlib import contextmanager, suppress
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from typing import Any, NoReturn
+
+import click
+
+from .._search_core import (
+    InvalidPatternError,
+    LineNotFoundError,
+    _parse_levels,
+    level_text,
+    parse_duration,
+)
+from ..config import FormatFileError
+from ..parser import format_time, to_utc
 
 
 @click.group()
@@ -40,56 +52,118 @@ EXIT_USER_ERROR = 2  # Invalid arguments, file not found
 EXIT_INTERNAL_ERROR = 3  # Unexpected exception
 
 
-def _output_json(data: Dict[str, Any], pretty: bool = False) -> None:
-    """Output JSON to stdout."""
+def _output_json(data: dict[str, Any], pretty: bool = False, err: bool = False) -> None:
+    """Output JSON to stdout (or to stderr, for a command whose stdout is its data stream)."""
     if pretty:
-        click.echo(json.dumps(data, indent=2, default=str))
+        click.echo(json.dumps(data, indent=2, default=str), err=err)
     else:
-        click.echo(json.dumps(data, default=str))
+        click.echo(json.dumps(data, default=str), err=err)
 
 
-def _error_json(message: str, code: int = EXIT_USER_ERROR) -> None:
-    """Output error as JSON and exit."""
-    _output_json({"error": message, "code": code})
+def file_error_message(e: BaseException) -> str | None:
+    """The one sentence for a file a command cannot open, read or write: ``<file>: <reason>``.
+
+    ``None`` when ``e`` is not an ``OSError`` that names a file and a reason; the caller then
+    treats it as any other failure. Both the ``llm`` commands and the plain ones take the
+    sentence from here.
+    """
+    if isinstance(e, OSError) and e.filename and e.strerror:
+        return f"{e.filename}: {e.strerror}"
+    return None
+
+
+def _error_json(
+    message: str,
+    code: int = EXIT_USER_ERROR,
+    err: bool = False,
+    file: str | None = None,
+) -> NoReturn:
+    """Output error as JSON and exit; ``file`` adds the key that names the file."""
+    data: dict[str, Any] = {"error": message, "code": code}
+    if file is not None:
+        data["file"] = file
+    _output_json(data, err=err)
     sys.exit(code)
 
 
-def _parse_duration(duration: str) -> timedelta:
-    """Parse duration string like '30m', '2h', '1d' to timedelta."""
-    match = re.match(r"^(\d+)(s|m|h|d)$", duration.lower())
-    if not match:
-        raise ValueError(f"Invalid duration format: {duration}. Use format like '30m', '2h', '1d'")
+def command(
+    name: str | None = None,
+    *,
+    group: click.Group | None = None,
+    stream: bool = False,
+):
+    """Declare an llm command: the one owner of what every command shares.
 
-    value = int(match.group(1))
-    unit = match.group(2)
+    Registers the function on ``group`` (default ``llm``) under ``name``, gives it the
+    ``--pretty`` option (passed to it as ``pretty``) and turns an exception it does not
+    handle into the JSON internal error with exit code 3, except a formats.yaml that cannot
+    be used (``FormatFileError``) and a file that cannot be opened, read or written (an
+    ``OSError`` that names a file) and a line number the file has no entry for
+    (``LineNotFoundError``) and a ``--query`` or ``--exclude-query`` that is not a regex
+    (``InvalidPatternError``), which are the user's to put right (exit code 2, the message is the file
+    and the reason).
+    ``sys.exit`` passes through.
+    ``stream=True`` is for a command whose stdout is a stream of one JSON object per line:
+    it has no ``--pretty``, and that error goes to stderr.
+    """
 
-    if unit == "s":
-        return timedelta(seconds=value)
-    elif unit == "m":
-        return timedelta(minutes=value)
-    elif unit == "h":
-        return timedelta(hours=value)
-    elif unit == "d":
-        return timedelta(days=value)
-    else:
-        raise ValueError(f"Unknown time unit: {unit}")
+    def decorate(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except FormatFileError as e:
+                _error_json(f"Unusable format file: {e}", err=stream)
+            except (LineNotFoundError, InvalidPatternError) as e:
+                _error_json(str(e), err=stream)
+            except OSError as e:
+                message = file_error_message(e)
+                if message is not None:
+                    _error_json(message, err=stream, file=str(e.filename))
+                _error_json(f"Internal error: {e}", EXIT_INTERNAL_ERROR, err=stream)
+            except Exception as e:
+                _error_json(f"Internal error: {e}", EXIT_INTERNAL_ERROR, err=stream)
+
+        if not stream:
+            wrapper = click.option("--pretty", is_flag=True, help="Pretty-print JSON output")(
+                wrapper
+            )
+        return (group or llm).command(name)(wrapper)
+
+    return decorate
 
 
-def _expand_globs(patterns: List[str]) -> List[str]:
-    """Expand glob patterns to file paths."""
+def _check_level_words(ctx, param, value):
+    """Click callback for an option that takes level words: a word that names no level is
+    the user's error. ``_parse_levels`` is the one reader of a list of level words."""
+    if value:
+        try:
+            _parse_levels(value)
+        except ValueError as e:
+            _error_json(str(e))
+    return value
+
+
+def _level_texts(value: str | None) -> set[str] | None:
+    """The texts of an entry's level (``WARN``) that a comma list of level words names."""
+    return {level_text(name) for name in _parse_levels(value)} if value else None
+
+
+def _expand_globs(patterns: list[str]) -> list[str]:
+    """The files the patterns name. A folder a pattern matches is not a log file."""
     import glob
 
     files = []
     for pattern in patterns:
-        matches = glob.glob(pattern, recursive=True)
+        matches = [m for m in glob.glob(pattern, recursive=True) if Path(m).is_file()]
         if matches:
             files.extend(matches)
-        elif Path(pattern).exists():
+        elif Path(pattern).is_file():
             files.append(pattern)
     return sorted(set(files))
 
 
-def _apply_max_bytes(data: Dict[str, Any], max_bytes: int) -> Dict[str, Any]:
+def _apply_max_bytes(data: dict[str, Any], max_bytes: int) -> dict[str, Any]:
     """Truncate results list to fit within max_bytes budget."""
     serialized = json.dumps(data, default=str)
     if len(serialized.encode("utf-8")) <= max_bytes:
@@ -157,18 +231,16 @@ def time_filter_options(f):
 
 
 def _resolve_time_filters(
-    last_duration: Optional[str], after: Optional[str], before: Optional[str]
-) -> tuple:
+    last_duration: str | None, after: str | None, before: str | None
+) -> tuple[str | None, str | None]:
     """Resolve time filter options into (time_start, time_end) ISO strings.
 
     Supports relative time with '-' prefix: --after=-1h --before=-30m
     means "between 1 hour ago and 30 minutes ago".
     """
-    from .. import investigate as inv_mod
-
     if last_duration:
-        tr = inv_mod._build_time_range(last=last_duration)
-        return (tr.get("start") if tr else None, tr.get("end") if tr else None)
+        now = datetime.now(UTC)
+        return (format_time(_before(now, last_duration, "--last")), format_time(now))
 
     time_start = None
     time_end = None
@@ -179,32 +251,56 @@ def _resolve_time_filters(
     return (time_start, time_end)
 
 
+def _resolve_time_bounds(
+    last_duration: str | None, after: str | None, before: str | None
+) -> tuple[datetime | None, datetime | None]:
+    """The same bounds as aware datetimes, for a command that compares entry times itself."""
+    start, end = _resolve_time_filters(last_duration, after, before)
+    return (to_utc(start), to_utc(end))
+
+
+def _outside_bounds(ts: datetime | None, start: datetime | None, end: datetime | None):
+    """Whether an entry's time lies outside the (inclusive) bounds.
+
+    An entry with no time is inside any bounds, as it is for the search engine: nothing
+    says it is too early or too late.
+    """
+    return ts is not None and ((start is not None and ts < start) or (end is not None and ts > end))
+
+
+def _time_text_outside_bounds(ts: str | None, start: datetime | None, end: datetime | None):
+    """``_outside_bounds`` for an engine entry, whose time is text."""
+    return _outside_bounds(to_utc(ts), start, end)
+
+
+def _before(now: datetime, duration: str, flag_name: str) -> datetime:
+    """``now`` minus a relative duration (``30m``, ``2h``, ``1d``). Text that is no duration,
+    or one that reaches back past the calendar's first year, is the user's error."""
+    try:
+        return now - parse_duration(duration)
+    except (ValueError, OverflowError):
+        _error_json(
+            f"Invalid duration for {flag_name}: {duration}. Use format like '30m', '2h', '1d'"
+        )
+
+
 def _parse_time_arg(value: str, flag_name: str) -> str:
     """Parse a time argument, supporting both ISO8601 and relative durations.
 
     Relative format: -30m, -2h, -1d (dash prefix + duration)
     """
     if value.startswith("-"):
-        # Relative time: subtract duration from now
-        try:
-            delta = _parse_duration(value[1:])
-            from datetime import timezone
-
-            return (datetime.now(timezone.utc) - delta).isoformat()
-        except ValueError:
-            _error_json(
-                f"Invalid relative duration for {flag_name}: {value}. "
-                f"Use format like '-30m', '-2h', '-1d'"
-            )
+        return format_time(_before(datetime.now(UTC), value[1:], flag_name))
     else:
-        # Absolute ISO8601 timestamp
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
-        except ValueError:
+        # Absolute ISO8601 timestamp. Without a zone it is UTC, as a log timestamp without
+        # one is; every entry's time is zone-aware, so the bound must be too.
+        parsed = to_utc(value)
+        if parsed is None:
             _error_json(f"Invalid timestamp format for {flag_name}: {value}")
+        return format_time(parsed)
 
 
-def _extract_patterns(values: List[str]) -> List[str]:
+def _extract_patterns(values: list[str]) -> list[str]:
     """Extract regex-like patterns from a list of values."""
     if not values:
         return []
@@ -270,7 +366,5 @@ def _db_file_source(files, db_path, default_glob=None):
         yield file_list
     finally:
         if db_jsonl_path:
-            try:
+            with suppress(OSError):
                 os.unlink(db_jsonl_path)
-            except OSError:
-                pass

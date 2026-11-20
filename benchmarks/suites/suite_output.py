@@ -51,7 +51,7 @@ class OutputFormatComparison:
                     limit=100,
                     output_format=f,
                 )
-                response_holder[0] = r
+                response_holder[0] = r  # noqa: B023 - called within the iteration that created the holder
                 return r
 
             stats = timer.measure(do_search)
@@ -130,7 +130,7 @@ class MaxBytesTruncation:
                     capture_output=True,
                     text=True,
                 )
-                response_holder[0] = len(proc.stdout.encode())
+                response_holder[0] = len(proc.stdout.encode())  # noqa: B023 - called within the iteration that created the holder
                 return proc
 
             stats = timer.measure(do_search)

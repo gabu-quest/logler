@@ -448,7 +448,7 @@ def _(mo):
 def _(inv, log_file):
     # Find a log line with a redis error and grab context around it
     redis_line = None
-    with open(log_file, "r") as _f:
+    with open(log_file) as _f:
         for _idx, _line in enumerate(_f, start=1):
             if "redis" in _line:
                 redis_line = _idx

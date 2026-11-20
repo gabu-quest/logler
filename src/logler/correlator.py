@@ -13,7 +13,7 @@ import hashlib
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .config import (
     CorrelationsConfig,
@@ -22,10 +22,11 @@ from .config import (
     TemporalRule,
     parse_duration,
 )
+from .parser import format_time
 from .safe_regex import try_compile
 
 
-def _get_field_value(entry: Dict[str, Any], field_name: str) -> Any:
+def _get_field_value(entry: dict[str, Any], field_name: str) -> Any:
     """Extract a field value from a log entry.
 
     Checks top-level entry keys first, then the 'fields' sub-dict.
@@ -35,7 +36,7 @@ def _get_field_value(entry: Dict[str, Any], field_name: str) -> Any:
     return entry.get("fields", {}).get(field_name)
 
 
-def _matches_file_pattern(entry: Dict[str, Any], file_pattern: Optional[str]) -> bool:
+def _matches_file_pattern(entry: dict[str, Any], file_pattern: str | None) -> bool:
     """Check if an entry's source file matches a glob pattern."""
     if file_pattern is None:
         return True
@@ -57,11 +58,11 @@ def _make_virtual_trace_id(group_name: str, rule_index: int, key: str) -> str:
 
 
 def _apply_field_match_rule(
-    entries: List[Dict[str, Any]],
+    entries: list[dict[str, Any]],
     rule: FieldMatchRule,
     group_name: str,
     rule_index: int,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Apply a single field_match rule, returning correlation clusters.
 
     For each unique value of the source field in source-file entries,
@@ -74,7 +75,7 @@ def _apply_field_match_rule(
     target_entries = [e for e in entries if _matches_file_pattern(e, rule.target.file_pattern)]
 
     # Build index: source field value -> list of source entries
-    source_by_value: Dict[str, List[Dict[str, Any]]] = {}
+    source_by_value: dict[str, list[dict[str, Any]]] = {}
     for entry in source_entries:
         val = _get_field_value(entry, rule.source.field)
         if val is not None:
@@ -82,7 +83,7 @@ def _apply_field_match_rule(
             source_by_value.setdefault(key, []).append(entry)
 
     # Build index: target field value -> list of target entries
-    target_by_value: Dict[str, List[Dict[str, Any]]] = {}
+    target_by_value: dict[str, list[dict[str, Any]]] = {}
     for entry in target_entries:
         val = _get_field_value(entry, rule.target.field)
         if val is not None:
@@ -142,7 +143,7 @@ def _evaluate_condition(value: Any, condition: str) -> bool:
     except (TypeError, ValueError):
         return False
 
-    if operator == "<":
+    if operator == "<":  # noqa: SIM116 - the parameter named `operator` hides the module a table would use
         return num_value < threshold
     elif operator == ">":
         return num_value > threshold
@@ -157,7 +158,7 @@ def _evaluate_condition(value: Any, condition: str) -> bool:
     return False
 
 
-def _matches_anchor(entry: Dict[str, Any], anchor: EventCondition) -> bool:
+def _matches_anchor(entry: dict[str, Any], anchor: EventCondition) -> bool:
     """Check if an entry matches all specified anchor conditions."""
     if not _matches_file_pattern(entry, anchor.file_pattern):
         return False
@@ -181,7 +182,7 @@ def _matches_anchor(entry: Dict[str, Any], anchor: EventCondition) -> bool:
     return True
 
 
-def _parse_entry_timestamp(entry: Dict[str, Any]) -> Optional[datetime]:
+def _parse_entry_timestamp(entry: dict[str, Any]) -> datetime | None:
     """Parse an entry's timestamp into a datetime object."""
     ts = entry.get("timestamp")
     if ts is None:
@@ -189,22 +190,30 @@ def _parse_entry_timestamp(entry: Dict[str, Any]) -> Optional[datetime]:
     if isinstance(ts, datetime):
         return ts
     try:
-        return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(ts))
     except (ValueError, TypeError):
         return None
 
 
+def _entry_time_text(entry: dict[str, Any], parsed: datetime) -> str:
+    """An entry's time as every command prints it. The engine's own text (UTC, ending in
+    ``Z``) is printed as it is, so it keeps every digit of a second the log had; any other
+    spelling, or a datetime, is spelled by ``format_time`` from ``parsed``."""
+    ts = entry.get("timestamp")
+    return ts if isinstance(ts, str) and ts.endswith("Z") else format_time(parsed)
+
+
 def _apply_temporal_rule(
-    entries: List[Dict[str, Any]],
+    entries: list[dict[str, Any]],
     rule: TemporalRule,
     group_name: str,
     rule_index: int,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Apply a single temporal rule, returning correlation clusters.
 
     Finds anchor events and collects all entries within the time window.
     """
-    clusters = []
+    clusters: list[dict[str, Any]] = []
     window = parse_duration(rule.window)
 
     # Find anchor events
@@ -255,7 +264,7 @@ def _apply_temporal_rule(
                 "group": group_name,
                 "rule_type": "temporal",
                 "rule_index": rule_index,
-                "anchor_timestamp": anchor_ts.isoformat(),
+                "anchor_timestamp": _entry_time_text(anchor_entry, anchor_ts),
                 "anchor_message": anchor_desc,
                 "window": rule.window,
                 "entry_count": len(cluster_entries),
@@ -272,10 +281,10 @@ def _apply_temporal_rule(
 
 
 def correlate_by_rules(
-    entries: List[Dict[str, Any]],
+    entries: list[dict[str, Any]],
     config: CorrelationsConfig,
-    group_name: Optional[str] = None,
-) -> Dict[str, Any]:
+    group_name: str | None = None,
+) -> dict[str, Any]:
     """Apply correlation rules to group entries by virtual trace IDs.
 
     Args:
@@ -292,7 +301,7 @@ def correlate_by_rules(
             "groups_applied": [str],
         }
     """
-    all_clusters: List[Dict[str, Any]] = []
+    all_clusters: list[dict[str, Any]] = []
 
     groups_to_apply = config.correlations
     if group_name is not None:

@@ -1,23 +1,25 @@
 """Correlation commands (M2.4, M3.4): correlation group + correlate-events."""
 
-import click
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
+import click
+
+from ..config import config_problem, find_correlations_config, load_correlations_config
 from ._core import (
-    llm,
-    EXIT_SUCCESS,
     EXIT_NO_RESULTS,
+    EXIT_SUCCESS,
     EXIT_USER_ERROR,
-    EXIT_INTERNAL_ERROR,
-    _output_json,
-    _error_json,
     _apply_max_bytes,
-    db_source_option,
+    _check_level_words,
     _db_file_source,
+    _error_json,
+    _output_json,
+    command,
+    db_source_option,
+    llm,
 )
-from ..config import find_correlations_config, load_correlations_config
 
 
 @llm.group()
@@ -31,99 +33,91 @@ def correlation():
     pass
 
 
-@correlation.command("list")
+@command("list", group=correlation)
 @click.option("--config-dir", help="Directory to search for .logler/correlations.yaml")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
-def correlation_list(config_dir: Optional[str], pretty: bool):
+def correlation_list(config_dir: str | None, pretty: bool):
     """List available correlation rule groups.
 
     Shows all correlation groups defined in .logler/correlations.yaml
     with their rule types and descriptions.
     """
-    try:
-        search_dir = Path(config_dir) if config_dir else Path.cwd()
-        config_path = find_correlations_config(search_dir)
+    search_dir = Path(config_dir) if config_dir else Path.cwd()
+    config_path = find_correlations_config(search_dir)
 
-        output: Dict[str, Any] = {
-            "config_path": None,
-            "groups": {},
+    output: dict[str, Any] = {
+        "config_path": None,
+        "groups": {},
+    }
+
+    if not config_path:
+        output["error"] = "No .logler/correlations.yaml found"
+        _output_json(output, pretty)
+        sys.exit(EXIT_NO_RESULTS)
+
+    output["config_path"] = str(config_path)
+
+    try:
+        config = load_correlations_config(config_path)
+    except (OSError, ValueError) as e:
+        output["config_error"] = config_problem(e)
+        _output_json(output, pretty)
+        sys.exit(EXIT_USER_ERROR)
+
+    for name, group in config.correlations.items():
+        rules_summary: list[dict[str, Any]] = []
+        for rule in group.rules:
+            if rule.type == "field_match":
+                rules_summary.append(
+                    {
+                        "type": "field_match",
+                        "source_field": rule.source.field,
+                        "target_field": rule.target.field,
+                        "source_pattern": rule.source.file_pattern,
+                        "target_pattern": rule.target.file_pattern,
+                    }
+                )
+            elif rule.type == "temporal":
+                anchor_desc: dict[str, str | None] = {}
+                if rule.anchor.level:
+                    anchor_desc["level"] = rule.anchor.level
+                if rule.anchor.pattern:
+                    anchor_desc["pattern"] = rule.anchor.pattern
+                if rule.anchor.field:
+                    anchor_desc["field"] = rule.anchor.field
+                    anchor_desc["condition"] = rule.anchor.condition
+                rules_summary.append(
+                    {
+                        "type": "temporal",
+                        "anchor": anchor_desc,
+                        "window": rule.window,
+                    }
+                )
+
+        output["groups"][name] = {
+            "description": group.description,
+            "rule_count": len(group.rules),
+            "rules": rules_summary,
         }
 
-        if not config_path:
-            output["error"] = "No .logler/correlations.yaml found"
-            _output_json(output, pretty)
-            sys.exit(EXIT_NO_RESULTS)
-
-        output["config_path"] = str(config_path)
-
-        try:
-            config = load_correlations_config(config_path)
-        except Exception as e:
-            output["config_error"] = str(e)
-            _output_json(output, pretty)
-            sys.exit(EXIT_USER_ERROR)
-
-        for name, group in config.correlations.items():
-            rules_summary = []
-            for rule in group.rules:
-                if rule.type == "field_match":
-                    rules_summary.append(
-                        {
-                            "type": "field_match",
-                            "source_field": rule.source.field,
-                            "target_field": rule.target.field,
-                            "source_pattern": rule.source.file_pattern,
-                            "target_pattern": rule.target.file_pattern,
-                        }
-                    )
-                elif rule.type == "temporal":
-                    anchor_desc = {}
-                    if rule.anchor.level:
-                        anchor_desc["level"] = rule.anchor.level
-                    if rule.anchor.pattern:
-                        anchor_desc["pattern"] = rule.anchor.pattern
-                    if rule.anchor.field:
-                        anchor_desc["field"] = rule.anchor.field
-                        anchor_desc["condition"] = rule.anchor.condition
-                    rules_summary.append(
-                        {
-                            "type": "temporal",
-                            "anchor": anchor_desc,
-                            "window": rule.window,
-                        }
-                    )
-
-            output["groups"][name] = {
-                "description": group.description,
-                "rule_count": len(group.rules),
-                "rules": rules_summary,
-            }
-
-        has_groups = bool(output["groups"])
-        _output_json(output, pretty)
-        sys.exit(EXIT_SUCCESS if has_groups else EXIT_NO_RESULTS)
-
-    except SystemExit:
-        raise
-    except Exception as e:
-        _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
+    has_groups = bool(output["groups"])
+    _output_json(output, pretty)
+    sys.exit(EXIT_SUCCESS if has_groups else EXIT_NO_RESULTS)
 
 
-@correlation.command("run")
+@command("run", group=correlation)
 @click.option("--files", "-f", multiple=True, help="Log files to correlate (supports globs)")
 @db_source_option
 @click.option("--rule", "-r", "rule_name", help="Run only this named correlation group")
 @click.option("--config-dir", help="Directory to search for .logler/correlations.yaml")
 @click.option("--limit", type=int, help="Max clusters to return")
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def correlation_run(
     files: tuple,
-    db_path: Optional[str],
-    rule_name: Optional[str],
-    config_dir: Optional[str],
-    limit: Optional[int],
-    max_bytes: Optional[int],
+    db_path: str | None,
+    rule_name: str | None,
+    config_dir: str | None,
+    limit: int | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """Run correlation rules against log files.
@@ -140,113 +134,101 @@ def correlation_run(
     from ..correlator import correlate_by_rules
 
     with _db_file_source(files, db_path) as file_list:
+        # Find and load correlation config
+        search_dir = Path(config_dir) if config_dir else Path.cwd()
+        config_path = find_correlations_config(search_dir)
+        if not config_path:
+            _error_json("No .logler/correlations.yaml found. Create one or specify --config-dir.")
+
         try:
-            # Find and load correlation config
-            search_dir = Path(config_dir) if config_dir else Path.cwd()
-            config_path = find_correlations_config(search_dir)
-            if not config_path:
-                _error_json(
-                    "No .logler/correlations.yaml found. Create one or specify --config-dir."
-                )
-
             config = load_correlations_config(config_path)
-            if not config.correlations:
-                _error_json("No correlation rules defined in config.")
+        except (OSError, ValueError) as e:
+            _error_json(f"Unusable correlations file: {config_path}: {config_problem(e)}")
+        if not config.correlations:
+            _error_json("No correlation rules defined in config.")
 
-            # Load all entries from files
-            all_entries = []
-            for file_path in file_list:
-                try:
-                    result = investigate.search(
-                        files=[file_path],
-                        output_format="full",
-                    )
-                    for item in result.get("results", []):
-                        entry = item.get("entry", {})
-                        if entry:
-                            all_entries.append(entry)
-                except Exception:
-                    # Skip files that fail to load
-                    pass
+        # Load all entries from files
+        all_entries = []
+        for file_path in file_list:
+            result = investigate.search(files=[file_path], output_format="full")
+            for item in result.get("results", []):
+                entry = item.get("entry", {})
+                if entry:
+                    all_entries.append(entry)
 
-            if not all_entries:
-                output = {
-                    "config_path": str(config_path),
-                    "files_searched": len(file_list),
-                    "entries_loaded": 0,
-                    "clusters": [],
-                    "total_clusters": 0,
-                }
-                _output_json(output, pretty)
-                sys.exit(EXIT_NO_RESULTS)
-
-            # Run correlation
-            result = correlate_by_rules(
-                entries=all_entries,
-                config=config,
-                group_name=rule_name,
-            )
-
-            # Strip full entries from clusters for output (keep counts and metadata)
-            output_clusters = []
-            for cluster in result["clusters"]:
-                slim = {
-                    "virtual_trace_id": cluster["virtual_trace_id"],
-                    "group": cluster["group"],
-                    "rule_type": cluster["rule_type"],
-                    "entry_count": cluster["entry_count"],
-                }
-                if cluster["rule_type"] == "field_match":
-                    slim["shared_value"] = cluster["shared_value"]
-                    slim["source_field"] = cluster["source_field"]
-                    slim["target_field"] = cluster["target_field"]
-                    slim["source_count"] = cluster["source_count"]
-                    slim["target_count"] = cluster["target_count"]
-                elif cluster["rule_type"] == "temporal":
-                    slim["anchor_timestamp"] = cluster["anchor_timestamp"]
-                    slim["anchor_message"] = cluster["anchor_message"]
-                    slim["window"] = cluster["window"]
-
-                # Include condensed entry references
-                slim["entries"] = [
-                    {
-                        "file": Path(e.get("file", "")).name,
-                        "line_number": e.get("line_number"),
-                        "timestamp": e.get("timestamp"),
-                        "level": e.get("level"),
-                        "message": (e.get("message") or "")[:200],
-                    }
-                    for e in cluster["entries"]
-                ]
-
-                output_clusters.append(slim)
-
-            if limit:
-                output_clusters = output_clusters[:limit]
-
+        if not all_entries:
             output = {
                 "config_path": str(config_path),
                 "files_searched": len(file_list),
-                "entries_loaded": len(all_entries),
-                "groups_applied": result["groups_applied"],
-                "total_clusters": result["total_clusters"],
-                "total_entries_correlated": result["total_entries_correlated"],
-                "clusters": output_clusters,
+                "entries_loaded": 0,
+                "clusters": [],
+                "total_clusters": 0,
             }
-
-            if max_bytes:
-                output = _apply_max_bytes(output, max_bytes)
-
             _output_json(output, pretty)
-            sys.exit(EXIT_SUCCESS if result["total_clusters"] > 0 else EXIT_NO_RESULTS)
+            sys.exit(EXIT_NO_RESULTS)
 
-        except SystemExit:
-            raise
-        except Exception as e:
-            _error_json(f"Internal error in correlation run: {str(e)}", EXIT_INTERNAL_ERROR)
+        # Run correlation
+        result = correlate_by_rules(
+            entries=all_entries,
+            config=config,
+            group_name=rule_name,
+        )
+
+        # Strip full entries from clusters for output (keep counts and metadata)
+        output_clusters = []
+        for cluster in result["clusters"]:
+            slim = {
+                "virtual_trace_id": cluster["virtual_trace_id"],
+                "group": cluster["group"],
+                "rule_type": cluster["rule_type"],
+                "entry_count": cluster["entry_count"],
+            }
+            if cluster["rule_type"] == "field_match":
+                slim["shared_value"] = cluster["shared_value"]
+                slim["source_field"] = cluster["source_field"]
+                slim["target_field"] = cluster["target_field"]
+                slim["source_count"] = cluster["source_count"]
+                slim["target_count"] = cluster["target_count"]
+            elif cluster["rule_type"] == "temporal":
+                slim["anchor_timestamp"] = cluster["anchor_timestamp"]
+                slim["anchor_message"] = cluster["anchor_message"]
+                slim["window"] = cluster["window"]
+
+            # Include condensed entry references
+            slim["entries"] = [
+                {
+                    "file": Path(e.get("file", "")).name,
+                    "line_number": e.get("line_number"),
+                    "timestamp": e.get("timestamp"),
+                    "level": e.get("level"),
+                    "message": (e.get("message") or "")[:200],
+                }
+                for e in cluster["entries"]
+            ]
+
+            output_clusters.append(slim)
+
+        if limit:
+            output_clusters = output_clusters[:limit]
+
+        output = {
+            "config_path": str(config_path),
+            "files_searched": len(file_list),
+            "entries_loaded": len(all_entries),
+            "groups_applied": result["groups_applied"],
+            "total_clusters": result["total_clusters"],
+            "total_entries_correlated": result["total_entries_correlated"],
+            "clusters": output_clusters,
+        }
+
+        if max_bytes:
+            output = _apply_max_bytes(output, max_bytes)
+
+        _output_json(output, pretty)
+        sys.exit(EXIT_SUCCESS if result["total_clusters"] > 0 else EXIT_NO_RESULTS)
 
 
-@llm.command("correlate-events")
+@command("correlate-events")
 @click.option(
     "--files",
     "-f",
@@ -270,6 +252,7 @@ def correlation_run(
 @click.option(
     "--trigger-level",
     help="Find trigger events by log level (e.g., ERROR)",
+    callback=_check_level_words,
 )
 @click.option(
     "--trigger-pattern",
@@ -291,20 +274,19 @@ def correlation_run(
 )
 @click.option("--limit", type=int, help="Max clusters to return")
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def correlate_events_cmd(
     files: tuple,
-    db_path: Optional[str],
-    anchor_timestamp: Optional[str],
-    anchor_file: Optional[str],
-    anchor_line: Optional[int],
-    trigger_level: Optional[str],
-    trigger_pattern: Optional[str],
-    trigger_field: Optional[str],
-    trigger_condition: Optional[str],
+    db_path: str | None,
+    anchor_timestamp: str | None,
+    anchor_file: str | None,
+    anchor_line: int | None,
+    trigger_level: str | None,
+    trigger_pattern: str | None,
+    trigger_field: str | None,
+    trigger_condition: str | None,
     window: str,
-    limit: Optional[int],
-    max_bytes: Optional[int],
+    limit: int | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """Find all events across files within a time window of reference events.
@@ -330,101 +312,95 @@ def correlate_events_cmd(
     from ..event_correlator import correlate_events
 
     with _db_file_source(files, db_path) as file_list:
-        try:
-            # Build anchor_entry if file+line specified
-            anchor_entry = None
-            if anchor_file and anchor_line:
-                try:
-                    result = investigate.search(files=[anchor_file])
-                    for item in result.get("results", []):
-                        entry = item.get("entry", {})
-                        if entry.get("line_number") == anchor_line:
-                            anchor_entry = entry
-                            break
-                    if anchor_entry is None:
-                        _error_json(f"Could not find entry at {anchor_file}:{anchor_line}")
-                except Exception as e:
-                    _error_json(f"Failed to read anchor file: {e}")
+        # Build anchor_entry if file+line specified
+        anchor_entry = None
+        if anchor_file and anchor_line:
+            try:
+                result = investigate.search(files=[anchor_file])
+                for item in result.get("results", []):
+                    entry = item.get("entry", {})
+                    if entry.get("line_number") == anchor_line:
+                        anchor_entry = entry
+                        break
+                if anchor_entry is None:
+                    _error_json(f"Could not find entry at {anchor_file}:{anchor_line}")
+            except (RuntimeError, OSError) as e:  # OSError: a file the engine cannot read
+                _error_json(f"Failed to read anchor file: {e}")
 
-            # Build trigger dict if trigger options specified
-            trigger = None
-            has_trigger = any([trigger_level, trigger_pattern, trigger_field])
-            if has_trigger:
-                trigger = {}
-                if trigger_level:
-                    trigger["level"] = trigger_level
-                if trigger_pattern:
-                    trigger["pattern"] = trigger_pattern
-                if trigger_field:
-                    trigger["field"] = trigger_field
-                if trigger_condition:
-                    trigger["condition"] = trigger_condition
+        # Build trigger dict if trigger options specified
+        trigger = None
+        has_trigger = any([trigger_level, trigger_pattern, trigger_field])
+        if has_trigger:
+            trigger = {}
+            if trigger_level:
+                trigger["level"] = trigger_level
+            if trigger_pattern:
+                trigger["pattern"] = trigger_pattern
+            if trigger_field:
+                trigger["field"] = trigger_field
+            if trigger_condition:
+                trigger["condition"] = trigger_condition
 
-            # Must have at least one mode
-            if anchor_entry is None and anchor_timestamp is None and trigger is None:
-                _error_json(
-                    "Must specify one of: --anchor-file/--anchor-line, "
-                    "--anchor-timestamp, or --trigger-level/--trigger-pattern/--trigger-field"
-                )
-
-            # Run correlation
-            result = correlate_events(
-                files=file_list,
-                anchor_entry=anchor_entry,
-                anchor_timestamp=anchor_timestamp,
-                trigger=trigger,
-                window=window,
-                limit=limit,
+        # Must have at least one mode
+        if anchor_entry is None and anchor_timestamp is None and trigger is None:
+            _error_json(
+                "Must specify one of: --anchor-file/--anchor-line, "
+                "--anchor-timestamp, or --trigger-level/--trigger-pattern/--trigger-field"
             )
 
-            if result.get("error"):
-                _error_json(result["error"])
+        # Run correlation
+        result = correlate_events(
+            files=file_list,
+            anchor_entry=anchor_entry,
+            anchor_timestamp=anchor_timestamp,
+            trigger=trigger,
+            window=window,
+            limit=limit,
+        )
 
-            # Slim down entries in clusters for output
-            output_clusters = []
-            for cluster in result.get("clusters", []):
-                slim = {
-                    "virtual_trace_id": cluster["virtual_trace_id"],
-                    "rule_type": cluster["rule_type"],
-                    "anchor_timestamp": cluster.get("anchor_timestamp"),
-                    "anchor_message": cluster.get("anchor_message"),
-                    "anchor_file": cluster.get("anchor_file"),
-                    "window": cluster["window"],
-                    "entry_count": cluster["entry_count"],
-                }
+        if result.get("error"):
+            _error_json(result["error"])
 
-                if cluster["rule_type"] == "event_trigger":
-                    slim["trigger"] = cluster.get("trigger")
-
-                # Condensed entry references
-                slim["entries"] = [
-                    {
-                        "file": Path(e.get("file", "")).name,
-                        "line_number": e.get("line_number"),
-                        "timestamp": e.get("timestamp"),
-                        "level": e.get("level"),
-                        "message": (e.get("message") or "")[:200],
-                    }
-                    for e in cluster["entries"]
-                ]
-
-                output_clusters.append(slim)
-
-            output = {
-                "files_searched": result["files_searched"],
-                "window": result["window"],
-                "total_clusters": result["total_clusters"],
-                "total_entries_correlated": result["total_entries_correlated"],
-                "clusters": output_clusters,
+        # Slim down entries in clusters for output
+        output_clusters = []
+        for cluster in result.get("clusters", []):
+            slim = {
+                "virtual_trace_id": cluster["virtual_trace_id"],
+                "rule_type": cluster["rule_type"],
+                "anchor_timestamp": cluster.get("anchor_timestamp"),
+                "anchor_message": cluster.get("anchor_message"),
+                "anchor_file": cluster.get("anchor_file"),
+                "window": cluster["window"],
+                "entry_count": cluster["entry_count"],
             }
 
-            if max_bytes:
-                output = _apply_max_bytes(output, max_bytes)
+            if cluster["rule_type"] == "event_trigger":
+                slim["trigger"] = cluster.get("trigger")
 
-            _output_json(output, pretty)
-            sys.exit(EXIT_SUCCESS if result["total_clusters"] > 0 else EXIT_NO_RESULTS)
+            # Condensed entry references
+            slim["entries"] = [
+                {
+                    "file": Path(e.get("file", "")).name,
+                    "line_number": e.get("line_number"),
+                    "timestamp": e.get("timestamp"),
+                    "level": e.get("level"),
+                    "message": (e.get("message") or "")[:200],
+                }
+                for e in cluster["entries"]
+            ]
 
-        except SystemExit:
-            raise
-        except Exception as e:
-            _error_json(f"Internal error in correlate-events: {str(e)}", EXIT_INTERNAL_ERROR)
+            output_clusters.append(slim)
+
+        output = {
+            "files_searched": result["files_searched"],
+            "window": result["window"],
+            "total_clusters": result["total_clusters"],
+            "total_entries_correlated": result["total_entries_correlated"],
+            "clusters": output_clusters,
+        }
+
+        if max_bytes:
+            output = _apply_max_bytes(output, max_bytes)
+
+        _output_json(output, pretty)
+        sys.exit(EXIT_SUCCESS if result["total_clusters"] > 0 else EXIT_NO_RESULTS)

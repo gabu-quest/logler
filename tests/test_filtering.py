@@ -21,11 +21,13 @@ Entry i:
 
 import json
 import tempfile
-import pytest
 from pathlib import Path
+from typing import ClassVar
+
+import pytest
 
 try:
-    from logler.investigate import search, RUST_AVAILABLE
+    from logler.investigate import RUST_AVAILABLE, search
 except ImportError as e:
     if "logler_rs" in str(e):
         RUST_AVAILABLE = False
@@ -353,3 +355,80 @@ class TestCombinedFilters:
             assert entry["level"] in ("WARN", "ERROR")
             assert set(entry.keys()) == {"timestamp", "level", "message", "service_name"}
             assert "health" not in entry["message"].lower()
+
+
+class TestOneFilterBuilder:
+    """``search`` and ``Investigator.search`` send the engine the same filter dict."""
+
+    ARGS: ClassVar[dict[str, str]] = dict(
+        level="ERROR,warn,crit",
+        exclude_level="debug",
+        exclude_query="health",
+        thread_id="a, ,b",
+        correlation_id=" a ",
+        trace_id="",
+        service_name="x,y",
+        time_start="2024-01-15T10:00:00Z",
+        time_end="2024-01-15T10:01:00Z",
+    )
+
+    @staticmethod
+    def _sent_filters(monkeypatch, door, **kwargs):
+        import logler._search_core as core
+
+        class Stub:
+            def search(self, payload):
+                self.payload = json.loads(payload)
+                return json.dumps({"results": []})
+
+        stub = Stub()
+        monkeypatch.setattr(core, "_investigator_for", lambda *a, **k: stub)
+        door(stub, **kwargs)
+        return stub.payload["filters"]
+
+    @staticmethod
+    def _function_door(stub, **kwargs):
+        search(files=["x.log"], **kwargs)
+
+    @staticmethod
+    def _method_door(stub, **kwargs):
+        from logler.investigate import Investigator
+
+        inv = Investigator()
+        inv._investigator = stub
+        inv.search(**kwargs)
+
+    @pytest.mark.parametrize(
+        "kwargs,expected",
+        [
+            (
+                ARGS,
+                {
+                    "levels": ["Error", "Warn", "Fatal"],
+                    "exclude_levels": ["Debug"],
+                    "exclude_pattern": "health",
+                    "thread_ids": ["a", "b"],
+                    "correlation_id": "a",
+                    "service_names": ["x", "y"],
+                    "time_range": {
+                        "start": "2024-01-15T10:00:00Z",
+                        "end": "2024-01-15T10:01:00Z",
+                    },
+                },
+            ),
+            ({"thread_id": "a, ,b"}, {"thread_ids": ["a", "b"]}),
+            ({"thread_id": " a "}, {"thread_id": "a"}),
+            ({"thread_id": ""}, {}),
+            ({"trace_id": " , "}, {}),
+        ],
+        ids=["all", "gap", "padded", "empty", "only-commas"],
+    )
+    def test_both_doors_send_the_same_dict(self, monkeypatch, kwargs, expected):
+        base = {"levels": [], "exclude_levels": []}
+        for door in (self._function_door, self._method_door):
+            assert self._sent_filters(monkeypatch, door, **kwargs) == {**base, **expected}
+
+    @pytest.mark.parametrize("door", ["_function_door", "_method_door"])
+    def test_unknown_level_word_raises_value_error(self, monkeypatch, door):
+        with pytest.raises(ValueError, match="Unknown log level: nonsense"):
+            self._sent_filters(monkeypatch, getattr(self, door), level="ERROR,nonsense")

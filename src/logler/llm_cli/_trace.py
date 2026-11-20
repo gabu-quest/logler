@@ -1,26 +1,27 @@
 """Trace-related commands: correlate, hierarchy, bottleneck, context, export."""
 
-import click
 import sys
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
+
+import click
 
 from ._core import (
-    llm,
-    EXIT_SUCCESS,
     EXIT_NO_RESULTS,
-    EXIT_INTERNAL_ERROR,
-    _output_json,
-    _error_json,
+    EXIT_SUCCESS,
     _apply_max_bytes,
-    _resolve_time_filters,
-    time_filter_options,
-    db_source_option,
     _db_file_source,
+    _error_json,
+    _output_json,
+    _resolve_time_bounds,
+    _time_text_outside_bounds,
+    command,
+    db_source_option,
+    time_filter_options,
 )
 
 
-@llm.command()
+@command()
 @click.argument("identifier")
 @click.option("--files", "-f", multiple=True, help="Files to search (supports globs)")
 @db_source_option
@@ -33,16 +34,15 @@ from ._core import (
 )
 @time_filter_options
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def correlate(
     identifier: str,
     files: tuple,
-    db_path: Optional[str],
+    db_path: str | None,
     id_type: str,
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
-    max_bytes: Optional[int],
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """
@@ -57,119 +57,115 @@ def correlate(
     from .. import investigate
 
     with _db_file_source(files, db_path, default_glob="*.log") as file_list:
-        try:
-            # Determine ID type
-            correlation_id = None
-            trace_id = None
-            thread_id = None
+        # Determine ID type
+        correlation_id = None
+        trace_id = None
+        thread_id = None
 
-            if id_type == "auto":
-                if identifier.startswith("trace-") or len(identifier) == 32:
-                    trace_id = identifier
-                    detected_type = "trace_id"
-                elif identifier.startswith("req-") or identifier.startswith("corr-"):
-                    correlation_id = identifier
-                    detected_type = "correlation_id"
-                else:
-                    correlation_id = identifier
-                    detected_type = "correlation_id"
-            elif id_type == "correlation_id":
-                correlation_id = identifier
-                detected_type = "correlation_id"
-            elif id_type == "trace_id":
+        if id_type == "auto":
+            if identifier.startswith("trace-") or len(identifier) == 32:
                 trace_id = identifier
                 detected_type = "trace_id"
-            elif id_type == "thread_id":
-                thread_id = identifier
-                detected_type = "thread_id"
+            elif identifier.startswith("req-") or identifier.startswith("corr-"):
+                correlation_id = identifier
+                detected_type = "correlation_id"
+            else:
+                correlation_id = identifier
+                detected_type = "correlation_id"
+        elif id_type == "correlation_id":
+            correlation_id = identifier
+            detected_type = "correlation_id"
+        elif id_type == "trace_id":
+            trace_id = identifier
+            detected_type = "trace_id"
+        elif id_type == "thread_id":
+            thread_id = identifier
+            detected_type = "thread_id"
 
-            # Resolve time filters
-            time_start, time_end = _resolve_time_filters(last_duration, after, before)
+        # Resolve time filters
+        time_start, time_end = _resolve_time_bounds(last_duration, after, before)
 
-            result = investigate.follow_thread(
-                files=file_list,
-                thread_id=thread_id,
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-            )
+        result = investigate.follow_thread(
+            files=file_list,
+            thread_id=thread_id,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+        )
 
-            entries = result.get("entries", [])
+        entries = result.get("entries", [])
 
-            # Apply time filters to entries
-            if time_start:
-                entries = [
-                    e for e in entries if e.get("timestamp") and e["timestamp"] >= time_start
-                ]
-            if time_end:
-                entries = [e for e in entries if e.get("timestamp") and e["timestamp"] <= time_end]
+        # Apply time filters to entries
+        if time_start or time_end:
+            entries = [
+                e
+                for e in entries
+                if not _time_text_outside_bounds(e.get("timestamp"), time_start, time_end)
+            ]
 
-            # Build timeline
-            timeline = []
-            services = set()
-            start_time = None
+        # Build timeline
+        timeline = []
+        services = set()
+        start_time = None
 
-            for i, entry in enumerate(entries):
-                ts = entry.get("timestamp")
-                if ts and not start_time:
-                    start_time = ts
+        for i, entry in enumerate(entries):
+            ts = entry.get("timestamp")
+            if ts and not start_time:
+                start_time = ts
 
-                service = entry.get("service") or entry.get("service_name")
-                if service:
-                    services.add(service)
+            service = entry.get("service") or entry.get("service_name")
+            if service:
+                services.add(service)
 
-                timeline_entry = {
-                    "sequence": i + 1,
-                    "timestamp": ts,
-                    "file": entry.get("file"),
-                    "line_number": entry.get("line_number"),
-                    "level": entry.get("level"),
-                    "message": entry.get("message"),
-                }
-
-                if entry.get("thread_id"):
-                    timeline_entry["thread_id"] = entry["thread_id"]
-                if service:
-                    timeline_entry["service"] = service
-
-                timeline.append(timeline_entry)
-
-            # Find error point
-            error_point = None
-            for entry in timeline:
-                if entry.get("level") in ["ERROR", "FATAL", "CRITICAL"]:
-                    error_point = entry
-                    break
-
-            output = {
-                "identifier": identifier,
-                "identifier_type": detected_type,
-                "trace": {
-                    "total_entries": len(timeline),
-                    "services": list(services),
-                    "duration_ms": result.get("duration_ms"),
-                    "outcome": "error" if error_point else "success",
-                },
-                "timeline": timeline,
+            timeline_entry = {
+                "sequence": i + 1,
+                "timestamp": ts,
+                "file": entry.get("file"),
+                "line_number": entry.get("line_number"),
+                "level": entry.get("level"),
+                "message": entry.get("message"),
             }
 
-            if error_point:
-                output["error_point"] = error_point
+            if entry.get("thread_id"):
+                timeline_entry["thread_id"] = entry["thread_id"]
+            if service:
+                timeline_entry["service"] = service
 
-            if max_bytes:
-                output = _apply_max_bytes(output, max_bytes)
+            timeline.append(timeline_entry)
 
-            _output_json(output, pretty)
+        # Find error point
+        error_point = None
+        for entry in timeline:
+            if entry.get("level") in ["ERROR", "FATAL", "CRITICAL"]:
+                error_point = entry
+                break
 
-            if len(timeline) == 0:
-                sys.exit(EXIT_NO_RESULTS)
-            else:
-                sys.exit(EXIT_SUCCESS)
+        output = {
+            "identifier": identifier,
+            "identifier_type": detected_type,
+            "trace": {
+                "total_entries": len(timeline),
+                "services": sorted(services),
+                "duration_ms": result.get("duration_ms"),
+                "outcome": "error" if error_point else "success",
+            },
+            "timeline": timeline,
+        }
 
-        except Exception as e:
-            _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
+        if error_point:
+            output["error_point"] = error_point
+
+        if max_bytes:
+            output = _apply_max_bytes(output, max_bytes)
+
+        _output_json(output, pretty)
+
+        if len(timeline) == 0:
+            sys.exit(EXIT_NO_RESULTS)
+        else:
+            sys.exit(EXIT_SUCCESS)
 
 
-@llm.command()
+@command()
 @click.argument("identifier")
 @click.option("--files", "-f", multiple=True, help="Files to search (supports globs)")
 @db_source_option
@@ -177,17 +173,16 @@ def correlate(
 @click.option("--min-confidence", type=float, default=0.0, help="Minimum confidence (0.0-1.0)")
 @time_filter_options
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def hierarchy(
     identifier: str,
     files: tuple,
-    db_path: Optional[str],
-    max_depth: Optional[int],
+    db_path: str | None,
+    max_depth: int | None,
     min_confidence: float,
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
-    max_bytes: Optional[int],
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """
@@ -204,30 +199,26 @@ def hierarchy(
     from .. import investigate
 
     with _db_file_source(files, db_path, default_glob="*.log") as file_list:
-        try:
-            result = investigate.follow_thread_hierarchy(
-                files=file_list,
-                root_identifier=identifier,
-                max_depth=max_depth,
-                min_confidence=min_confidence,
-            )
+        result = investigate.follow_thread_hierarchy(
+            files=file_list,
+            root_identifier=identifier,
+            max_depth=max_depth,
+            min_confidence=min_confidence,
+        )
 
-            # Output directly - hierarchy result is already structured
-            if max_bytes:
-                result = _apply_max_bytes(result, max_bytes)
+        # Output directly - hierarchy result is already structured
+        if max_bytes:
+            result = _apply_max_bytes(result, max_bytes)
 
-            _output_json(result, pretty)
+        _output_json(result, pretty)
 
-            if not result.get("roots"):
-                sys.exit(EXIT_NO_RESULTS)
-            else:
-                sys.exit(EXIT_SUCCESS)
-
-        except Exception as e:
-            _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
+        if not result.get("roots"):
+            sys.exit(EXIT_NO_RESULTS)
+        else:
+            sys.exit(EXIT_SUCCESS)
 
 
-@llm.command()
+@command()
 @click.argument("identifier")
 @click.option("--files", "-f", multiple=True, help="Files to search (supports globs)")
 @db_source_option
@@ -235,17 +226,16 @@ def hierarchy(
 @click.option("--top-n", type=int, default=10, help="Number of top bottlenecks to return")
 @time_filter_options
 @click.option("--max-bytes", type=int, help="Maximum output size in bytes (truncates)")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def bottleneck(
     identifier: str,
     files: tuple,
-    db_path: Optional[str],
+    db_path: str | None,
     threshold_ms: int,
     top_n: int,
-    last_duration: Optional[str],
-    after: Optional[str],
-    before: Optional[str],
-    max_bytes: Optional[int],
+    last_duration: str | None,
+    after: str | None,
+    before: str | None,
+    max_bytes: int | None,
     pretty: bool,
 ):
     """
@@ -259,88 +249,83 @@ def bottleneck(
     from .. import investigate
 
     with _db_file_source(files, db_path, default_glob="*.log") as file_list:
-        try:
-            # Get hierarchy to analyze
-            hierarchy_result = investigate.follow_thread_hierarchy(
-                files=file_list,
-                root_identifier=identifier,
-            )
+        # Get hierarchy to analyze
+        hierarchy_result = investigate.follow_thread_hierarchy(
+            files=file_list,
+            root_identifier=identifier,
+        )
 
-            if not hierarchy_result.get("roots"):
-                _output_json(
-                    {
-                        "identifier": identifier,
-                        "error": "No hierarchy found for identifier",
-                    },
-                    pretty,
-                )
-                sys.exit(EXIT_NO_RESULTS)
-
-            # Collect all nodes with durations
-            nodes_with_duration = []
-
-            def collect_nodes(node: Dict[str, Any], path: List[str]):
-                node_id = node.get("id", "unknown")
-                duration = node.get("duration_ms", 0) or 0
-                current_path = path + [node_id]
-
-                if duration >= threshold_ms:
-                    nodes_with_duration.append(
-                        {
-                            "node_id": node_id,
-                            "name": node.get("name") or node.get("operation_name"),
-                            "duration_ms": duration,
-                            "depth": node.get("depth", 0),
-                            "entry_count": node.get("entry_count", 0),
-                            "error_count": node.get("error_count", 0),
-                            "path": current_path,
-                            "children_count": len(node.get("children", [])),
-                        }
-                    )
-
-                for child in node.get("children", []):
-                    collect_nodes(child, current_path)
-
-            for root in hierarchy_result.get("roots", []):
-                collect_nodes(root, [])
-
-            # Sort by duration descending
-            nodes_with_duration.sort(key=lambda x: -x["duration_ms"])
-            top_bottlenecks = nodes_with_duration[:top_n]
-
-            # Calculate percentages
-            total_duration = hierarchy_result.get("total_duration_ms", 0) or 1
-            for node in top_bottlenecks:
-                node["percentage"] = round(node["duration_ms"] / total_duration * 100, 1)
-
-            output = {
-                "identifier": identifier,
-                "total_duration_ms": hierarchy_result.get("total_duration_ms"),
-                "total_nodes": hierarchy_result.get("total_nodes", 0),
-                "analysis": {
-                    "threshold_ms": threshold_ms,
-                    "nodes_above_threshold": len(nodes_with_duration),
+        if not hierarchy_result.get("roots"):
+            _output_json(
+                {
+                    "identifier": identifier,
+                    "error": "No hierarchy found for identifier",
                 },
-                "bottlenecks": top_bottlenecks,
-                "hierarchy_bottleneck": hierarchy_result.get("bottleneck"),
-            }
+                pretty,
+            )
+            sys.exit(EXIT_NO_RESULTS)
 
-            if max_bytes:
-                output = _apply_max_bytes(output, max_bytes)
+        # Collect all nodes with durations
+        nodes_with_duration = []
 
-            _output_json(output, pretty)
-            sys.exit(EXIT_SUCCESS)
+        def collect_nodes(node: dict[str, Any], path: list[str]):
+            node_id = node.get("id", "unknown")
+            duration = node.get("duration_ms", 0) or 0
+            current_path = [*path, node_id]
 
-        except Exception as e:
-            _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
+            if duration >= threshold_ms:
+                nodes_with_duration.append(
+                    {
+                        "node_id": node_id,
+                        "name": node.get("name") or node.get("operation_name"),
+                        "duration_ms": duration,
+                        "depth": node.get("depth", 0),
+                        "entry_count": node.get("entry_count", 0),
+                        "error_count": node.get("error_count", 0),
+                        "path": current_path,
+                        "children_count": len(node.get("children", [])),
+                    }
+                )
+
+            for child in node.get("children", []):
+                collect_nodes(child, current_path)
+
+        for root in hierarchy_result.get("roots", []):
+            collect_nodes(root, [])
+
+        # Sort by duration descending
+        nodes_with_duration.sort(key=lambda x: -x["duration_ms"])
+        top_bottlenecks = nodes_with_duration[:top_n]
+
+        # Calculate percentages
+        total_duration = hierarchy_result.get("total_duration_ms", 0) or 1
+        for node in top_bottlenecks:
+            node["percentage"] = round(node["duration_ms"] / total_duration * 100, 1)
+
+        output = {
+            "identifier": identifier,
+            "total_duration_ms": hierarchy_result.get("total_duration_ms"),
+            "total_nodes": hierarchy_result.get("total_nodes", 0),
+            "analysis": {
+                "threshold_ms": threshold_ms,
+                "nodes_above_threshold": len(nodes_with_duration),
+            },
+            "bottlenecks": top_bottlenecks,
+            "hierarchy_bottleneck": hierarchy_result.get("bottleneck"),
+        }
+
+        if max_bytes:
+            output = _apply_max_bytes(output, max_bytes)
+
+        _output_json(output, pretty)
+        sys.exit(EXIT_SUCCESS)
 
 
-@llm.command()
+@command()
 @click.argument("file")
 @click.argument("line", type=int)
 @click.option("--before", "-B", type=int, default=10, help="Lines before")
 @click.option("--after", "-A", type=int, default=10, help="Lines after")
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def context(file: str, line: int, before: int, after: int, pretty: bool):
     """
     Get context lines around a specific log entry.
@@ -353,35 +338,31 @@ def context(file: str, line: int, before: int, after: int, pretty: bool):
     """
     from .. import investigate
 
-    try:
-        if not Path(file).exists():
-            _error_json(f"File not found: {file}")
+    if not Path(file).exists():
+        _error_json(f"File not found: {file}")
 
-        result = investigate.get_context(
-            file=file,
-            line_number=line,
-            lines_before=before,
-            lines_after=after,
-        )
+    result = investigate.get_context(
+        file=file,
+        line_number=line,
+        lines_before=before,
+        lines_after=after,
+    )
 
-        # Transform to cleaner output
-        output = {
-            "file": file,
-            "line_number": line,
-            "context_lines": {"before": before, "after": after},
-            "target": result.get("target"),
-            "context_before": result.get("context_before", []),
-            "context_after": result.get("context_after", []),
-        }
+    # Transform to cleaner output
+    output = {
+        "file": file,
+        "line_number": line,
+        "context_lines": {"before": before, "after": after},
+        "target": result.get("target"),
+        "context_before": result.get("context_before", []),
+        "context_after": result.get("context_after", []),
+    }
 
-        _output_json(output, pretty)
-        sys.exit(EXIT_SUCCESS)
-
-    except Exception as e:
-        _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
+    _output_json(output, pretty)
+    sys.exit(EXIT_SUCCESS)
 
 
-@llm.command("export")
+@command("export")
 @click.argument("identifier")
 @click.option("--files", "-f", multiple=True, help="Files to search (supports globs)")
 @db_source_option
@@ -392,9 +373,8 @@ def context(file: str, line: int, before: int, after: int, pretty: bool):
     default="jaeger",
     help="Export format",
 )
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
 def export_trace(
-    identifier: str, files: tuple, db_path: Optional[str], export_format: str, pretty: bool
+    identifier: str, files: tuple, db_path: str | None, export_format: str, pretty: bool
 ):
     """
     Export traces to Jaeger/Zipkin/OTLP format.
@@ -408,141 +388,43 @@ def export_trace(
     from .. import investigate
 
     with _db_file_source(files, db_path, default_glob="*.log") as file_list:
-        try:
-            # Get hierarchy for the trace
-            hierarchy_result = investigate.follow_thread_hierarchy(
-                files=file_list,
-                root_identifier=identifier,
+        # Get hierarchy for the trace
+        hierarchy_result = investigate.follow_thread_hierarchy(
+            files=file_list,
+            root_identifier=identifier,
+        )
+
+        if not hierarchy_result.get("roots"):
+            _output_json(
+                {
+                    "identifier": identifier,
+                    "format": export_format,
+                    "error": "No trace data found for identifier",
+                },
+                pretty,
+            )
+            sys.exit(EXIT_NO_RESULTS)
+
+        from ..export import EXPORTERS
+
+        trace_output = EXPORTERS[export_format](hierarchy_result, identifier=identifier)
+        if export_format == "jaeger":
+            span_count = len(trace_output["data"][0]["spans"])
+        elif export_format == "zipkin":
+            span_count = len(trace_output)
+        else:
+            span_count = sum(
+                len(scope["spans"])
+                for resource in trace_output["resourceSpans"]
+                for scope in resource["scopeSpans"]
             )
 
-            if not hierarchy_result.get("roots"):
-                _output_json(
-                    {
-                        "identifier": identifier,
-                        "format": export_format,
-                        "error": "No trace data found for identifier",
-                    },
-                    pretty,
-                )
-                sys.exit(EXIT_NO_RESULTS)
+        output = {
+            "identifier": identifier,
+            "format": export_format,
+            "span_count": span_count,
+            "export": trace_output,
+        }
 
-            # Convert hierarchy to spans
-            spans = []
-
-            def node_to_span(node: Dict[str, Any], parent_span_id: Optional[str] = None):
-                node_id = node.get("id", "unknown")
-
-                # Generate span ID if not present
-                span_id = node.get("span_id") or f"span-{hash(node_id) & 0xFFFFFFFF:08x}"
-
-                span = {
-                    "traceId": identifier.replace("trace-", "")
-                    .replace("-", "")[:32]
-                    .ljust(32, "0"),
-                    "spanId": span_id.replace("-", "")[:16].ljust(16, "0"),
-                    "operationName": node.get("name") or node.get("operation_name") or node_id,
-                    "serviceName": node.get("service_name", "unknown"),
-                    "startTime": node.get("start_time"),
-                    "duration": (node.get("duration_ms", 0) or 0) * 1000,  # Convert to microseconds
-                    "tags": [],
-                    "logs": [],
-                }
-
-                if parent_span_id:
-                    span["parentSpanId"] = parent_span_id.replace("-", "")[:16].ljust(16, "0")
-
-                # Add tags
-                if node.get("error_count", 0) > 0:
-                    span["tags"].append({"key": "error", "value": True})
-
-                if node.get("entry_count"):
-                    span["tags"].append({"key": "log.entry_count", "value": node["entry_count"]})
-
-                spans.append(span)
-
-                for child in node.get("children", []):
-                    node_to_span(child, span_id)
-
-            for root in hierarchy_result.get("roots", []):
-                node_to_span(root)
-
-            # Format output based on target format
-            if export_format == "jaeger":
-                trace_output = {
-                    "data": [
-                        {
-                            "traceID": identifier.replace("trace-", "")
-                            .replace("-", "")[:32]
-                            .ljust(32, "0"),
-                            "spans": spans,
-                            "processes": {
-                                "p1": {
-                                    "serviceName": "logler-export",
-                                    "tags": [],
-                                }
-                            },
-                        }
-                    ],
-                    "total": 1,
-                    "limit": 0,
-                    "offset": 0,
-                    "errors": None,
-                }
-            elif export_format == "zipkin":
-                trace_output = [
-                    {
-                        "traceId": span["traceId"],
-                        "id": span["spanId"],
-                        "name": span["operationName"],
-                        "timestamp": span.get("startTime"),
-                        "duration": span["duration"],
-                        "localEndpoint": {"serviceName": span.get("serviceName", "unknown")},
-                        "parentId": span.get("parentSpanId"),
-                        "tags": {t["key"]: str(t["value"]) for t in span.get("tags", [])},
-                    }
-                    for span in spans
-                ]
-            else:  # otlp
-                trace_output = {
-                    "resourceSpans": [
-                        {
-                            "resource": {
-                                "attributes": [
-                                    {
-                                        "key": "service.name",
-                                        "value": {"stringValue": "logler-export"},
-                                    }
-                                ]
-                            },
-                            "scopeSpans": [
-                                {
-                                    "scope": {"name": "logler"},
-                                    "spans": [
-                                        {
-                                            "traceId": span["traceId"],
-                                            "spanId": span["spanId"],
-                                            "name": span["operationName"],
-                                            "startTimeUnixNano": span.get("startTime"),
-                                            "endTimeUnixNano": None,
-                                            "parentSpanId": span.get("parentSpanId"),
-                                        }
-                                        for span in spans
-                                    ],
-                                }
-                            ],
-                        }
-                    ]
-                }
-
-            output = {
-                "identifier": identifier,
-                "format": export_format,
-                "span_count": len(spans),
-                "export": trace_output,
-            }
-
-            _output_json(output, pretty)
-            sys.exit(EXIT_SUCCESS)
-
-        except Exception as e:
-            _error_json(f"Internal error: {str(e)}", EXIT_INTERNAL_ERROR)
+        _output_json(output, pretty)
+        sys.exit(EXIT_SUCCESS)

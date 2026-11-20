@@ -9,9 +9,9 @@ Logler is a Rust-powered log investigation tool optimized for AI agents. It uses
 │                        Python Layer                               │
 │                                                                    │
 │  ┌─────────────────────┐  ┌──────────────────────────────────┐  │
-│  │   cli.py (Human)    │  │    llm_cli.py (LLM Agent)       │  │
+│  │   cli.py (Human)    │  │    llm_cli/ (LLM Agent)         │  │
 │  │                     │  │                                    │  │
-│  │  - view             │  │  - 17 JSON commands                │  │
+│  │  - view             │  │  - 30 JSON commands                │  │
 │  │  - stats            │  │  - Pagination, compact mode        │  │
 │  │  - investigate      │  │  - Max-bytes truncation            │  │
 │  │  - watch            │  │  - Consistent exit codes           │  │
@@ -102,18 +102,27 @@ Wraps Rust calls with Python ergonomics. Adds:
 - Cross-service timeline
 - Report generation
 
+The module-level functions (`search()`, `follow_thread()`, `extract_ids()` and the rest) share
+a cache of parsed files (`cache.py`): up to 10 sets of files are kept, and a set is parsed
+again when one of its files, or the `.logler/formats.yaml` that applies to it, has changed.
+So a second call on the same files does not parse them again. An `Investigator` holds its
+own index for as long as it lives.
+
 ### Human CLI (`src/logler/cli.py`)
 
 Rich terminal output for human users: `view`, `stats`, `investigate`, `watch`.
 
-### LLM CLI (`src/logler/llm_cli.py`)
+### LLM CLI (`src/logler/llm_cli/`)
 
-17 JSON-output commands optimized for AI agents:
-- Assessment: `triage`, `summarize`
-- Search: `search`, `ids`, `schema`, `sample`
-- Tracing: `correlate`, `hierarchy`, `bottleneck`, `compare`
-- Analysis: `sql`, `verify-pattern`, `diff`, `context`
-- Utilities: `emit`, `export`, `session`
+A package of 30 JSON-output commands optimized for AI agents:
+- Assessment: `triage`, `summarize`, `schema`
+- Search: `search`, `ids`, `sample`, `sql`
+- Tracing: `correlate`, `hierarchy`, `bottleneck`, `context`, `export`
+- Comparison: `compare`, `diff`
+- Sessions: `session create`, `list`, `query`, `note`, `conclude`
+- Formats: `detect`, `templates`, `format list`, `test`, `validate`
+- Correlation: `correlation list`, `run`, `correlate-events`
+- Metrics and checks: `metrics`, `verify-pattern`, `emit`
 
 Key features: `--count-only`, `--offset` pagination, `--compact` mode,
 `--metadata-only`, `--max-bytes` truncation, relative `--after`/`--before`.
@@ -122,13 +131,13 @@ Key features: `--count-only`, `--offset` pagination, `--compact` mode,
 
 ### Search Query
 ```
-CLI args → llm_cli.py → investigate.py → logler_rs (PyO3) → Rust search
+CLI args → llm_cli/   → investigate.py → logler_rs (PyO3) → Rust search
                                                                 │
                                                           Parse all files
                                                           Apply filters
                                                           Return JSON
                                                                 │
-CLI JSON ← llm_cli.py ← investigate.py ← logler_rs ←──────────┘
+CLI JSON ← llm_cli/   ← investigate.py ← logler_rs ←──────────┘
 ```
 
 ### Hierarchy Build
@@ -145,24 +154,33 @@ JSON tree ← investigate.py ← logler_rs ←─────┘
 
 ## Performance
 
-- **Search**: <50ms for 1GB files (~20 GB/s throughput)
-- **Thread follow**: <20ms for 1GB files
-- **Hierarchy build**: <100ms for 1GB files
-- **Parallel indexing**: Uses rayon for multi-core file loading
+The measured numbers, with the machine they were measured on, are in
+[docs/benchmarks/REPORT.md](docs/benchmarks/REPORT.md). Files of 1 GB and more are not
+benchmarked.
+
+Indexing uses rayon to parse on every core.
+
+## Memory and Limits
+
+- **The index holds all entries in memory.** The Rust backend (`PyInvestigator`) parses entire files into an in-memory index. At 600K+ entries, `load_files()` alone uses ~800 MB. Mitigations: `Investigator(sql_db_path=...)` for disk-backed DuckDB, engine caching to avoid redundant rebuilds, and two-phase search (filter and score with lightweight ~40-byte candidates, materialize only the final N results), which keeps `search()` from amplifying the index cost. A `DEFAULT_MAX_RESULTS` (10K) safety cap prevents unbounded queries; `limit=0` removes it. `count_only=True` skips materialization entirely, and `offset` pages without re-materializing skipped entries. Deferred: Rust-side loading that indexes file offsets without holding all entries in memory.
+- **comparison.py.** `compare_time_periods()` pushes time windows to Rust via `time_start`/`time_end` instead of materialising all entries. The `cross_service_timeline()` fallback (no correlation or trace ID) is capped at `_DEFAULT_TIMELINE_LIMIT` (10K). `_analyze_thread()` computes duration from `min()`/`max()` timestamps, so unsorted input does not skew it.
+- **One SQL loader.** `sql.py`'s `SqlEngine.load_entries()` serves `llm sql` and `Investigator.sql_query()`: rows are staged to a temporary CSV and bulk-loaded with DuckDB's `read_csv`, a chunk at a time, and the CSV is removed when the load ends or fails. `Investigator._get_sql_engine()` feeds it from the Rust index with `get_entries_page(offset, limit)` in pages of 10,000, on the first SQL call; the engine is kept until `load_files()` is called again.
+- **BSD syslog without a `<priority>` prefix** has no parsed timestamp, so time filters cannot select those entries. Its level is inferred from the message (auth failures are ERROR, out of memory is FATAL, and so on).
 
 ## Build & Test
 
 ```bash
-cargo build --release --all          # Build Rust
-uv sync --all-groups                  # Install Python deps
-cargo test --workspace                # 26 Rust tests
-uv run pytest                         # 680+ Python tests
+uv sync --extra dev                   # Build the extension, install the Python deps and dev tools
+cargo test --workspace                # Rust tests
+uv run pytest                         # Python tests
 ```
 
-After Rust changes, copy the `.so` manually:
+`uv sync` builds the Rust extension with maturin and puts it at
+`src/logler_rs/logler_rs.abi3.so`, one file for every supported Python version. It does not
+build again when only Rust sources change. After a Rust change:
+
 ```bash
-cp target/release/liblogler_rs.so \
-   .venv/lib/python3.12/site-packages/logler_rs/logler_rs.cpython-312-x86_64-linux-gnu.so
+uv sync --extra dev --reinstall-package logler
 ```
 
 ## Key Dependencies

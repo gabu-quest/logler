@@ -6,20 +6,20 @@ real file operations, edge cases, and adversarial inputs.
 """
 
 import json
-import pytest
 import tempfile
 from pathlib import Path
 
+import pytest
 
 # Import with Rust backend check
 try:
     from logler.investigate import (
-        search,
+        RUST_AVAILABLE,
+        InvestigationSession,
+        Investigator,
         follow_thread,
         get_context,
-        Investigator,
-        InvestigationSession,
-        RUST_AVAILABLE,
+        search,
     )
 except ImportError as e:
     if "logler_rs" in str(e):
@@ -335,17 +335,17 @@ class TestGetContext:
 
     def test_context_line_zero(self, temp_log_file):
         """Get context at line 0 - should raise ValueError (lines are 1-indexed)"""
-        with pytest.raises((ValueError, IndexError, RuntimeError)):
+        with pytest.raises(ValueError):
             get_context(file=temp_log_file, line_number=0, lines_before=5, lines_after=5)
 
     def test_context_negative_line(self, temp_log_file):
         """Get context at negative line - should raise ValueError"""
-        with pytest.raises((ValueError, IndexError, RuntimeError, OverflowError)):
+        with pytest.raises(ValueError):
             get_context(file=temp_log_file, line_number=-1, lines_before=5, lines_after=5)
 
     def test_context_past_end_of_file(self, temp_log_file):
-        """Get context past end of file - should raise IndexError"""
-        with pytest.raises((RuntimeError, IndexError)):
+        """Get context past end of file - should raise ValueError"""
+        with pytest.raises(ValueError):
             get_context(file=temp_log_file, line_number=99999, lines_before=5, lines_after=5)
 
 
@@ -669,11 +669,15 @@ class TestSpecialCharacterHandling:
         assert total >= 1, "Should find entry containing 'SELECT *'"
 
     def test_search_with_caret(self, special_char_file):
-        """Search with caret - should find regex entry"""
-        result = search(files=[special_char_file], query="^[a-z]")
-        assert "results" in result or "total_matches" in result
-        total = result.get("total_matches", len(result.get("results", [])))
-        assert total >= 1, "Should find entry containing '^[a-z]'"
+        """A query is a regex: the escaped pattern finds the text, the bare one anchors"""
+        literal = search(files=[special_char_file], query=r"\^\[a-z\]")
+        assert literal["total_matches"] == 1
+        assert literal["results"][0]["entry"]["message"] == "Regex: ^[a-z]+$"
+        # The caret holds at the start of the line or of the message: one message starts so
+        anchored = search(files=[special_char_file], query="^regex")
+        assert anchored["total_matches"] == 1
+        assert anchored["results"][0]["entry"]["message"] == "Regex: ^[a-z]+$"
+        assert search(files=[special_char_file], query="^[a-z]+$")["total_matches"] == 0
 
     def test_search_with_unicode(self, special_char_file):
         """Search with unicode characters - should find Japanese text"""

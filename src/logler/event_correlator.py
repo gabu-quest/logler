@@ -12,19 +12,24 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from . import investigate
 from .config import EventCondition, parse_duration
-from .correlator import _matches_anchor, _make_virtual_trace_id, _parse_entry_timestamp
+from .correlator import (
+    _entry_time_text,
+    _make_virtual_trace_id,
+    _matches_anchor,
+    _parse_entry_timestamp,
+)
 
 
 def search_around_timestamp(
-    files: List[str],
+    files: list[str],
     anchor_timestamp: str,
     window: str = "5s",
     **search_kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Search all files for events within a time window around a timestamp.
 
     Uses the Rust search engine's time_range filtering for performance.
@@ -39,7 +44,7 @@ def search_around_timestamp(
         Search results with window metadata added.
     """
     delta = parse_duration(window)
-    anchor_dt = datetime.fromisoformat(anchor_timestamp.replace("Z", "+00:00"))
+    anchor_dt = datetime.fromisoformat(anchor_timestamp)
 
     time_start = (anchor_dt - delta).isoformat()
     time_end = (anchor_dt + delta).isoformat()
@@ -60,9 +65,9 @@ def search_around_timestamp(
 
 
 def find_trigger_events(
-    entries: List[Dict[str, Any]],
-    trigger: Dict[str, Any],
-) -> List[Dict[str, Any]]:
+    entries: list[dict[str, Any]],
+    trigger: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Find entries matching trigger conditions.
 
     Args:
@@ -98,13 +103,13 @@ def find_trigger_events(
 
 
 def correlate_events(
-    files: List[str],
-    anchor_entry: Optional[Dict[str, Any]] = None,
-    anchor_timestamp: Optional[str] = None,
-    trigger: Optional[Dict[str, Any]] = None,
+    files: list[str],
+    anchor_entry: dict[str, Any] | None = None,
+    anchor_timestamp: str | None = None,
+    trigger: dict[str, Any] | None = None,
     window: str = "5s",
-    limit: Optional[int] = None,
-) -> Dict[str, Any]:
+    limit: int | None = None,
+) -> dict[str, Any]:
     """Cross-file event correlation.
 
     Finds all events across multiple files within a time window around
@@ -125,7 +130,7 @@ def correlate_events(
         Dict with clusters, total_clusters, total_entries_correlated,
         files_searched, window.
     """
-    clusters: List[Dict[str, Any]] = []
+    clusters: list[dict[str, Any]] = []
     delta = parse_duration(window)
 
     if anchor_entry is not None:
@@ -170,11 +175,11 @@ def correlate_events(
 
 
 def _correlate_around_entry(
-    files: List[str],
-    anchor_entry: Dict[str, Any],
+    files: list[str],
+    anchor_entry: dict[str, Any],
     delta,
     window: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Build a correlation cluster around a specific entry."""
     anchor_ts = _parse_entry_timestamp(anchor_entry)
     if anchor_ts is None:
@@ -197,7 +202,7 @@ def _correlate_around_entry(
     return {
         "virtual_trace_id": vtid,
         "rule_type": "event_window",
-        "anchor_timestamp": anchor_ts.isoformat(),
+        "anchor_timestamp": _entry_time_text(anchor_entry, anchor_ts),
         "anchor_message": anchor_msg,
         "anchor_file": Path(anchor_entry.get("file", "")).name,
         "anchor_line": anchor_entry.get("line_number"),
@@ -208,13 +213,13 @@ def _correlate_around_entry(
 
 
 def _correlate_around_timestamp(
-    files: List[str],
+    files: list[str],
     anchor_timestamp: str,
     delta,
     window: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Build a correlation cluster around a timestamp."""
-    anchor_dt = datetime.fromisoformat(anchor_timestamp.replace("Z", "+00:00"))
+    anchor_dt = datetime.fromisoformat(anchor_timestamp)
 
     result = investigate.search(
         files=files,
@@ -239,35 +244,30 @@ def _correlate_around_timestamp(
 
 
 def _correlate_by_trigger(
-    files: List[str],
-    trigger: Dict[str, Any],
+    files: list[str],
+    trigger: dict[str, Any],
     delta,
     window: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Find trigger events and build correlation clusters around each."""
-    clusters: List[Dict[str, Any]] = []
+    clusters: list[dict[str, Any]] = []
 
     # Use Rust search with level/query filters for efficient trigger finding
-    search_kwargs: Dict[str, Any] = {}
+    search_kwargs: dict[str, Any] = {}
     if trigger.get("level"):
         search_kwargs["level"] = trigger["level"]
     if trigger.get("pattern"):
         search_kwargs["query"] = trigger["pattern"]
 
     # Load candidate trigger entries
-    all_candidates: List[Dict[str, Any]] = []
+    all_candidates: list[dict[str, Any]] = []
     for fp in files:
-        try:
-            result = investigate.search(files=[fp], **search_kwargs)
-            for item in result.get("results", []):
-                all_candidates.append(item.get("entry", item))
-        except Exception:
-            pass
+        result = investigate.search(files=[fp], **search_kwargs)
+        for item in result.get("results", []):
+            all_candidates.append(item.get("entry", item))
 
     # If field/condition specified, filter further
-    if trigger.get("field") and trigger.get("condition"):
-        trigger_entries = find_trigger_events(all_candidates, trigger)
-    elif trigger.get("file_pattern"):
+    if (trigger.get("field") and trigger.get("condition")) or trigger.get("file_pattern"):
         trigger_entries = find_trigger_events(all_candidates, trigger)
     else:
         trigger_entries = all_candidates
@@ -306,7 +306,7 @@ def _correlate_by_trigger(
                     "virtual_trace_id": vtid,
                     "rule_type": "event_trigger",
                     "trigger": trigger,
-                    "anchor_timestamp": trigger_ts.isoformat(),
+                    "anchor_timestamp": _entry_time_text(trigger_entry, trigger_ts),
                     "anchor_message": trigger_msg,
                     "anchor_file": Path(trigger_entry.get("file", "")).name,
                     "anchor_line": trigger_entry.get("line_number"),

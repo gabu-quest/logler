@@ -6,6 +6,7 @@ import json
 import random
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 
 class LogGenerator:
@@ -15,13 +16,19 @@ class LogGenerator:
     spans, and varied message templates.
     """
 
-    LEVELS = ["DEBUG", "INFO", "WARN", "ERROR"]
-    LEVEL_WEIGHTS = [0.1, 0.6, 0.2, 0.1]
+    LEVELS: ClassVar[list[str]] = ["DEBUG", "INFO", "WARN", "ERROR"]
+    LEVEL_WEIGHTS: ClassVar[list[float]] = [0.1, 0.6, 0.2, 0.1]
 
-    SERVICES = ["api-gateway", "auth-service", "user-service", "order-service", "cache-service"]
+    SERVICES: ClassVar[list[str]] = [
+        "api-gateway",
+        "auth-service",
+        "user-service",
+        "order-service",
+        "cache-service",
+    ]
 
-    HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"]
-    HTTP_PATHS = [
+    HTTP_METHODS: ClassVar[list[str]] = ["GET", "POST", "PUT", "DELETE", "PATCH"]
+    HTTP_PATHS: ClassVar[list[str]] = [
         "/api/users",
         "/api/orders",
         "/api/products",
@@ -33,14 +40,41 @@ class LogGenerator:
         "/api/inventory",
         "/api/payments",
     ]
-    HTTP_STATUSES = [200, 200, 200, 201, 204, 301, 400, 401, 403, 404, 500, 502, 503]
+    HTTP_STATUSES: ClassVar[list[int]] = [
+        200,
+        200,
+        200,
+        201,
+        204,
+        301,
+        400,
+        401,
+        403,
+        404,
+        500,
+        502,
+        503,
+    ]
 
-    DB_TABLES = ["users", "orders", "products", "sessions", "inventory", "payments"]
-    DB_OPS = ["SELECT", "INSERT", "UPDATE", "DELETE"]
+    DB_TABLES: ClassVar[list[str]] = [
+        "users",
+        "orders",
+        "products",
+        "sessions",
+        "inventory",
+        "payments",
+    ]
+    DB_OPS: ClassVar[list[str]] = ["SELECT", "INSERT", "UPDATE", "DELETE"]
 
-    CACHE_KEYS = ["user:{}", "session:{}", "product:{}", "config:{}", "rate_limit:{}"]
+    CACHE_KEYS: ClassVar[list[str]] = [
+        "user:{}",
+        "session:{}",
+        "product:{}",
+        "config:{}",
+        "rate_limit:{}",
+    ]
 
-    ERROR_MESSAGES = [
+    ERROR_MESSAGES: ClassVar[list[str]] = [
         "Connection refused to {}:{}",
         "Timeout after {}ms waiting for {}",
         "Failed to parse response from {}",
@@ -53,7 +87,7 @@ class LogGenerator:
         "DNS resolution failed for {}",
     ]
 
-    INFO_TEMPLATES = [
+    INFO_TEMPLATES: ClassVar[list[str]] = [
         "Request received from {}",
         "Processing batch of {} items",
         "Cache {} for key={}",

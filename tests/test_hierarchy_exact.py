@@ -20,9 +20,10 @@ import pytest
 
 try:
     from logler.investigate import (
-        analyze_bottlenecks,
-        get_hierarchy_summary,
         RUST_AVAILABLE,
+        analyze_bottlenecks,
+        follow_thread_hierarchy,
+        get_hierarchy_summary,
     )
     from logler.tree_formatter import format_tree, format_waterfall
 except ImportError as e:
@@ -81,9 +82,9 @@ class TestHierarchyDuration:
 
     def test_total_duration_exact(self, deterministic_hierarchy):
         """Total duration should be exactly 1000ms."""
-        assert (
-            deterministic_hierarchy["total_duration_ms"] == 1000
-        ), f"Total duration should be 1000ms, got {deterministic_hierarchy['total_duration_ms']}ms"
+        assert deterministic_hierarchy["total_duration_ms"] == 1000, (
+            f"Total duration should be 1000ms, got {deterministic_hierarchy['total_duration_ms']}ms"
+        )
 
 
 class TestHierarchyBottleneck:
@@ -94,25 +95,25 @@ class TestHierarchyBottleneck:
         bottleneck = deterministic_hierarchy.get("bottleneck")
 
         assert bottleneck is not None, "Bottleneck should be identified"
-        assert (
-            bottleneck["node_id"] == "child-slow"
-        ), f"Bottleneck should be 'child-slow', got '{bottleneck['node_id']}'"
+        assert bottleneck["node_id"] == "child-slow", (
+            f"Bottleneck should be 'child-slow', got '{bottleneck['node_id']}'"
+        )
 
     def test_bottleneck_duration_exact(self, deterministic_hierarchy):
         """Bottleneck duration should be exactly 800ms."""
         bottleneck = deterministic_hierarchy["bottleneck"]
 
-        assert (
-            bottleneck["duration_ms"] == 800
-        ), f"Bottleneck duration should be 800ms, got {bottleneck['duration_ms']}ms"
+        assert bottleneck["duration_ms"] == 800, (
+            f"Bottleneck duration should be 800ms, got {bottleneck['duration_ms']}ms"
+        )
 
     def test_bottleneck_percentage_exact(self, deterministic_hierarchy):
         """Bottleneck percentage should be exactly 80.0%."""
         bottleneck = deterministic_hierarchy["bottleneck"]
 
-        assert (
-            bottleneck["percentage"] == 80.0
-        ), f"Bottleneck percentage should be 80.0%, got {bottleneck['percentage']}%"
+        assert bottleneck["percentage"] == 80.0, (
+            f"Bottleneck percentage should be 80.0%, got {bottleneck['percentage']}%"
+        )
 
     def test_bottleneck_depth_exact(self, deterministic_hierarchy):
         """Bottleneck depth should be 1 (child of root)."""
@@ -125,28 +126,50 @@ class TestAnalyzeBottlenecks:
     """Test analyze_bottlenecks function with exact thresholds."""
 
     def test_identifies_child_slow_as_bottleneck(self, deterministic_hierarchy):
-        """analyze_bottlenecks should identify child-slow."""
+        """At a 20% threshold the primary bottleneck is child-slow: 800 ms of 1000 ms."""
         result = analyze_bottlenecks(deterministic_hierarchy, threshold_percentage=20.0)
 
-        # Should identify at least one bottleneck
-        bottlenecks = result.get("bottlenecks", result.get("analysis", {}).get("bottlenecks", []))
-        primary = result.get("primary_bottleneck")
+        assert result["primary_bottleneck"] == {
+            "node_id": "child-slow",
+            "duration_ms": 800,
+            "percentage": 80.0,
+            "depth": 1,
+        }
 
-        # Either in bottlenecks list or as primary
-        if primary:
-            assert "slow" in str(primary).lower() or primary.get("node_id") == "child-slow"
-        elif bottlenecks:
-            bottleneck_ids = [b.get("node_id", str(b)) for b in bottlenecks]
-            assert "child-slow" in bottleneck_ids or any(
-                "slow" in str(b).lower() for b in bottlenecks
-            )
+    def test_threshold_filters_the_secondary_list_not_the_primary(self, deterministic_hierarchy):
+        """At a 90% threshold the primary is still child-slow and nothing is secondary.
 
-    def test_high_threshold_filters_minor_nodes(self, deterministic_hierarchy):
-        """90% threshold should still identify child-slow (80%)."""
+        The primary is the hierarchy's own bottleneck, which has no minimum share. The
+        threshold filters the secondary list, which is measured as the primary is, by
+        self-time: the root spends all 1000 ms inside its children (0 ms of its own), and
+        the two 100 ms children are 10% each.
+        """
         result = analyze_bottlenecks(deterministic_hierarchy, threshold_percentage=90.0)
 
-        # With 90% threshold, child-slow (80%) should NOT qualify as a bottleneck
-        assert "bottlenecks" in result or "analysis" in result or "primary_bottleneck" in result
+        assert result["primary_bottleneck"] == {
+            "node_id": "child-slow",
+            "duration_ms": 800,
+            "percentage": 80.0,
+            "depth": 1,
+        }
+        assert result["secondary_bottlenecks"] == []
+
+    def test_secondary_list_is_the_other_nodes_by_self_time(self, deterministic_hierarchy):
+        """The secondary list holds neither the primary nor a node that only encloses it.
+
+        The primary is child-slow: the most self-time (800 ms), not the longest node (the
+        root, 1000 ms). The secondary list is the other nodes by the same measure. The root
+        has no time of its own, so it is not a bottleneck; the two 100 ms children are 10%
+        each. Skipping position 0 of the list by duration took the root out and left
+        child-slow, the primary, in.
+        """
+        result = analyze_bottlenecks(deterministic_hierarchy, threshold_percentage=10.0)
+
+        assert result["primary_bottleneck"]["node_id"] == "child-slow"
+        assert [
+            (n["id"], n["self_time_ms"], n["self_percentage"])
+            for n in result["secondary_bottlenecks"]
+        ] == [("child-fast", 100, 10.0), ("child-medium", 100, 10.0)]
 
 
 class TestHierarchyNodeCounts:
@@ -154,15 +177,15 @@ class TestHierarchyNodeCounts:
 
     def test_total_nodes_exact(self, deterministic_hierarchy):
         """Total nodes should be exactly 4 (root + 3 children)."""
-        assert (
-            deterministic_hierarchy["total_nodes"] == 4
-        ), f"Total nodes should be 4, got {deterministic_hierarchy['total_nodes']}"
+        assert deterministic_hierarchy["total_nodes"] == 4, (
+            f"Total nodes should be 4, got {deterministic_hierarchy['total_nodes']}"
+        )
 
     def test_max_depth_exact(self, deterministic_hierarchy):
         """Max depth should be exactly 1."""
-        assert (
-            deterministic_hierarchy["max_depth"] == 1
-        ), f"Max depth should be 1, got {deterministic_hierarchy['max_depth']}"
+        assert deterministic_hierarchy["max_depth"] == 1, (
+            f"Max depth should be 1, got {deterministic_hierarchy['max_depth']}"
+        )
 
 
 class TestHierarchyNameExtraction:
@@ -173,9 +196,9 @@ class TestHierarchyNameExtraction:
         tree = format_tree(hierarchy_with_names, use_colors=False)
 
         # Should show "HTTP POST /checkout" from the operation_name/name field
-        assert (
-            "HTTP POST /checkout" in tree
-        ), f"Tree should show 'HTTP POST /checkout', got:\n{tree}"
+        assert "HTTP POST /checkout" in tree, (
+            f"Tree should show 'HTTP POST /checkout', got:\n{tree}"
+        )
 
     def test_child_node_uses_name(self, hierarchy_with_names):
         """Child node with name should use that name."""
@@ -189,9 +212,9 @@ class TestHierarchyNameExtraction:
         tree = format_tree(hierarchy_with_names, use_colors=False)
 
         # Node "node-fallback-to-id" has no name, should show its ID
-        assert (
-            "node-fallback-to-id" in tree or "fallback" in tree.lower()
-        ), f"Tree should show node ID when name is missing, got:\n{tree}"
+        assert "node-fallback-to-id" in tree or "fallback" in tree.lower(), (
+            f"Tree should show node ID when name is missing, got:\n{tree}"
+        )
 
 
 class TestHierarchySummary:
@@ -208,9 +231,9 @@ class TestHierarchySummary:
         summary = get_hierarchy_summary(deterministic_hierarchy)
 
         # Should mention the bottleneck node or percentage
-        assert (
-            "child-slow" in summary or "slow" in summary.lower() or "80" in summary
-        ), f"Summary should include bottleneck info, got:\n{summary}"
+        assert "child-slow" in summary or "slow" in summary.lower() or "80" in summary, (
+            f"Summary should include bottleneck info, got:\n{summary}"
+        )
 
 
 class TestTreeFormatting:
@@ -231,9 +254,9 @@ class TestTreeFormatting:
         tree = format_tree(deterministic_hierarchy, mode="detailed", use_colors=False)
 
         # Should show duration values
-        assert (
-            "1000" in tree or "800" in tree or "100" in tree
-        ), f"Detailed tree should show durations, got:\n{tree}"
+        assert "1000" in tree or "800" in tree or "100" in tree, (
+            f"Detailed tree should show durations, got:\n{tree}"
+        )
 
     def test_tree_respects_max_depth(self, deterministic_hierarchy):
         """max_depth limits how deep the tree is rendered."""
@@ -358,9 +381,9 @@ class TestHierarchyEntryCount:
         node = find_node(deterministic_hierarchy, node_id)
 
         assert node is not None, f"Node {node_id} not found"
-        assert (
-            node["entry_count"] == expected_entry_count
-        ), f"Node {node_id} should have {expected_entry_count} entries, got {node['entry_count']}"
+        assert node["entry_count"] == expected_entry_count, (
+            f"Node {node_id} should have {expected_entry_count} entries, got {node['entry_count']}"
+        )
 
     def test_leaf_entry_counts_sum_to_direct_entries(self, deterministic_hierarchy):
         """Leaf node entry counts should sum to total direct entries."""
@@ -374,6 +397,33 @@ class TestHierarchyEntryCount:
             node = find_node(deterministic_hierarchy, child_id)
             total += node["entry_count"]
 
-        assert (
-            total == expected_total
-        ), f"Total direct entries should be {expected_total}, got {total}"
+        assert total == expected_total, (
+            f"Total direct entries should be {expected_total}, got {total}"
+        )
+
+
+class TestHierarchyEachLogLineOnce:
+    """A request tree counts each log line once, however many lines its parent span has."""
+
+    LINES = (
+        '{"timestamp":"2026-11-14T10:00:00.000Z","level":"INFO","message":"request start","thread_id":"req-123","span_id":"a","service":"api"}',
+        '{"timestamp":"2026-11-14T10:00:00.050Z","level":"INFO","message":"auth ok","thread_id":"req-123","span_id":"b","parent_span_id":"a","service":"auth"}',
+        '{"timestamp":"2026-11-14T10:00:00.450Z","level":"ERROR","message":"Redis connection refused","thread_id":"req-123","span_id":"c","parent_span_id":"a","service":"cache"}',
+        '{"timestamp":"2026-11-14T10:00:00.520Z","level":"INFO","message":"request done","thread_id":"req-123","span_id":"a","service":"api"}',
+        '{"timestamp":"2026-11-14T10:00:01.000Z","level":"ERROR","message":"timeout talking to db","thread_id":"req-124","span_id":"d","service":"api"}',
+    )
+
+    def test_child_spans_of_a_two_line_parent_count_their_one_line_once(self, tmp_path):
+        log = tmp_path / "app.log"
+        log.write_text("\n".join(self.LINES) + "\n")
+        tree = follow_thread_hierarchy([str(log)], root_identifier="req-123")
+
+        root = find_node(tree, "a")
+        span_b = find_node(tree, "b")
+        span_c = find_node(tree, "c")
+        assert root["entry_count"] == 2
+        assert span_b["entry_count"] == 1
+        assert span_c["entry_count"] == 1
+        assert span_c["error_count"] == 1
+        assert span_c["level_counts"] == {"ERROR": 1}
+        assert len(span_c["entry_ids"]) == 1

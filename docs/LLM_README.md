@@ -8,8 +8,8 @@ Logler now includes a **Rust-powered investigation engine** specifically designe
 
 ## ⚡ Key Features
 
-- **🚀 Blazing Fast**: Rust backend with parallel processing - search 1GB files in <50ms
-- **🔍 Semantic Search**: Find errors by description, not just exact matches
+- **🚀 Fast**: Rust backend that parses on every core ([measured numbers](benchmarks/REPORT.md))
+- **🔍 Search**: Filter by text, level, thread, correlation ID, service and time
 - **🧵 Thread Following**: Reconstruct request flows across distributed systems
 - **🌳 Hierarchy Visualization**: Tree and waterfall views with bottleneck detection
 - **📈 Statistical Analysis**: Get insights about error rates, response times, anomalies
@@ -88,10 +88,15 @@ results = investigate.search(
     tail=20,                        # Last 20 by timestamp
     time_start="2024-01-15T10:00:00Z",  # Time range
     time_end="2024-01-15T11:00:00Z",
-    context_lines=3,                # Include 3 lines before/after
+    context_lines=3,                # Include 3 entries before/after
     fields=["timestamp", "level", "message"],  # Project fields
 )
 ```
+
+`query` and `exclude_query` are each one regex, matched without regard to letter case against
+the whole line as written in the file (a JSON line: its keys and other fields too) and against
+the message read from it. A pattern that is not a regex raises `ValueError`. Use `a|b` to ask
+for either of two words.
 
 **Output:**
 ```json
@@ -109,7 +114,7 @@ results = investigate.search(
       },
       "context_before": [...],
       "context_after": [...],
-      "relevance_score": 0.95
+      "relevance_score": 1.0
     }
   ],
   "total_matches": 247,
@@ -154,8 +159,9 @@ metadata = investigate.get_metadata(files=["app.log"])
   {
     "path": "app.log",
     "size_bytes": 10485760,
-    "lines": 52341,
-    "format": "json",
+    "lines": 52400,    # lines of the file, blank ones too
+    "entry_count": 52341,  # a blank line is no entry
+    "format": "Json",
     "time_range": {
       "start": "2024-01-15T00:00:00Z",
       "end": "2024-01-15T23:59:59Z"
@@ -215,7 +221,7 @@ import logler.investigate as investigate
 
 # Step 1: Get overview
 metadata = investigate.get_metadata(files=["app.log"])
-print(f"Analyzing {metadata[0]['lines']} log entries")
+print(f"Analyzing {metadata[0]['entry_count']} log entries")
 print(f"Time range: {metadata[0]['time_range']['start']} to {metadata[0]['time_range']['end']}")
 print(f"Error count: {metadata[0]['log_levels']['ERROR']}")
 
@@ -279,36 +285,28 @@ for entry in context['context_before']:
 │  - Fast log parsing                 │
 │  - In-memory indexing               │
 │  - Parallel processing (Rayon)      │
-│  - Memory-mapped I/O                │
 └─────────────────────────────────────┘
 ```
 
 ## ⚡ Performance
 
-| Operation | File Size | Time | Throughput |
-|-----------|-----------|------|------------|
-| Search | 1GB | <50ms | 20 GB/s |
-| Follow thread | 1GB | <20ms | 50 GB/s |
-| Build hierarchy | 1GB | <100ms | 10 GB/s |
-| Build index | 1GB | <500ms | 2 GB/s |
-
-**Memory usage:**
-- Base: <100MB
-- 1GB file indexed: ~200MB
-- 10GB file indexed: ~2GB
+The measured numbers, with the machine they were measured on, are in the
+[benchmark report](benchmarks/REPORT.md); [PERFORMANCE.md](PERFORMANCE.md) says what costs
+time and memory. Files of 1 GB and more are not benchmarked.
 
 ## 🎨 Supported Log Formats
 
 - **JSON**: Structured logs with automatic field extraction
 - **Plain text**: Pattern-based parsing for timestamps, levels, threads
-- **Syslog**: Standard syslog format
-- **Custom**: Extensible parser
+- **Syslog**: RFC 3164 and RFC 5424
+- **logfmt** and **Apache common log format**
+- **Custom**: a regex with named groups in `.logler/formats.yaml`, applied to the files it names
 
 ## 🔍 What Makes This LLM-Friendly?
 
 1. **Fast responses**: Results in milliseconds, not seconds
 2. **Structured output**: All results are JSON for easy parsing
-3. **Semantic relevance**: Search results ranked by relevance
+3. **Order**: Results come in time order; `relevance_score` is 1.0 on every result
 4. **Context included**: Get surrounding log lines automatically
 5. **Hierarchy visualization**: Tree views with bottleneck detection
 6. **Statistics**: Get aggregate insights for better understanding
@@ -352,15 +350,12 @@ timeline = investigate.follow_thread(
 
 - [ ] MCP (Model Context Protocol) server for Claude Desktop integration
 - [ ] WebSocket streaming for real-time log following
-- [ ] DuckDB backend for SQL queries on logs
-- [ ] Anomaly detection using statistical models
-- [ ] Log correlation across multiple services
 - [ ] Custom parser plugins
 - [ ] Visualization API
 
 ## 📖 API Documentation
 
-Full API documentation available at: [docs/LLM_INVESTIGATION_API.md](LLM_INVESTIGATION_API.md)
+The Python API and its tested contracts: [API.md](API.md). Every `logler llm` command: [LLM_CLI_REFERENCE.md](LLM_CLI_REFERENCE.md).
 
 ## 🤝 Contributing
 
@@ -368,7 +363,7 @@ The Rust core is designed to be extended. To add new investigation tools:
 
 1. Add the function to `crates/logler-core/src/investigate.rs`
 2. Expose it via PyO3 in `crates/logler-py/src/lib.rs`
-3. Add Python wrapper in `logler/investigate.py`
+3. Add Python wrapper in `src/logler/investigate.py`
 4. Update documentation
 
 ## 📄 License

@@ -5,8 +5,10 @@ These tests exist to break the parser in every conceivable way.
 If your parser survives this gauntlet, it might be production-ready.
 """
 
-import pytest
 import json
+
+import pytest
+
 from logler.parser import LogParser
 
 
@@ -244,17 +246,17 @@ class TestLogLevelEdgeCases:
             ("DEBUG", "DEBUG"),
             ("debug", "DEBUG"),
             ("INFO", "INFO"),
-            ("INFORMATION", "INFORMATION"),
+            ("INFORMATION", "INFO"),
             ("WARN", "WARN"),
-            ("WARNING", "WARNING"),
+            ("WARNING", "WARN"),
             ("warn", "WARN"),
             ("ERROR", "ERROR"),
-            ("ERR", "ERR"),
+            ("ERR", "ERROR"),
             ("error", "ERROR"),
             ("FATAL", "FATAL"),
             ("fatal", "FATAL"),
-            ("CRITICAL", "CRITICAL"),
-            ("CRIT", "CRIT"),
+            ("CRITICAL", "FATAL"),
+            ("CRIT", "FATAL"),
         ],
     )
     def test_level_case_variations(self, parser, level_str, expected):
@@ -265,8 +267,8 @@ class TestLogLevelEdgeCases:
     def test_level_embedded_in_word(self, parser):
         """Level embedded in another word shouldn't match incorrectly"""
         entry = parser.parse_line(1, "INFORMATION about DEBUGGING the ERROR in WARNING systems")
-        # Should pick the first valid level
-        assert entry.level in ["INFORMATION", "DEBUG", "ERROR", "WARN"]
+        # The first level word wins
+        assert entry.level == "INFO"
 
     def test_level_in_message_not_prefix(self, parser):
         """Level word in message body"""
