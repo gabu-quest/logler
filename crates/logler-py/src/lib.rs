@@ -2,6 +2,7 @@
 
 use logler_core::index::LoadError;
 use logler_core::investigate::{InvalidPattern, NoEntryAtLine};
+use logler_core::parser::TimestampFormat;
 use logler_core::*;
 use pyo3::create_exception;
 use pyo3::exceptions::PyValueError;
@@ -63,16 +64,23 @@ impl PyInvestigator {
             .map_err(engine_err)
     }
 
-    /// Load log files with optional parser config (force_format/custom_regex)
+    /// Load log files with optional parser config (force_format/custom_regex, and the
+    /// timestamp_format the custom regex's timestamp group is written in)
+    #[pyo3(signature = (files, force_format, custom_regex, timestamp_format=None))]
     fn load_files_with_config(
         &self,
         py: Python<'_>,
         files: Vec<String>,
         force_format: Option<String>,
         custom_regex: Option<String>,
+        timestamp_format: Option<String>,
     ) -> PyResult<()> {
         let paths = to_paths(&files);
-        let config = build_parser_config(force_format.as_deref(), custom_regex.as_deref())?;
+        let config = build_parser_config(
+            force_format.as_deref(),
+            custom_regex.as_deref(),
+            timestamp_format.as_deref(),
+        )?;
         py.detach(|| self.write().load_files_with_config(&paths, &config))
             .map_err(engine_err)
     }
@@ -255,13 +263,18 @@ struct PyLineParser {
 #[pymethods]
 impl PyLineParser {
     #[new]
-    #[pyo3(signature = (file_name=None, force_format=None, custom_regex=None))]
+    #[pyo3(signature = (file_name=None, force_format=None, custom_regex=None, timestamp_format=None))]
     fn new(
         file_name: Option<String>,
         force_format: Option<String>,
         custom_regex: Option<String>,
+        timestamp_format: Option<String>,
     ) -> PyResult<Self> {
-        let config = build_parser_config(force_format.as_deref(), custom_regex.as_deref())?;
+        let config = build_parser_config(
+            force_format.as_deref(),
+            custom_regex.as_deref(),
+            timestamp_format.as_deref(),
+        )?;
         Ok(Self {
             parser: config.build_for_file(file_name.unwrap_or_default()),
         })
@@ -305,10 +318,13 @@ fn logler_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-/// The one place a format name and a regex string become a `ParserConfig`.
+/// The one place a format name, a regex string and a timestamp format become a
+/// `ParserConfig`. A timestamp format is Python's strptime words and needs a custom regex;
+/// an empty one is no timestamp format.
 fn build_parser_config(
     force_format: Option<&str>,
     custom_regex: Option<&str>,
+    timestamp_format: Option<&str>,
 ) -> PyResult<logler_core::ParserConfig> {
     let mut config = logler_core::ParserConfig::new();
 
@@ -320,6 +336,17 @@ fn build_parser_config(
         let regex = Regex::new(re)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         config = config.with_custom_regex(regex);
+    }
+
+    if let Some(format) = timestamp_format.filter(|format| !format.is_empty()) {
+        if custom_regex.is_none() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "a timestamp_format reads the timestamp group of a custom_regex; give both",
+            ));
+        }
+        let compiled = TimestampFormat::compile(format)
+            .map_err(PyErr::new::<pyo3::exceptions::PyValueError, _>)?;
+        config = config.with_timestamp_format(compiled);
     }
 
     Ok(config)

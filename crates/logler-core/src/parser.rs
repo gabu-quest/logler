@@ -190,6 +190,227 @@ fn read_timestamp(text: &str) -> Option<DateTime<Utc>> {
     )
 }
 
+/// The part of a time a strptime word fills.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimePart {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+    Fraction,
+    Zone,
+}
+
+impl TimePart {
+    fn name(self) -> &'static str {
+        match self {
+            TimePart::Year => "year",
+            TimePart::Month => "month",
+            TimePart::Day => "day",
+            TimePart::Hour => "hour",
+            TimePart::Minute => "minute",
+            TimePart::Second => "second",
+            TimePart::Fraction => "fraction of a second",
+            TimePart::Zone => "zone",
+        }
+    }
+}
+
+const MONTHS: [&str; 12] = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+];
+
+/// What a strptime word reads: the part it fills and the pattern Python's `_strptime` gives it,
+/// with ASCII digits where Python takes any digit. Month names are English, in any letter case.
+fn strptime_word(word: char) -> Result<(TimePart, &'static str), String> {
+    Ok(match word {
+        'Y' => (TimePart::Year, "[0-9]{4}"),
+        'y' => (TimePart::Year, "[0-9]{2}"),
+        'm' => (TimePart::Month, "1[0-2]|0[1-9]|[1-9]"),
+        'b' => (
+            TimePart::Month,
+            "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec",
+        ),
+        'B' => (
+            TimePart::Month,
+            "september|february|november|december|january|october|august|april|march|july|june|may",
+        ),
+        'd' => (TimePart::Day, "3[01]|[12][0-9]|0[1-9]|[1-9]| [1-9]"),
+        'H' => (TimePart::Hour, "2[0-3]|[01][0-9]|[0-9]"),
+        'M' => (TimePart::Minute, "[0-5][0-9]|[0-9]"),
+        'S' => (TimePart::Second, "6[01]|[0-5][0-9]|[0-9]"),
+        'f' => (TimePart::Fraction, "[0-9]{1,6}"),
+        // Python's `%z`, but a colon is used throughout or not at all, and an offset holds
+        // no fraction of a second.
+        'z' => (
+            TimePart::Zone,
+            "[+-][0-9]{2}(?::[0-5][0-9](?::[0-5][0-9])?|[0-5][0-9](?:[0-5][0-9])?)|(?-i:Z)",
+        ),
+        'Z' => {
+            return Err(
+                "%Z is not supported: a zone name is read differently from machine to \
+                        machine; write the zone as an offset and read it with %z"
+                    .to_string(),
+            )
+        }
+        'a' | 'A' | 'c' | 'x' | 'X' | 'p' => {
+            return Err(format!(
+                "%{word} is read in the machine's language, which differs from machine to machine"
+            ))
+        }
+        _ => {
+            return Err(format!(
+                "%{word} is not supported; the words read are %Y %y %m %b %B %d %H %M %S %f %z \
+                 and %%"
+            ))
+        }
+    })
+}
+
+/// A format's `timestamp_format`: Python's `strptime` words, compiled once per load and read
+/// as `datetime.strptime` reads them. The text must be the whole of what the format describes
+/// (no text left over), white space in the format stands for any run of white space, and
+/// letters match in any case. A time without `%z` is UTC; a second 60 is a leap second, as
+/// in `read_timestamp`.
+#[derive(Debug, Clone)]
+pub struct TimestampFormat {
+    pattern: Regex,
+}
+
+impl TimestampFormat {
+    /// The format compiled, or why it cannot be: a word that is not read (the message names
+    /// it), a part given by two words, a lone `%` at the end, or no full date.
+    pub fn compile(format: &str) -> Result<Self, String> {
+        let mut pattern = String::from("(?i)^(?:");
+        let mut seen: Vec<(TimePart, char)> = Vec::new();
+        let mut chars = format.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '%' {
+                let Some(word) = chars.next() else {
+                    return Err("the format ends in a lone %; write a literal % as %%".to_string());
+                };
+                if word == '%' {
+                    pattern.push('%');
+                    continue;
+                }
+                let (part, word_pattern) = strptime_word(word)?;
+                if let Some((_, first)) = seen.iter().find(|(p, _)| *p == part) {
+                    return Err(format!(
+                        "the {} is given by two words, %{first} and %{word}",
+                        part.name()
+                    ));
+                }
+                seen.push((part, word));
+                pattern.push_str(&format!("(?P<{word}>{word_pattern})"));
+            } else if c.is_whitespace() {
+                while chars.next_if(|next| next.is_whitespace()).is_some() {}
+                pattern.push_str(r"\s+");
+            } else {
+                pattern.push_str(&regex::escape(c.encode_utf8(&mut [0; 4])));
+            }
+        }
+        pattern.push_str(")$");
+
+        let missing: Vec<&str> = [
+            (TimePart::Year, "year (%Y or %y)"),
+            (TimePart::Month, "month (%m, %b or %B)"),
+            (TimePart::Day, "day (%d)"),
+        ]
+        .iter()
+        .filter(|(part, _)| !seen.iter().any(|(p, _)| p == part))
+        .map(|(_, name)| *name)
+        .collect();
+        if let Some((last, rest)) = missing.split_last() {
+            let list = if rest.is_empty() {
+                format!("no {last}")
+            } else {
+                format!("no {} and no {last}", rest.join(", no "))
+            };
+            return Err(format!("a timestamp needs a date: the format has {list}"));
+        }
+
+        let pattern = Regex::new(&pattern).map_err(|e| e.to_string())?;
+        Ok(Self { pattern })
+    }
+
+    /// The instant `text` names, or `None` when the format does not fit all of it or the
+    /// date or time does not exist (31 February, hour 24).
+    pub fn read(&self, text: &str) -> Option<DateTime<Utc>> {
+        let caps = self.pattern.captures(text)?;
+        let digits = |name: &str| caps.name(name).map(|m| m.as_str().trim_start().as_bytes());
+        let field = |name: &str| digits(name).map_or(Some(0), number);
+
+        let year = match (digits("Y"), digits("y")) {
+            (Some(full), _) => number(full)? as i32,
+            // Python's pivot: 69 to 99 are the 1900s, 00 to 68 the 2000s.
+            (_, Some(short)) => match number(short)? as i32 {
+                short @ 0..=68 => 2000 + short,
+                short => 1900 + short,
+            },
+            _ => return None,
+        };
+        let month = match caps.name("b").or_else(|| caps.name("B")) {
+            Some(name) => {
+                let name = name.as_str().to_ascii_lowercase();
+                MONTHS.iter().position(|month| month.starts_with(&name))? as u32 + 1
+            }
+            None => field("m")?,
+        };
+        let date = NaiveDate::from_ymd_opt(year, month, field("d")?)?;
+
+        let nanos = match digits("f") {
+            Some(fraction) => number(fraction)? * 10u32.pow(9 - fraction.len() as u32),
+            None => 0,
+        };
+        // chrono keeps a leap second (`:60`) as second 59 with one more second of nanoseconds.
+        let (second, nanos) = match field("S")? {
+            60 => (59, nanos + 1_000_000_000),
+            second => (second, nanos),
+        };
+        let local = date.and_hms_nano_opt(field("H")?, field("M")?, second, nanos)?;
+
+        let east = match caps.name("z").map(|m| m.as_str().as_bytes()) {
+            None | Some(b"Z") => 0,
+            Some([sign, offset @ ..]) => {
+                let offset: Vec<u8> = offset.iter().copied().filter(|b| *b != b':').collect();
+                let (hours, rest) = offset.split_at(2);
+                let (minutes, seconds) = rest.split_at(2);
+                let seconds = if seconds.is_empty() {
+                    0
+                } else {
+                    number(seconds)?
+                };
+                let east = (number(hours)? * 3600 + number(minutes)? * 60 + seconds) as i32;
+                if *sign == b'-' {
+                    -east
+                } else {
+                    east
+                }
+            }
+            Some([]) => return None,
+        };
+        Some(
+            FixedOffset::east_opt(east)?
+                .from_local_datetime(&local)
+                .single()?
+                .with_timezone(&Utc),
+        )
+    }
+}
+
 /// The letters a line starts with, when a word ends there (no digit or `_` runs on).
 fn leading_word(text: &str) -> Option<&str> {
     let end = text
@@ -359,6 +580,8 @@ fn init_regexes() {
 pub struct ParserConfig {
     pub force_format: Option<LogFormat>,
     pub custom_regex: Option<Regex>,
+    /// How the custom regex's timestamp group is written; tried before the known shapes.
+    pub timestamp_format: Option<TimestampFormat>,
 }
 
 impl ParserConfig {
@@ -374,6 +597,11 @@ impl ParserConfig {
     pub fn with_custom_regex(mut self, regex: Regex) -> Self {
         self.custom_regex = Some(regex);
         self.force_format = Some(LogFormat::Custom);
+        self
+    }
+
+    pub fn with_timestamp_format(mut self, format: TimestampFormat) -> Self {
+        self.timestamp_format = Some(format);
         self
     }
 
@@ -399,6 +627,7 @@ impl LogParser {
             ParserConfig {
                 force_format: Some(format),
                 custom_regex: None,
+                timestamp_format: None,
             },
         )
     }
@@ -409,6 +638,7 @@ impl LogParser {
             ParserConfig {
                 force_format: Some(LogFormat::Custom),
                 custom_regex: Some(regex),
+                timestamp_format: None,
             },
         )
     }
@@ -857,9 +1087,18 @@ impl LogParser {
         Some(entry)
     }
 
-    /// The shared reader, then the looser forms only a custom format's capture may hold:
-    /// fields written without a leading zero (`2024-1-5 1:02:03`), or the day first.
+    /// The format's `timestamp_format` when it has one and it fits; then the shared reader,
+    /// then the looser forms only a custom format's capture may hold: fields written without
+    /// a leading zero (`2024-1-5 1:02:03`), or the day first.
     fn parse_custom_timestamp(&self, value: &str) -> Option<DateTime<Utc>> {
+        if let Some(time) = self
+            .config
+            .timestamp_format
+            .as_ref()
+            .and_then(|format| format.read(value))
+        {
+            return Some(time);
+        }
         read_timestamp(value).or_else(|| {
             ["%Y-%m-%d %H:%M:%S", "%d-%m-%Y %H:%M:%S"]
                 .iter()
@@ -2065,5 +2304,294 @@ mod tests {
             let entry = LogParser::new("test.log").parse_line(1, line).unwrap();
             assert_eq!(entry.format, *format, "parsed format of {line}");
         }
+    }
+
+    fn compiled(format: &str) -> TimestampFormat {
+        TimestampFormat::compile(format).unwrap_or_else(|e| panic!("{format}: {e}"))
+    }
+
+    /// Each row: a format in Python's strptime words, the text of the timestamp group, and the
+    /// instant Python's `datetime.strptime` reads (UTC when the format has no `%z`); `None`
+    /// where Python refuses the text. Two rows differ from Python on purpose, as every other
+    /// timestamp in logler does: a second 60 is a leap second, and a digit is an ASCII digit.
+    #[test]
+    fn test_timestamp_format_reads_as_python_strptime_does() {
+        let rows: &[(&str, &str, Option<&str>)] = &[
+            (
+                "%d.%m.%Y %H:%M:%S",
+                "31.12.2024 23:59:58",
+                Some("2024-12-31T23:59:58Z"),
+            ),
+            (
+                "%Y-%m-%d %H:%M:%S,%f",
+                "2024-01-15 10:00:00,123",
+                Some("2024-01-15T10:00:00.123Z"),
+            ),
+            (
+                "%Y-%m-%d %H:%M:%S,%f",
+                "2024-01-15 10:00:00,123456",
+                Some("2024-01-15T10:00:00.123456Z"),
+            ),
+            (
+                "%Y-%m-%d %H:%M:%S,%f",
+                "2024-01-15 10:00:00,5",
+                Some("2024-01-15T10:00:00.5Z"),
+            ),
+            ("%Y-%m-%d %H:%M:%S,%f", "2024-01-15 10:00:00,1234567", None),
+            (
+                "%y%m%d %H%M%S",
+                "690115 100000",
+                Some("1969-01-15T10:00:00Z"),
+            ),
+            (
+                "%y%m%d %H%M%S",
+                "680115 100000",
+                Some("2068-01-15T10:00:00Z"),
+            ),
+            (
+                "%d/%b/%Y:%H:%M:%S %z",
+                "10/Oct/2024:13:55:36 -0700",
+                Some("2024-10-10T20:55:36Z"),
+            ),
+            (
+                "%d/%b/%Y:%H:%M:%S %z",
+                "10/oct/2024:13:55:36 -0700",
+                Some("2024-10-10T20:55:36Z"),
+            ),
+            (
+                "%d/%b/%Y:%H:%M:%S %z",
+                "10/OCT/2024:13:55:36 -0700",
+                Some("2024-10-10T20:55:36Z"),
+            ),
+            (
+                "%B %d %Y %H:%M",
+                "september 5 2024 10:30",
+                Some("2024-09-05T10:30:00Z"),
+            ),
+            (
+                "%Y-%m-%d %H:%M:%S%z",
+                "2024-01-15 10:00:00+0900",
+                Some("2024-01-15T01:00:00Z"),
+            ),
+            (
+                "%Y-%m-%d %H:%M:%S%z",
+                "2024-01-15 10:00:00+09:00",
+                Some("2024-01-15T01:00:00Z"),
+            ),
+            (
+                "%Y-%m-%d %H:%M:%S%z",
+                "2024-01-15 10:00:00-05:30",
+                Some("2024-01-15T15:30:00Z"),
+            ),
+            (
+                "%Y-%m-%d %H:%M:%S%z",
+                "2024-01-15 10:00:00Z",
+                Some("2024-01-15T10:00:00Z"),
+            ),
+            ("%Y-%m-%d %H:%M:%S%z", "2024-01-15 10:00:00z", None),
+            ("%Y-%m-%d %H:%M:%S%z", "2024-01-15 10:00:00+09", None),
+            ("%Y-%m-%d %H:%M:%S%z", "2024-01-15 10:00:00+0960", None),
+            (
+                "100%% %Y-%m-%d",
+                "100% 2024-01-15",
+                Some("2024-01-15T00:00:00Z"),
+            ),
+            ("%Y-%m-%d %H:%M:%S", "2024-01-15 10:00:00 and more", None),
+            ("%Y-%m-%d %H:%M", "2024-01-15 10:00:00", None),
+            ("%d.%m.%Y", "31.02.2024", None),
+            ("%d.%m.%Y", "29.02.2024", Some("2024-02-29T00:00:00Z")),
+            (
+                "%d.%m.%Y %H:%M:%S",
+                "31.12.2016 23:59:60",
+                Some("2016-12-31T23:59:60Z"),
+            ),
+            ("%d.%m.%Y %H:%M:%S", "31.12.2016 23:59:61", None),
+            (
+                "%Y-%m-%dT%H:%M:%S",
+                "2024-01-15t10:00:00",
+                Some("2024-01-15T10:00:00Z"),
+            ),
+            (
+                "%Y-%m-%d  %H:%M",
+                "2024-01-15 10:00",
+                Some("2024-01-15T10:00:00Z"),
+            ),
+            (
+                "%Y-%m-%d %H:%M",
+                "2024-01-15\t \t10:00",
+                Some("2024-01-15T10:00:00Z"),
+            ),
+            ("%d.%m.%Y", "5.1.2024", Some("2024-01-05T00:00:00Z")),
+            ("%d.%m.%Y", " 5.1.2024", Some("2024-01-05T00:00:00Z")),
+            ("%b %d %Y", "Jan  5 2024", Some("2024-01-05T00:00:00Z")),
+            ("%m%d%Y", "1102024", Some("2024-01-10T00:00:00Z")),
+            ("%Y-%m-%d", "２０２４-01-15", None),
+            (
+                "(%Y) [%m] {%d} a.b*c",
+                "(2024) [01] {15} a.b*c",
+                Some("2024-01-15T00:00:00Z"),
+            ),
+            ("(%Y) [%m] {%d} a.b*c", "(2024) [01] {15} aXb*c", None),
+        ];
+        for (format, text, expected) in rows {
+            assert_eq!(
+                compiled(format).read(text),
+                expected.and_then(utc),
+                "{format:?} reading {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_timestamp_format_refuses_a_word_it_cannot_read_as_python_does() {
+        const LOCALE: &str =
+            "is read in the machine's language, which differs from machine to machine";
+        const OTHER: &str =
+            "is not supported; the words read are %Y %y %m %b %B %d %H %M %S %f %z and %%";
+        let rows: Vec<(&str, String)> = vec![
+            (
+                "%Y-%m-%d %H:%M:%S.%f %Z",
+                "%Z is not supported: a zone name is read differently from machine to machine; \
+                 write the zone as an offset and read it with %z"
+                    .to_string(),
+            ),
+            ("%a %Y-%m-%d", format!("%a {LOCALE}")),
+            ("%A %Y-%m-%d", format!("%A {LOCALE}")),
+            ("%c", format!("%c {LOCALE}")),
+            ("%x", format!("%x {LOCALE}")),
+            ("%Y-%m-%d %X", format!("%X {LOCALE}")),
+            ("%Y-%m-%d %I:%M %p", format!("%I {OTHER}")),
+            ("%Y-%m-%d %H:%M %p", format!("%p {LOCALE}")),
+            ("%Y %j", format!("%j {OTHER}")),
+            ("%Y-%m-%d %:z", format!("%: {OTHER}")),
+            ("%Y-%m-%d %é", format!("%é {OTHER}")),
+            (
+                "%Y-%m-%d %H:%M:%S %",
+                "the format ends in a lone %; write a literal % as %%".to_string(),
+            ),
+            (
+                "%Y %Y-%m-%d",
+                "the year is given by two words, %Y and %Y".to_string(),
+            ),
+            (
+                "%y-%m-%d %Y",
+                "the year is given by two words, %y and %Y".to_string(),
+            ),
+            (
+                "%Y-%m-%d %b",
+                "the month is given by two words, %m and %b".to_string(),
+            ),
+            (
+                "%Y-%m-%d %H:%M:%S %S",
+                "the second is given by two words, %S and %S".to_string(),
+            ),
+            (
+                "%Y-%m-%d %z %z",
+                "the zone is given by two words, %z and %z".to_string(),
+            ),
+            (
+                "%H:%M:%S",
+                "a timestamp needs a date: the format has no year (%Y or %y), no month \
+                 (%m, %b or %B) and no day (%d)"
+                    .to_string(),
+            ),
+            (
+                "%b %d %H:%M:%S",
+                "a timestamp needs a date: the format has no year (%Y or %y)".to_string(),
+            ),
+            (
+                "%Y %H:%M",
+                "a timestamp needs a date: the format has no month (%m, %b or %B) and no day (%d)"
+                    .to_string(),
+            ),
+            (
+                "",
+                "a timestamp needs a date: the format has no year (%Y or %y), no month \
+                 (%m, %b or %B) and no day (%d)"
+                    .to_string(),
+            ),
+        ];
+        for (format, message) in rows {
+            assert_eq!(
+                TimestampFormat::compile(format).map(|_| ()),
+                Err(message),
+                "{format:?}"
+            );
+        }
+    }
+
+    /// A custom line's timestamp group is read by the format first; where the format does not
+    /// fit, by the shapes a custom group is read in without one.
+    #[test]
+    fn test_custom_format_reads_its_group_with_the_timestamp_format_first() {
+        let regex = Regex::new(r"^(?P<timestamp>\S+ \S+) (?P<message>.*)$").unwrap();
+        let with = |format: &str| {
+            ParserConfig::new()
+                .with_custom_regex(regex.clone())
+                .with_timestamp_format(compiled(format))
+                .build_for_file("test.log")
+        };
+        let without = LogParser::with_custom_regex("test.log", regex.clone());
+        let rows: &[(&str, &str, Option<&str>, Option<&str>)] = &[
+            // format, line, read with the format, read without it
+            (
+                "%d.%m.%Y %H:%M:%S",
+                "31.12.2024 23:59:58 hello",
+                Some("2024-12-31T23:59:58Z"),
+                None,
+            ),
+            (
+                "%Y-%d-%m %H:%M:%S",
+                "2024-01-02 10:00:00 hello",
+                Some("2024-02-01T10:00:00Z"),
+                Some("2024-01-02T10:00:00Z"),
+            ),
+            (
+                "%d.%m.%Y %H:%M:%S",
+                "2024-01-15 10:00:00 hello",
+                Some("2024-01-15T10:00:00Z"),
+                Some("2024-01-15T10:00:00Z"),
+            ),
+            (
+                "%d.%m.%Y %H:%M:%S",
+                "15-01-2024 10:00:00 hello",
+                Some("2024-01-15T10:00:00Z"),
+                Some("2024-01-15T10:00:00Z"),
+            ),
+            (
+                "%Y-%m-%d %H:%M:%S,%f",
+                "2024-01-15 10:00:00,1234567 hello",
+                Some("2024-01-15T10:00:00.1234567Z"),
+                Some("2024-01-15T10:00:00.1234567Z"),
+            ),
+            ("%d.%m.%Y %H:%M:%S", "31.02.2024 10:00:00 hello", None, None),
+            ("%d.%m.%Y %H:%M:%S", "no time here", None, None),
+        ];
+        for (format, line, read_with, read_without) in rows {
+            let entry = with(format).parse_line(1, line).unwrap();
+            assert_eq!(
+                entry.timestamp,
+                read_with.and_then(utc),
+                "{format:?} on {line:?}"
+            );
+            let entry = without.parse_line(1, line).unwrap();
+            assert_eq!(
+                entry.timestamp,
+                read_without.and_then(utc),
+                "no format on {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_a_timestamp_format_reads_whichever_timestamp_group_the_regex_names() {
+        let regex = Regex::new(r"^(?P<time>\S+) (?P<message>.*)$").unwrap();
+        let parser = ParserConfig::new()
+            .with_custom_regex(regex)
+            .with_timestamp_format(compiled("%d.%m.%Y/%H:%M"))
+            .build_for_file("test.log");
+        let entry = parser.parse_line(1, "15.01.2024/10:30 hello").unwrap();
+        assert_eq!(entry.timestamp, utc("2024-01-15T10:30:00Z"));
+        assert_eq!(entry.message, "hello");
     }
 }

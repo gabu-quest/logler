@@ -18,6 +18,7 @@ class PyInvestigator:
         files: list[str],
         force_format: str | None,
         custom_regex: str | None,
+        timestamp_format: str | None = None,
     ) -> None: ...
     def search(self, query_json: str) -> str: ...
     def follow_thread(
@@ -56,6 +57,7 @@ class PyLineParser:
         file_name: str | None = None,
         force_format: str | None = None,
         custom_regex: str | None = None,
+        timestamp_format: str | None = None,
     ) -> None: ...
     def parse_line(self, line_number: int, raw: str) -> str: ...
 

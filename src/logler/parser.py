@@ -125,10 +125,15 @@ class LogParser:
         self,
         force_format: str | None = None,
         custom_regex: str | None = None,
+        timestamp_format: str | None = None,
     ):
         if logler_rs is None:
             raise RuntimeError("Rust backend not available")
-        self._parser = logler_rs.PyLineParser(force_format=force_format, custom_regex=custom_regex)
+        self._parser = logler_rs.PyLineParser(
+            force_format=force_format,
+            custom_regex=custom_regex,
+            timestamp_format=timestamp_format,
+        )
 
     @classmethod
     def for_file(cls, path: str) -> "LogParser":
@@ -137,7 +142,9 @@ class LogParser:
         from .config import format_for_file
 
         fmt = format_for_file(path)
-        return cls(custom_regex=fmt.regex) if fmt is not None else cls()
+        if fmt is None:
+            return cls()
+        return cls(custom_regex=fmt.regex, timestamp_format=fmt.timestamp_format)
 
     def parse_entry(self, line_number: int, raw: str, file: str = "") -> dict[str, Any]:
         """One line as the dict the Rust index gives for an entry (``timestamp`` as RFC 3339

@@ -142,7 +142,10 @@ BUILTIN_FORMATS: dict[str, FormatConfig] = {
             r"(?P<level>\w+): "
             r"(?P<message>.*)"
         ),
-        timestamp_format="%Y-%m-%d %H:%M:%S.%f %Z",
+        # A zone name is no strptime word logler reads (it means different offsets on
+        # different machines); a server that logs in UTC is read, any other zone name is
+        # left to the known shapes.
+        timestamp_format="%Y-%m-%d %H:%M:%S.%f UTC",
         file_patterns=["postgresql*.log", "pg*.log"],
     ),
     "mysql": _fmt(

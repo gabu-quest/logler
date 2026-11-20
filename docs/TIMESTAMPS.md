@@ -11,6 +11,7 @@ it understands and how it decides the time zone.
 | logfmt | The same keys; failing those, a timestamp at the start of the line |
 | Plain text, syslog | The first timestamp in the shape below, anywhere in the line, inside `[...]` included |
 | Apache common log format | The bracketed time, `[15/Jan/2024:10:00:00 +0000]` |
+| A custom format (`.logler/formats.yaml`) | The group named `timestamp`, `time`, `ts` or `datetime`: by the format's `timestamp_format` when it has one and the whole group fits it (`docs/CONFIGURATION.md`); else in the shape below; else as `2024-1-5 1:02:03` or `15-01-2024 10:00:00` |
 
 A line with no readable time has no timestamp. That includes a syslog line that writes its
 time without a year (`Jan 15 10:00:00`).
@@ -25,6 +26,7 @@ time without a year (`Jan 15 10:00:00`).
 ```
 
 The date is always year, month, day with dashes. Up to nine digits of the fraction are kept.
+A second `60` is a leap second: `2016-12-31T23:59:60Z` is read and written as such.
 
 ## The time zone
 

@@ -36,7 +36,11 @@ class FormatConfig(BaseModel):
 
     regex: str = Field(description="Regex with named capture groups for parsing log lines")
     timestamp_format: str | None = Field(
-        None, description="strftime format for the timestamp capture group"
+        None,
+        description=(
+            "How the timestamp group is written, in Python's strptime words; tried before "
+            "the shapes logler knows. An empty string is no format."
+        ),
     )
     file_patterns: list[str] = Field(
         default_factory=list,
@@ -57,6 +61,12 @@ class FormatConfig(BaseModel):
                 f"got pattern with no named groups: {v!r}"
             )
         return v
+
+    @field_validator("timestamp_format")
+    @classmethod
+    def empty_timestamp_format_is_none(cls, v: str | None) -> str | None:
+        """An empty ``timestamp_format`` is no format, as if the key were not written."""
+        return v or None
 
 
 class LoglerConfig(BaseModel):
@@ -391,12 +401,27 @@ def _rust_error(regex: str) -> str | None:
     return None
 
 
+@lru_cache(maxsize=256)
+def _rust_timestamp_format_error(regex: str, timestamp_format: str) -> str | None:
+    """What the Rust engine says about a ``timestamp_format`` it cannot read (a strptime word
+    it does not support, or no date); ``None`` when it can. ``regex`` compiles."""
+    import logler_rs
+
+    try:
+        logler_rs.PyLineParser(custom_regex=regex, timestamp_format=timestamp_format)
+    except Exception as exc:
+        return str(exc)
+    return None
+
+
 def load_usable_config(path: str | Path) -> LoglerConfig:
     """The one decision whether a formats.yaml can be used: ``load_config`` plus the Rust
-    engine's compile of every format's regex, so the verdict is for the whole file.
+    engine's compile of every format's regex and ``timestamp_format``, so the verdict is for
+    the whole file.
 
     Raises:
-        FormatFileError: naming the file and the problem (and the format, for a regex).
+        FormatFileError: naming the file and the problem (and the format, for a regex or a
+            timestamp_format).
     """
     try:
         config = load_config(path)
@@ -407,6 +432,15 @@ def load_usable_config(path: str | Path) -> LoglerConfig:
         if error is not None:
             raise FormatFileError(
                 path, f"format '{name}': the regex cannot be compiled by the Rust engine: {error}"
+            )
+        if fmt.timestamp_format is None:
+            continue
+        error = _rust_timestamp_format_error(fmt.regex, fmt.timestamp_format)
+        if error is not None:
+            raise FormatFileError(
+                path,
+                f"format '{name}': the timestamp_format {fmt.timestamp_format!r} cannot be "
+                f"used: {error}",
             )
     return config
 

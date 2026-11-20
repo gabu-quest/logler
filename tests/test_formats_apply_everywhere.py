@@ -417,12 +417,25 @@ formats:
     file_patterns: ["robot_*.log"]
 """
 
+ZONE_NAME_YAML = r"""
+formats:
+  robot:
+    regex: '^(?P<lvl>\w+);(?P<axis>\d+);(?P<msg>.*)$'
+    timestamp_format: "%Y-%m-%d %H:%M:%S %Z"
+    file_patterns: ["robot_*.log"]
+"""
+
 BUILTIN_ROBOT = {("UNKNOWN", "error;3;overtravel"), ("UNKNOWN", "info;1;homed")}
 
 # A formats.yaml that cannot be used -> the words its error must carry besides the file's path.
 UNUSABLE = {
     "broken_yaml": ("not: valid: yaml: {{{", "Invalid YAML"),
     "rust_cannot_compile": (LOOKAHEAD_YAML, "robot"),
+    "timestamp_format_zone_name": (
+        ZONE_NAME_YAML,
+        "format 'robot': the timestamp_format '%Y-%m-%d %H:%M:%S %Z' cannot be used: "
+        "%Z is not supported",
+    ),
 }
 
 
