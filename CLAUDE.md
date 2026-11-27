@@ -3,9 +3,6 @@
 Rust-powered log viewer optimized for AI agents. Three tiers: Rust core -> PyO3 bridge ->
 Python API/CLI. Layers, data flow, memory and limits: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
-## Active Roadmaps
-- [Sqler Bridge](./ROADMAP.md) — M-1 to M-3 complete, M-4 paused
-
 ## Architecture
 
 ```
